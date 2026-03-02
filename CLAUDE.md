@@ -6,8 +6,7 @@
 ```bash
 ps aux | grep "src.main" | grep -v grep  # 봇 상태 확인
 source venv/bin/activate
-export PYTHONPYCACHEPREFIX=.build  # 캐시 한 곳에 모음
-nohup python -m src.main > /tmp/telegram-bot.log 2>&1 &
+PYTHONPYCACHEPREFIX=.build nohup python -m src.main > /tmp/telegram-bot.log 2>&1 &
 ```
 
 ### 완료 (필수 수행)
@@ -17,7 +16,7 @@ pytest                                    # 1. 테스트
 git add -A && git commit -m "type: msg"   # 2. 커밋
 git push --force origin main              # 3. 푸시
 pkill -9 -f "src.main"; sleep 1 && \
-  nohup python -m src.main > /tmp/telegram-bot.log 2>&1 &  # 4. 재시작
+  PYTHONPYCACHEPREFIX=.build nohup python -m src.main > /tmp/telegram-bot.log 2>&1 &  # 4. 재시작
 python -m src.notify "변경1" -- "file1"   # 5. 리포트
 ```
 
@@ -62,12 +61,16 @@ src/
 
 ## 환경변수
 
-| 변수 | 설명 |
-|------|------|
-| `TELEGRAM_TOKEN` | 봇 토큰 |
-| `ALLOWED_CHAT_IDS` | 허용 채팅 ID |
-| `MAINTAINER_CHAT_ID` | 개발 리포트 수신 |
-| `AI_COMMAND` | AI CLI 명령어 |
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| `TELEGRAM_TOKEN` | (필수) | 봇 토큰 |
+| `ALLOWED_CHAT_IDS` | (빈값) | 허용 채팅 ID (쉼표 구분) |
+| `MAINTAINER_CHAT_ID` | (빈값) | 개발 리포트 수신 |
+| `AI_COMMAND` | `claude` | AI CLI 명령어 |
+| `SESSION_TIMEOUT_HOURS` | `24` | 세션 만료 시간 |
+| `REQUIRE_AUTH` | `true` | 인증 필요 여부 |
+| `AUTH_SECRET_KEY` | (조건부 필수) | 인증 키 (`REQUIRE_AUTH=true` 시 필수) |
+| `AUTH_TIMEOUT_MINUTES` | `30` | 인증 유효 시간 |
 
 ## 금지
 
