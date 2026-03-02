@@ -4,7 +4,8 @@ import json
 import re
 from pathlib import Path
 from typing import Optional
-import aiohttp
+
+import httpx
 
 from src.plugins.loader import Plugin, PluginResult
 
@@ -14,6 +15,15 @@ class WeatherPlugin(Plugin):
 
     name = "weather"
     description = "날씨 조회 및 위치 설정"
+    usage = (
+        "🌤️ <b>날씨 플러그인 사용법</b>\n\n"
+        "<b>위치 설정</b>\n"
+        "• <code>위치 설정: 서울</code>\n"
+        "• <code>날씨 위치: 부산</code>\n\n"
+        "<b>날씨 조회</b>\n"
+        "• <code>날씨</code>\n"
+        "• <code>오늘 기온</code>"
+    )
 
     # Open-Meteo API (무료, 키 불필요)
     GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
@@ -29,6 +39,13 @@ class WeatherPlugin(Plugin):
         r"위치\s*설정\s*[:\-]?\s*(.+)",
         r"날씨\s*위치\s*[:\-]?\s*(.+)",
         r"(.+)\s*날씨\s*설정",
+    ]
+    # 제외 패턴 - AI에게 넘김
+    EXCLUDE_PATTERNS = [
+        r"(란|이란|가|이)\s*(뭐|무엇|뭔)",  # "날씨란 뭐야"
+        r"영어로|번역|translate",            # 번역 요청
+        r"어떻게|왜|원리",                   # 질문
+        r"알려줘|설명",                      # 설명 요청
     ]
 
     # 날씨 코드 -> 이모지/설명
@@ -58,7 +75,12 @@ class WeatherPlugin(Plugin):
 
     async def can_handle(self, message: str, chat_id: int) -> bool:
         """날씨 관련 메시지인지 확인."""
-        msg = message.strip().lower()
+        msg = message.strip()
+
+        # 제외 패턴 먼저 체크 - AI에게 넘김
+        for pattern in self.EXCLUDE_PATTERNS:
+            if re.search(pattern, msg, re.IGNORECASE):
+                return False
 
         for pattern in self.WEATHER_PATTERNS:
             if re.search(pattern, msg, re.IGNORECASE):
@@ -111,29 +133,29 @@ class WeatherPlugin(Plugin):
     async def _geocode(self, query: str) -> Optional[dict]:
         """지명 → 좌표 변환."""
         try:
-            async with aiohttp.ClientSession() as session:
+            async with httpx.AsyncClient() as client:
                 params = {"name": query, "count": 1, "language": "ko"}
-                async with session.get(self.GEOCODING_URL, params=params) as resp:
-                    if resp.status != 200:
-                        return None
-                    data = await resp.json()
-                    results = data.get("results", [])
-                    if not results:
-                        return None
-                    r = results[0]
-                    return {
-                        "name": r.get("name", query),
-                        "country": r.get("country", ""),
-                        "lat": r["latitude"],
-                        "lon": r["longitude"],
-                    }
+                resp = await client.get(self.GEOCODING_URL, params=params)
+                if resp.status_code != 200:
+                    return None
+                data = resp.json()
+                results = data.get("results", [])
+                if not results:
+                    return None
+                r = results[0]
+                return {
+                    "name": r.get("name", query),
+                    "country": r.get("country", ""),
+                    "lat": r["latitude"],
+                    "lon": r["longitude"],
+                }
         except Exception:
             return None
 
     async def _fetch_weather(self, lat: float, lon: float) -> Optional[dict]:
         """날씨 데이터 조회."""
         try:
-            async with aiohttp.ClientSession() as session:
+            async with httpx.AsyncClient() as client:
                 params = {
                     "latitude": lat,
                     "longitude": lon,
@@ -142,10 +164,10 @@ class WeatherPlugin(Plugin):
                     "timezone": "Asia/Seoul",
                     "forecast_days": 3,
                 }
-                async with session.get(self.WEATHER_URL, params=params) as resp:
-                    if resp.status != 200:
-                        return None
-                    return await resp.json()
+                resp = await client.get(self.WEATHER_URL, params=params)
+                if resp.status_code != 200:
+                    return None
+                return resp.json()
         except Exception:
             return None
 
