@@ -20,10 +20,16 @@ class Settings(BaseSettings):
     # Telegram
     telegram_token: str = Field(..., description="Telegram Bot API token")
     allowed_chat_ids: list[int] = Field(default_factory=list)
-    
-    # Claude
-    claude_command: str = Field(default="claude")
+    maintainer_chat_id: int = Field(default=0, description="Chat ID for dev notifications")
+
+    # AI
+    ai_command: str = Field(default="claude", alias="AI_COMMAND")
+    claude_command: str = Field(default="")  # Deprecated, use ai_command
     session_timeout_hours: int = Field(default=24)
+
+    @property
+    def effective_ai_command(self) -> str:
+        return self.ai_command or self.claude_command or "claude"
     
     # Authentication
     require_auth: bool = Field(default=True)

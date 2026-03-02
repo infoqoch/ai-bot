@@ -40,7 +40,7 @@ def create_app() -> Application:
     )
     
     claude_client = ClaudeClient(
-        command=settings.claude_command,
+        command=settings.effective_ai_command,
         system_prompt_file=settings.telegram_prompt_file,
         timeout=300,
     )
