@@ -4,6 +4,8 @@
 
 터미널 없이 스마트폰으로 Claude Code와 대화하세요.
 
+---
+
 ## ✨ 강점
 
 | | |
@@ -14,45 +16,140 @@
 | **🔒 내 봇은 나만** | 허용된 ID만 접근 + 선택적 인증 |
 | **⚡ 안정적** | 동시 요청 제한, 좀비 태스크 자동 정리 |
 
-## 🚀 5분 설치
+---
+
+## 🚀 설치 가이드
+
+### 1. 사전 준비
+
+- **Python 3.11+**
+- **Claude CLI** 설치 및 로그인 완료
+  ```bash
+  # Claude CLI 설치 확인
+  claude --version
+  ```
+
+### 2. 텔레그램 봇 생성
+
+1. 텔레그램에서 [@BotFather](https://t.me/BotFather) 검색
+2. `/newbot` 명령어 입력
+3. 봇 이름과 username 설정
+4. **API 토큰** 복사 (예: `123456789:ABCdefGHI...`)
+
+> 📖 자세한 내용: [Telegram Bot API 공식 문서](https://core.telegram.org/bots#how-do-i-create-a-bot)
+
+### 3. 내 채팅 ID 확인
+
+1. 텔레그램에서 [@userinfobot](https://t.me/userinfobot) 검색
+2. `/start` 입력
+3. **Id** 값 복사 (예: `123456789`)
+
+### 4. 프로젝트 설치
 
 ```bash
 git clone https://github.com/infoqoch/ai-bot.git
 cd ai-bot
 python -m venv venv && source venv/bin/activate
 pip install -e .
-cp .env.example .env  # TELEGRAM_TOKEN 설정
-./run.sh start
 ```
+
+### 5. 환경 설정
+
+```bash
+cp .env.example .env
+```
+
+`.env` 파일 수정:
+```env
+TELEGRAM_TOKEN=123456789:ABCdefGHI...    # BotFather에서 받은 토큰
+ALLOWED_CHAT_IDS=123456789               # 허용할 채팅 ID
+REQUIRE_AUTH=false                        # 인증 없이 사용 (선택)
+```
+
+### 6. 실행
+
+```bash
+./run.sh start     # 봇 시작
+./run.sh status    # 상태 확인
+./run.sh log       # 로그 보기
+./run.sh stop      # 봇 중지
+```
+
+---
 
 ## 💬 사용법
 
+### 기본 대화
+메시지를 보내면 Claude가 응답합니다.
 ```
-메시지 보내기     →  Claude 응답
-/new              →  새 세션 시작
-/session_list     →  세션 목록
-/s_abc123         →  세션 전환
-/h_abc123         →  히스토리 보기
+나: 파이썬으로 피보나치 함수 만들어줘
+봇: [Claude 응답]
 ```
 
-## ⚙️ 필수 설정
+### 세션 관리
+
+| 명령어 | 설명 |
+|--------|------|
+| `/new` | 새 세션 시작 |
+| `/session` | 현재 세션 정보 |
+| `/session_list` | 전체 세션 목록 |
+| `/s_abc123` | 해당 세션으로 전환 |
+| `/h_abc123` | 해당 세션 히스토리 보기 |
+
+### 인증 (선택)
+
+`REQUIRE_AUTH=true` 설정 시:
+```
+/auth <비밀키>    → 30분간 인증
+/status           → 인증 상태 확인
+```
+
+---
+
+## ⚙️ 환경변수
+
+### 필수
 
 | 변수 | 설명 |
 |------|------|
-| `TELEGRAM_TOKEN` | [@BotFather](https://t.me/BotFather)에서 발급 |
-| `ALLOWED_CHAT_IDS` | 허용할 채팅 ID (쉼표 구분) |
+| `TELEGRAM_TOKEN` | BotFather에서 발급받은 봇 토큰 |
 
-<details>
-<summary>전체 환경변수</summary>
+### 선택
 
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
-| `AI_COMMAND` | `claude` | CLI 명령어 |
+| `ALLOWED_CHAT_IDS` | (전체 허용) | 허용할 채팅 ID, 쉼표 구분 |
+| `AI_COMMAND` | `claude` | Claude CLI 명령어 |
 | `REQUIRE_AUTH` | `true` | 인증 필요 여부 |
-| `AUTH_SECRET_KEY` | - | 인증 키 (REQUIRE_AUTH=true 시 필수) |
+| `AUTH_SECRET_KEY` | - | 인증 키 (`REQUIRE_AUTH=true` 시 필수) |
 | `SESSION_TIMEOUT_HOURS` | `24` | 세션 만료 시간 |
+| `SESSION_LIST_AI_SUMMARY` | `false` | 세션 목록에서 AI 요약 사용 |
 
-</details>
+---
+
+## 🛠️ 개발
+
+```bash
+pip install -e ".[dev]"
+./run.sh test     # 테스트 실행 (100개)
+```
+
+### 프로젝트 구조
+
+```
+src/
+├── main.py           # 엔트리포인트
+├── config.py         # Pydantic 설정
+├── bot/
+│   ├── handlers.py   # 텔레그램 핸들러
+│   ├── middleware.py # 인증 관리
+│   └── formatters.py # 메시지 포맷팅
+└── claude/
+    ├── client.py     # Claude CLI 클라이언트
+    └── session.py    # 세션 저장소
+```
+
+---
 
 ## 📄 라이선스
 
