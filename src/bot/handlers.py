@@ -284,6 +284,31 @@ class BotHandlers:
         else:
             await update.message.reply_text("❌ 세션 전환 실패")
     
+    def _format_session_list_with_lock(self, user_id: str) -> str:
+        """세션 목록을 Lock 상태와 함께 포맷."""
+        sessions = self.sessions.list_sessions(user_id)
+        if not sessions:
+            return "📭 세션 없음"
+
+        current_session_id = self.sessions.get_current_session_id(user_id)
+        is_locked = self._user_locks[user_id].locked()
+
+        lines = ["📋 <b>세션 목록:</b>"]
+        for s in sessions[:5]:  # 최대 5개
+            sid = s["session_id"]
+            is_current = s["full_session_id"] == current_session_id
+
+            if is_current and is_locked:
+                status = "🔒 처리 중"
+            elif is_current:
+                status = "◀ 현재"
+            else:
+                status = "✅"
+
+            lines.append(f"• <code>{sid}</code> {status}")
+
+        return "\n".join(lines)
+
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle regular text messages."""
         if not self._is_authorized(update.effective_chat.id):
@@ -306,6 +331,17 @@ class BotHandlers:
             )
             return
 
+        # Lock 상태 확인 (블로킹 전)
+        if self._user_locks[user_id].locked():
+            session_list = self._format_session_list_with_lock(user_id)
+            await update.message.reply_text(
+                f"⏳ 이전 메시지 처리 중입니다.\n\n"
+                f"{session_list}\n\n"
+                f"/new - 새 세션에서 시작",
+                parse_mode="HTML"
+            )
+            return
+
         # 유저별 Lock으로 동시 요청 순차 처리
         async with self._user_locks[user_id]:
             logger.info(f"[{user_id}] 메시지: {message[:50]}...")
@@ -320,23 +356,46 @@ class BotHandlers:
             session_id = self.sessions.get_current_session_id(user_id)
 
             if session_id:
-                # Resume existing session
-                response, error = await self.claude.chat(message, session_id, resume=True)
-
-                if error == "SESSION_NOT_FOUND":
-                    # Session expired, create new one
-                    self.sessions.clear_current(user_id)
-                    new_session_id = self.sessions.create_session(user_id, message)
-                    response, error = await self.claude.chat(message, new_session_id, resume=False)
-                else:
-                    self.sessions.add_message(user_id, message)
+                chat_session_id = session_id
+                resume = True
             else:
-                # Create new session
+                chat_session_id = self.sessions.create_session(user_id, message)
+                resume = False
+
+            # Claude 호출을 Task로 실행
+            chat_task = asyncio.create_task(
+                self.claude.chat(message, chat_session_id, resume=resume)
+            )
+
+            # 60초 대기, 초과 시 알림
+            notification_sent = False
+            try:
+                response, error = await asyncio.wait_for(chat_task, timeout=60)
+            except asyncio.TimeoutError:
+                # 60초 초과 - 알림 전송 후 계속 대기
+                session_list = self._format_session_list_with_lock(user_id)
+                await update.message.reply_text(
+                    f"⏳ 1분 초과. 계속 대기 중입니다.\n"
+                    f"다른 세션에서 작업하시겠습니까?\n\n"
+                    f"{session_list}\n\n"
+                    f"/new - 새 세션 시작",
+                    parse_mode="HTML"
+                )
+                notification_sent = True
+                # 계속 대기 (타임아웃 없이)
+                response, error = await chat_task
+
+            # 세션 처리
+            if error == "SESSION_NOT_FOUND":
+                # 세션 만료, 새로 생성
+                self.sessions.clear_current(user_id)
                 new_session_id = self.sessions.create_session(user_id, message)
                 response, error = await self.claude.chat(message, new_session_id, resume=False)
+            elif resume:
+                self.sessions.add_message(user_id, message)
 
             if error == "TIMEOUT":
-                response = "⏱️ 응답 시간 초과 (5분). 다시 시도해주세요."
+                response = "⏱️ 응답 시간 초과. 다시 시도해주세요."
             elif error and error != "SESSION_NOT_FOUND":
                 response = f"❌ 오류 발생: {error}"
 
