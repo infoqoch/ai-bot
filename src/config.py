@@ -40,6 +40,23 @@ class Settings(BaseSettings):
     
     # Paths
     base_dir: Path = Field(default_factory=lambda: Path(__file__).parent.parent)
+    working_dir: Optional[Path] = Field(default=None, description="봇이 작업할 디렉토리")
+
+    @field_validator("working_dir", mode="before")
+    @classmethod
+    def expand_working_dir(cls, v):
+        """~ 경로 확장 및 Path 변환."""
+        if v is None or v == "":
+            return None
+        path = Path(v).expanduser()
+        return path
+
+    @property
+    def effective_working_dir(self) -> Path:
+        """실제 작업 디렉토리 반환. 설정 없으면 base_dir 사용."""
+        if self.working_dir:
+            return self.working_dir
+        return self.base_dir
     
     @field_validator("auth_secret_key", mode="after")
     @classmethod
