@@ -2,22 +2,24 @@
 
 ## 개발 루틴
 
-### 시작
+### 실행 스크립트 (run.sh)
 ```bash
-ps aux | grep "src.main" | grep -v grep  # 봇 상태 확인
-source venv/bin/activate
-PYTHONPYCACHEPREFIX=.build nohup python -m src.main > /tmp/telegram-bot.log 2>&1 &
+./run.sh start    # 봇 시작
+./run.sh stop     # 봇 중지
+./run.sh restart  # 봇 재시작
+./run.sh status   # 상태 확인
+./run.sh log      # 로그 보기
+./run.sh test     # 테스트 실행
 ```
 
 ### 완료 (필수 수행)
 ```bash
-export PYTHONPYCACHEPREFIX=.build
-pytest                                    # 1. 테스트
+./run.sh test                             # 1. 테스트
 git add -A && git commit -m "type: msg"   # 2. 커밋
 git push --force origin main              # 3. 푸시
-pkill -9 -f "src.main"; sleep 1 && \
-  PYTHONPYCACHEPREFIX=.build nohup python -m src.main > /tmp/telegram-bot.log 2>&1 &  # 4. 재시작
-python -m src.notify "변경1" -- "file1"   # 5. 리포트
+./run.sh restart                          # 4. 재시작
+source venv/bin/activate && \
+  python -m src.notify "변경1" -- "file1" # 5. 리포트
 ```
 
 ## 커밋 컨벤션
