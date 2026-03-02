@@ -2,8 +2,11 @@
 
 import asyncio
 import logging
+import subprocess
+import time
 from collections import defaultdict
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Optional
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -18,14 +21,36 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class TaskInfo:
+    """백그라운드 태스크 메타데이터."""
+    user_id: str
+    session_id: str
+    started_at: float = field(default_factory=time.time)
+    task: Optional[asyncio.Task] = None
+
+
 class BotHandlers:
     """Container for all bot command handlers."""
 
     # 유저별 Lock: 세션 생성 시 race condition 방지
     _user_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
+    # 유저별 Semaphore: 동시 요청 제한
+    _user_semaphores: dict[str, asyncio.Semaphore] = defaultdict(
+        lambda: asyncio.Semaphore(3)
+    )
+
+    # 태스크 추적
+    _active_tasks: dict[int, TaskInfo] = {}  # task_id -> TaskInfo
+    _watchdog_task: Optional[asyncio.Task] = None
+
     # 메시지 최대 길이 (DoS 방지)
     MAX_MESSAGE_LENGTH = 4096
+
+    # Watchdog 설정
+    WATCHDOG_INTERVAL_SECONDS = 60  # 1분마다 체크
+    TASK_TIMEOUT_SECONDS = 30 * 60  # 30분 타임아웃
 
     def __init__(
         self,
@@ -44,6 +69,98 @@ class BotHandlers:
         self.allowed_chat_ids = allowed_chat_ids
         self.response_notify_seconds = response_notify_seconds
         self.session_list_ai_summary = session_list_ai_summary
+        self._watchdog_started = False
+
+    def _ensure_watchdog(self) -> None:
+        """Watchdog 태스크 시작 (지연 초기화)."""
+        if self._watchdog_started:
+            return
+        try:
+            if self._watchdog_task is None or self._watchdog_task.done():
+                self._watchdog_task = asyncio.create_task(self._watchdog_loop())
+                self._watchdog_started = True
+                logger.info("Watchdog 태스크 시작됨")
+        except RuntimeError:
+            # 이벤트 루프가 없으면 무시 (테스트 환경)
+            pass
+
+    async def _watchdog_loop(self) -> None:
+        """주기적으로 장시간 실행 태스크를 체크하고 정리."""
+        while True:
+            try:
+                await asyncio.sleep(self.WATCHDOG_INTERVAL_SECONDS)
+                await self._cleanup_zombie_tasks()
+            except asyncio.CancelledError:
+                logger.info("Watchdog 태스크 종료됨")
+                break
+            except Exception as e:
+                logger.exception(f"Watchdog 오류: {e}")
+
+    async def _cleanup_zombie_tasks(self) -> None:
+        """30분 이상 실행 중인 태스크 정리."""
+        now = time.time()
+        zombie_tasks = []
+
+        for task_id, info in list(self._active_tasks.items()):
+            elapsed = now - info.started_at
+            if elapsed > self.TASK_TIMEOUT_SECONDS:
+                zombie_tasks.append((task_id, info))
+
+        for task_id, info in zombie_tasks:
+            elapsed_min = int((now - info.started_at) / 60)
+            logger.warning(
+                f"[{info.user_id}] 좀비 태스크 감지: {elapsed_min}분 경과, "
+                f"session: {info.session_id[:8]}"
+            )
+
+            # 태스크 취소
+            if info.task and not info.task.done():
+                info.task.cancel()
+                logger.info(f"[{info.user_id}] 태스크 취소됨")
+
+            # Claude 프로세스 kill (session_id로 찾기)
+            await self._kill_claude_process(info.session_id)
+
+            # 추적 목록에서 제거
+            self._active_tasks.pop(task_id, None)
+
+    async def _kill_claude_process(self, session_id: str) -> None:
+        """특정 세션의 Claude 프로세스 종료."""
+        try:
+            # session_id를 포함한 claude 프로세스 찾기
+            result = subprocess.run(
+                ["pgrep", "-f", f"claude.*{session_id}"],
+                capture_output=True,
+                text=True,
+            )
+            pids = result.stdout.strip().split("\n")
+            pids = [p for p in pids if p]
+
+            for pid in pids:
+                try:
+                    subprocess.run(["kill", "-9", pid], check=True)
+                    logger.info(f"Claude 프로세스 종료: PID {pid}")
+                except subprocess.CalledProcessError:
+                    pass  # 이미 종료됨
+        except Exception as e:
+            logger.warning(f"Claude 프로세스 종료 실패: {e}")
+
+    def _register_task(self, task: asyncio.Task, user_id: str, session_id: str) -> int:
+        """태스크를 추적 목록에 등록."""
+        task_id = id(task)
+        self._active_tasks[task_id] = TaskInfo(
+            user_id=user_id,
+            session_id=session_id,
+            task=task,
+        )
+        task.add_done_callback(lambda t: self._active_tasks.pop(id(t), None))
+        return task_id
+
+    def get_active_task_count(self, user_id: str = None) -> int:
+        """활성 태스크 수 반환. user_id 지정 시 해당 유저만."""
+        if user_id is None:
+            return len(self._active_tasks)
+        return sum(1 for info in self._active_tasks.values() if info.user_id == user_id)
 
     def _is_authorized(self, chat_id: int) -> bool:
         if not self.allowed_chat_ids:
@@ -355,12 +472,24 @@ class BotHandlers:
         # 로깅 (session_id 확정 후)
         logger.info(f"[{user_id}] 메시지 접수: {message[:50]}... (session: {session_id[:8]})")
 
+        # Watchdog 지연 시작
+        self._ensure_watchdog()
+
+        # 동시 요청 제한 체크
+        semaphore = self._user_semaphores[user_id]
+        if semaphore.locked():
+            active_count = self.get_active_task_count(user_id)
+            await update.message.reply_text(
+                f"⏳ 현재 {active_count}개 요청 처리 중입니다. 잠시 후 다시 시도해주세요."
+            )
+            return
+
         # Show typing indicator
         await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
         # Fire-and-Forget: 백그라운드에서 Claude 호출 + 응답 전송
-        asyncio.create_task(
-            self._process_claude_request(
+        task = asyncio.create_task(
+            self._process_claude_request_with_semaphore(
                 bot=context.bot,
                 chat_id=chat_id,
                 user_id=user_id,
@@ -369,7 +498,29 @@ class BotHandlers:
                 is_new_session=is_new_session,
             )
         )
+        # 태스크 추적 등록
+        self._register_task(task, user_id, session_id)
         # 핸들러는 즉시 리턴 (Claude 응답을 기다리지 않음)
+
+    async def _process_claude_request_with_semaphore(
+        self,
+        bot,
+        chat_id: int,
+        user_id: str,
+        session_id: str,
+        message: str,
+        is_new_session: bool,
+    ) -> None:
+        """Semaphore로 동시 요청 제한 후 Claude 호출."""
+        async with self._user_semaphores[user_id]:
+            await self._process_claude_request(
+                bot=bot,
+                chat_id=chat_id,
+                user_id=user_id,
+                session_id=session_id,
+                message=message,
+                is_new_session=is_new_session,
+            )
 
     async def _process_claude_request(
         self,
