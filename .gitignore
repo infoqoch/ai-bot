@@ -32,3 +32,6 @@ Thumbs.db
 
 # OMC state
 .omc/
+
+# Custom plugins (personal, not shared)
+plugins/custom/
