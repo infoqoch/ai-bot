@@ -3,7 +3,7 @@
 ClaudeClient 클래스의 핵심 기능 검증:
 - 명령어 빌드
 - 시스템 프롬프트 로딩
-- 요약 기능
+- 세션 생성
 """
 
 import tempfile
@@ -59,7 +59,7 @@ class TestClaudeClient:
 
     def test_build_command_with_resume(self, client):
         """세션 재개 명령어 빌드 확인."""
-        cmd = client._build_command("Hello", claude_session_id="abc-123")
+        cmd = client._build_command("Hello", session_id="abc-123")
 
         assert "--resume" in cmd
         assert "abc-123" in cmd
@@ -91,7 +91,7 @@ class TestClaudeClient:
             mock_exec.return_value = mock_process
 
             with patch('asyncio.wait_for', side_effect=TimeoutError()):
-                response, error, session_id = await client.chat("Hello")
+                response, error, session_id = await client.chat("Hello", "test-session")
 
             assert error == "TIMEOUT"
             assert response == ""
@@ -102,11 +102,3 @@ class TestClaudeClient:
         """빈 질문 목록 요약."""
         result = await client.summarize([])
         assert result == "(내용 없음)"
-
-    def test_summarize_prompt_format(self, client):
-        """요약 프롬프트 형식 확인."""
-        questions = ["질문1", "질문2", "질문3"]
-
-        # _build_command에서 프롬프트가 올바르게 구성되는지 확인
-        # 실제 summarize는 subprocess를 호출하므로 통합 테스트 필요
-        assert len(questions) == 3
