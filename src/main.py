@@ -57,6 +57,7 @@ def create_app() -> Application:
         require_auth=settings.require_auth,
         allowed_chat_ids=settings.allowed_chat_ids,
         response_notify_seconds=settings.response_notify_seconds,
+        session_list_ai_summary=settings.session_list_ai_summary,
     )
     
     # Create application (concurrent_updates=True로 동시 메시지 처리 활성화)

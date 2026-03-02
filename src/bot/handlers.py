@@ -35,6 +35,7 @@ class BotHandlers:
         require_auth: bool,
         allowed_chat_ids: list[int],
         response_notify_seconds: int = 60,
+        session_list_ai_summary: bool = False,
     ):
         self.sessions = session_store
         self.claude = claude_client
@@ -42,6 +43,7 @@ class BotHandlers:
         self.require_auth = require_auth
         self.allowed_chat_ids = allowed_chat_ids
         self.response_notify_seconds = response_notify_seconds
+        self.session_list_ai_summary = session_list_ai_summary
 
     def _is_authorized(self, chat_id: int) -> bool:
         if not self.allowed_chat_ids:
@@ -232,8 +234,15 @@ class BotHandlers:
             for s in sessions
         }
 
-        # Send quick list first
+        # Send quick list
         quick_list = format_session_quick_list(sessions, histories)
+
+        if not self.session_list_ai_summary:
+            # AI 요약 비활성화 - 목록만 전송
+            await update.message.reply_text(quick_list, parse_mode="HTML")
+            return
+
+        # AI 요약 활성화
         await update.message.reply_text(
             quick_list + "\n\n🔍 AI 분석 중...",
             parse_mode="HTML"
@@ -295,12 +304,20 @@ class BotHandlers:
             await update.message.reply_text("❌ 세션 전환 실패")
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle regular text messages."""
+        """Handle regular text messages.
+
+        Fire-and-Forget 패턴:
+        1. 인증/권한 체크
+        2. 세션 결정 (Lock으로 보호)
+        3. 백그라운드 태스크로 Claude 호출 + 응답 전송
+        4. 핸들러는 즉시 리턴
+        """
         if not self._is_authorized(update.effective_chat.id):
             await update.message.reply_text("⛔ 권한이 없습니다.")
             return
 
-        user_id = str(update.effective_chat.id)
+        chat_id = update.effective_chat.id
+        user_id = str(chat_id)
         message = update.message.text
 
         # 메시지 길이 제한 (DoS 방지)
@@ -335,55 +352,104 @@ class BotHandlers:
             else:
                 is_new_session = False
 
-        # 여기서부터 session_id는 고정됨 (Lock 밖에서 Claude 호출)
-        logger.info(f"[{user_id}] 메시지: {message[:50]}... (session: {session_id[:8]})")
+        # 로깅 (session_id 확정 후)
+        logger.info(f"[{user_id}] 메시지 접수: {message[:50]}... (session: {session_id[:8]})")
 
         # Show typing indicator
-        await context.bot.send_chat_action(
-            chat_id=update.effective_chat.id,
-            action="typing"
-        )
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
-        # Claude 호출 (항상 session_id 사용)
-        chat_task = asyncio.create_task(
-            self.claude.chat(message, session_id)
+        # Fire-and-Forget: 백그라운드에서 Claude 호출 + 응답 전송
+        asyncio.create_task(
+            self._process_claude_request(
+                bot=context.bot,
+                chat_id=chat_id,
+                user_id=user_id,
+                session_id=session_id,
+                message=message,
+                is_new_session=is_new_session,
+            )
         )
+        # 핸들러는 즉시 리턴 (Claude 응답을 기다리지 않음)
 
-        # 설정된 시간 대기, 초과 시 알림
+    async def _process_claude_request(
+        self,
+        bot,
+        chat_id: int,
+        user_id: str,
+        session_id: str,
+        message: str,
+        is_new_session: bool,
+    ) -> None:
+        """백그라운드에서 Claude 호출 후 응답 전송.
+
+        Args:
+            bot: Telegram Bot instance (응답 전송용)
+            chat_id: 응답을 보낼 채팅 ID
+            user_id: 사용자 ID (로깅/세션용)
+            session_id: Claude 세션 ID
+            message: 사용자 메시지
+            is_new_session: 새 세션 여부
+        """
         try:
-            response, error, _ = await asyncio.wait_for(
-                chat_task, timeout=self.response_notify_seconds
+            logger.info(f"[{user_id}] Claude 호출 시작 (session: {session_id[:8]})")
+
+            # Claude 호출
+            response, error, _ = await self.claude.chat(message, session_id)
+
+            logger.info(f"[{user_id}] Claude 응답 완료 (session: {session_id[:8]})")
+
+            # 기존 세션이면 메시지 추가 (명시적 session_id 사용)
+            if not is_new_session:
+                self.sessions.add_message(user_id, session_id, message)
+
+            # 에러 처리
+            if error == "TIMEOUT":
+                response = "⏱️ 응답 시간 초과. 다시 시도해주세요."
+            elif error and error != "SESSION_NOT_FOUND":
+                response = f"❌ 오류 발생: {error}"
+
+            # 세션 정보 prefix 추가
+            session_info = self.sessions.get_session_info(user_id, session_id)
+            history_count = self.sessions.get_history_count(user_id, session_id)
+            prefix = f"<b>[{session_info}|#{history_count}]</b>\n\n"
+
+            full_response = prefix + response
+
+            # 응답 전송 (chat_id로 직접 전송)
+            await self._send_message_to_chat(bot, chat_id, full_response)
+
+        except Exception as e:
+            logger.exception(f"[{user_id}] Claude 처리 실패: {e}")
+            await bot.send_message(
+                chat_id=chat_id,
+                text="❌ 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
             )
-        except asyncio.TimeoutError:
-            # 시간 초과 - 알림 전송 후 계속 대기
-            await update.message.reply_text(
-                f"⏳ {self.response_notify_seconds}초 초과. 계속 대기 중입니다...",
-                parse_mode="HTML"
-            )
-            # 계속 대기 (타임아웃 없이)
-            response, error, _ = await chat_task
 
-        # 기존 세션이면 메시지 추가 (명시적 session_id 사용)
-        if not is_new_session:
-            self.sessions.add_message(user_id, session_id, message)
+    async def _send_message_to_chat(
+        self,
+        bot,
+        chat_id: int,
+        text: str,
+        max_length: int = 4000,
+    ) -> None:
+        """chat_id로 직접 메시지 전송 (긴 메시지는 분할)."""
+        if len(text) <= max_length:
+            try:
+                await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+            except Exception:
+                await bot.send_message(chat_id=chat_id, text=text)
+            return
 
-        if error == "TIMEOUT":
-            response = "⏱️ 응답 시간 초과. 다시 시도해주세요."
-        elif error and error != "SESSION_NOT_FOUND":
-            response = f"❌ 오류 발생: {error}"
-
-        # Add session info prefix (명시적 session_id 사용)
-        session_info = self.sessions.get_session_info(user_id, session_id)
-        history_count = self.sessions.get_history_count(user_id, session_id)
-        prefix = f"<b>[{session_info}|#{history_count}]</b>\n\n"
-
-        full_response = prefix + response
-
-        # Handle message length limit (4096 chars)
-        await self._send_long_message(update, full_response)
+        # Split into chunks
+        chunks = [text[i:i + max_length] for i in range(0, len(text), max_length)]
+        for chunk in chunks:
+            try:
+                await bot.send_message(chat_id=chat_id, text=chunk, parse_mode="HTML")
+            except Exception:
+                await bot.send_message(chat_id=chat_id, text=chunk)
 
     async def _send_long_message(self, update: Update, text: str, max_length: int = 4000) -> None:
-        """Send message, splitting if too long."""
+        """Send message, splitting if too long. (레거시 - update.reply_text 사용)"""
         if len(text) <= max_length:
             try:
                 await update.message.reply_text(text, parse_mode="HTML")
