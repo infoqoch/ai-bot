@@ -462,7 +462,6 @@ class BotHandlers:
             f"• ID: <code>{target_info['session_id']}</code>\n"
             f"• 질문: {len(history)}개\n\n"
             f"{history_text}\n\n"
-            f"---\n"
             f"/s_{target_info['session_id']} 세션이동",
             parse_mode="HTML"
         )
@@ -613,8 +612,9 @@ class BotHandlers:
 
             # 세션 커맨드 suffix 추가
             suffix = (
-                f"\n\n---\n"
-                f"/s_{session_info} 세션이동 | /h_{session_info} 히스토리"
+                f"\n\n"
+                f"/s_{session_info} 세션이동\n"
+                f"/h_{session_info} 히스토리"
             )
 
             full_response = prefix + response + suffix
