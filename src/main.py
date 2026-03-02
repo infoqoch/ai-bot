@@ -72,6 +72,7 @@ def create_app() -> Application:
     app.add_handler(CommandHandler("session", handlers.session_command))
     app.add_handler(CommandHandler("session_list", handlers.session_list_command))
     app.add_handler(MessageHandler(filters.Regex(r'^/s_'), handlers.switch_session_command))
+    app.add_handler(MessageHandler(filters.Regex(r'^/h_'), handlers.history_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_message))
     
     app.add_error_handler(handlers.error_handler)
