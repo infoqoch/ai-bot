@@ -5,11 +5,14 @@
 ### 시작
 ```bash
 ps aux | grep "src.main" | grep -v grep  # 봇 상태 확인
-source venv/bin/activate && nohup python -m src.main > /tmp/telegram-bot.log 2>&1 &
+source venv/bin/activate
+export PYTHONPYCACHEPREFIX=.build  # 캐시 한 곳에 모음
+nohup python -m src.main > /tmp/telegram-bot.log 2>&1 &
 ```
 
 ### 완료 (필수 수행)
 ```bash
+export PYTHONPYCACHEPREFIX=.build
 pytest                                    # 1. 테스트
 git add -A && git commit -m "type: msg"   # 2. 커밋
 git push --force origin main              # 3. 푸시

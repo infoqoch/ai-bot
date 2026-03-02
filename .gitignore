@@ -16,6 +16,8 @@ htmlcov/
 dist/
 build/
 
+.build/
+
 # Runtime data
 .data/
 
