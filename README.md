@@ -28,6 +28,38 @@
 
 ---
 
+## 🔧 어떻게 동작하나요?
+
+```
+Telegram ──▶ Bot (Python) ──▶ Claude CLI (로컬)
+   │              │
+   │              └── sessions.json (세션 ID 관리)
+   │
+   └── 메시지 송수신
+```
+
+### 핵심: Claude CLI 래퍼
+
+| 항목 | 설명 |
+|------|------|
+| **Claude API** | ❌ 사용 안 함 |
+| **Claude CLI** | ✅ `claude --session-id abc "메시지"` 실행 |
+| **OAuth** | ❌ 필요 없음 (CLI가 로컬에서 인증됨) |
+| **세션 관리** | 봇이 `--session-id`만 저장/관리 |
+
+봇은 단순히 CLI 명령어를 subprocess로 실행합니다:
+```bash
+# 새 세션
+claude --session-id "uuid-1234" --print "안녕"
+
+# 기존 세션 재개
+claude --resume "uuid-1234" --print "계속하자"
+```
+
+> **즉, Claude API 키 없이 CLI만 설치되어 있으면 동작합니다.**
+
+---
+
 ## 🎯 주요 기능
 
 | 기능 | 설명 |

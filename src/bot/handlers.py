@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 class BotHandlers:
     """Container for all bot command handlers."""
 
-    # 유저별 Lock: 동시 메시지 처리 시 세션 데이터 유실 방지
-    _user_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+    # 세션별 Lock: 동시 메시지 처리 시 세션 데이터 유실 방지
+    _session_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     # 메시지 최대 길이 (DoS 방지)
     MAX_MESSAGE_LENGTH = 4096
@@ -34,12 +34,14 @@ class BotHandlers:
         auth_manager: "AuthManager",
         require_auth: bool,
         allowed_chat_ids: list[int],
+        response_notify_seconds: int = 60,
     ):
         self.sessions = session_store
         self.claude = claude_client
         self.auth = auth_manager
         self.require_auth = require_auth
         self.allowed_chat_ids = allowed_chat_ids
+        self.response_notify_seconds = response_notify_seconds
     
     def _is_authorized(self, chat_id: int) -> bool:
         if not self.allowed_chat_ids:
@@ -291,21 +293,22 @@ class BotHandlers:
             return "📭 세션 없음"
 
         current_session_id = self.sessions.get_current_session_id(user_id)
-        is_locked = self._user_locks[user_id].locked()
 
         lines = ["📋 <b>세션 목록:</b>"]
         for s in sessions[:5]:  # 최대 5개
             sid = s["session_id"]
-            is_current = s["full_session_id"] == current_session_id
+            full_sid = s["full_session_id"]
+            is_current = full_sid == current_session_id
+            is_locked = self._session_locks[full_sid].locked()
 
-            if is_current and is_locked:
+            if is_locked:
                 status = "🔒 처리 중"
             elif is_current:
                 status = "◀ 현재"
             else:
                 status = "✅"
 
-            lines.append(f"• <code>{sid}</code> {status}")
+            lines.append(f"• /s_{sid} {status}")
 
         return "\n".join(lines)
 
@@ -331,19 +334,28 @@ class BotHandlers:
             )
             return
 
-        # Lock 상태 확인 (블로킹 전)
-        if self._user_locks[user_id].locked():
+        # 현재 세션 확인
+        session_id = self.sessions.get_current_session_id(user_id)
+
+        # 기존 세션이 있으면 Lock 상태 확인
+        if session_id and self._session_locks[session_id].locked():
             session_list = self._format_session_list_with_lock(user_id)
             await update.message.reply_text(
-                f"⏳ 이전 메시지 처리 중입니다.\n\n"
+                f"⏳ 현재 세션 처리 중입니다.\n\n"
                 f"{session_list}\n\n"
                 f"/new - 새 세션에서 시작",
                 parse_mode="HTML"
             )
             return
 
-        # 유저별 Lock으로 동시 요청 순차 처리
-        async with self._user_locks[user_id]:
+        # 세션 결정 (Lock 확인 후)
+        if session_id:
+            chat_session_id = session_id
+        else:
+            chat_session_id = self.sessions.create_session(user_id, message)
+
+        # 세션별 Lock으로 동시 요청 순차 처리
+        async with self._session_locks[chat_session_id]:
             logger.info(f"[{user_id}] 메시지: {message[:50]}...")
 
             # Show typing indicator
@@ -352,46 +364,38 @@ class BotHandlers:
                 action="typing"
             )
 
-            # Check for existing session
-            session_id = self.sessions.get_current_session_id(user_id)
-
-            if session_id:
-                chat_session_id = session_id
-                resume = True
-            else:
-                chat_session_id = self.sessions.create_session(user_id, message)
-                resume = False
+            # Claude의 session_id 가져오기 (대화 연속성 유지)
+            claude_session_id = self.sessions.get_claude_session_id(user_id)
 
             # Claude 호출을 Task로 실행
             chat_task = asyncio.create_task(
-                self.claude.chat(message, chat_session_id, resume=resume)
+                self.claude.chat(message, claude_session_id)
             )
 
-            # 60초 대기, 초과 시 알림
-            notification_sent = False
+            # 설정된 시간 대기, 초과 시 알림
             try:
-                response, error = await asyncio.wait_for(chat_task, timeout=60)
+                response, error, new_claude_session_id = await asyncio.wait_for(
+                    chat_task, timeout=self.response_notify_seconds
+                )
             except asyncio.TimeoutError:
-                # 60초 초과 - 알림 전송 후 계속 대기
+                # 시간 초과 - 알림 전송 후 계속 대기
                 session_list = self._format_session_list_with_lock(user_id)
                 await update.message.reply_text(
-                    f"⏳ 1분 초과. 계속 대기 중입니다.\n"
+                    f"⏳ {self.response_notify_seconds}초 초과. 계속 대기 중입니다.\n"
                     f"다른 세션에서 작업하시겠습니까?\n\n"
                     f"{session_list}\n\n"
                     f"/new - 새 세션 시작",
                     parse_mode="HTML"
                 )
-                notification_sent = True
                 # 계속 대기 (타임아웃 없이)
-                response, error = await chat_task
+                response, error, new_claude_session_id = await chat_task
 
-            # 세션 처리
-            if error == "SESSION_NOT_FOUND":
-                # 세션 만료, 새로 생성
-                self.sessions.clear_current(user_id)
-                new_session_id = self.sessions.create_session(user_id, message)
-                response, error = await self.claude.chat(message, new_session_id, resume=False)
-            elif resume:
+            # Claude session_id 저장 (새로 받은 경우)
+            if new_claude_session_id:
+                self.sessions.set_claude_session_id(user_id, new_claude_session_id)
+
+            # 기존 세션이면 메시지 추가
+            if session_id:
                 self.sessions.add_message(user_id, message)
 
             if error == "TIMEOUT":
