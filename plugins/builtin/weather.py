@@ -29,6 +29,94 @@ class WeatherPlugin(Plugin):
     GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
     WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 
+    # 한글 → 영문 도시명 매핑 (Open-Meteo는 한글 검색 미지원)
+    KOREAN_TO_ENGLISH = {
+        "서울": "Seoul",
+        "부산": "Busan",
+        "인천": "Incheon",
+        "대구": "Daegu",
+        "대전": "Daejeon",
+        "광주": "Gwangju",
+        "울산": "Ulsan",
+        "수원": "Suwon",
+        "성남": "Seongnam",
+        "고양": "Goyang",
+        "용인": "Yongin",
+        "창원": "Changwon",
+        "청주": "Cheongju",
+        "전주": "Jeonju",
+        "천안": "Cheonan",
+        "제주": "Jeju",
+        "세종": "Sejong",
+        "포항": "Pohang",
+        "김해": "Gimhae",
+        "평택": "Pyeongtaek",
+        "안산": "Ansan",
+        "안양": "Anyang",
+        "파주": "Paju",
+        "의정부": "Uijeongbu",
+        "김포": "Gimpo",
+        "화성": "Hwaseong",
+        "시흥": "Siheung",
+        "구미": "Gumi",
+        "양산": "Yangsan",
+        "춘천": "Chuncheon",
+        "원주": "Wonju",
+        "강릉": "Gangneung",
+        "속초": "Sokcho",
+        "목포": "Mokpo",
+        "여수": "Yeosu",
+        "순천": "Suncheon",
+        "군산": "Gunsan",
+        "익산": "Iksan",
+        "경주": "Gyeongju",
+        "거제": "Geoje",
+        "통영": "Tongyeong",
+        "진주": "Jinju",
+        "안동": "Andong",
+        "충주": "Chungju",
+        "제천": "Jecheon",
+        "논산": "Nonsan",
+        "공주": "Gongju",
+        "서산": "Seosan",
+        "당진": "Dangjin",
+        "아산": "Asan",
+        "보령": "Boryeong",
+        "나주": "Naju",
+        "광양": "Gwangyang",
+        "정읍": "Jeongeup",
+        "남원": "Namwon",
+        "김천": "Gimcheon",
+        "상주": "Sangju",
+        "영주": "Yeongju",
+        "문경": "Mungyeong",
+        "영천": "Yeongcheon",
+        "밀양": "Miryang",
+        "사천": "Sacheon",
+        # 해외 주요 도시
+        "도쿄": "Tokyo",
+        "오사카": "Osaka",
+        "교토": "Kyoto",
+        "후쿠오카": "Fukuoka",
+        "삿포로": "Sapporo",
+        "베이징": "Beijing",
+        "상하이": "Shanghai",
+        "홍콩": "Hong Kong",
+        "타이베이": "Taipei",
+        "방콕": "Bangkok",
+        "싱가포르": "Singapore",
+        "뉴욕": "New York",
+        "로스앤젤레스": "Los Angeles",
+        "샌프란시스코": "San Francisco",
+        "시애틀": "Seattle",
+        "런던": "London",
+        "파리": "Paris",
+        "베를린": "Berlin",
+        "로마": "Rome",
+        "시드니": "Sydney",
+        "멜버른": "Melbourne",
+    }
+
     # 트리거 패턴
     WEATHER_PATTERNS = [
         r"날씨",
@@ -133,8 +221,11 @@ class WeatherPlugin(Plugin):
     async def _geocode(self, query: str) -> Optional[dict]:
         """지명 → 좌표 변환."""
         try:
+            # 한글 → 영문 변환 (Open-Meteo는 한글 검색 미지원)
+            search_query = self.KOREAN_TO_ENGLISH.get(query, query)
+
             async with httpx.AsyncClient() as client:
-                params = {"name": query, "count": 1, "language": "ko"}
+                params = {"name": search_query, "count": 1, "language": "ko"}
                 resp = await client.get(self.GEOCODING_URL, params=params)
                 if resp.status_code != 200:
                     return None
