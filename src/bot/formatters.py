@@ -1,0 +1,94 @@
+"""Message formatting utilities for Telegram."""
+
+import html
+import re
+
+
+def markdown_to_telegram_html(text: str) -> str:
+    """Convert markdown to Telegram HTML format."""
+    # Save code blocks with unique markers
+    code_blocks: list[str] = []
+    inline_codes: list[str] = []
+    
+    def save_code_block(match: re.Match) -> str:
+        code_blocks.append(match.group(0))
+        return f"\x00CODEBLOCK{len(code_blocks) - 1}\x00"
+    
+    def save_inline_code(match: re.Match) -> str:
+        inline_codes.append(match.group(1))
+        return f"\x00INLINECODE{len(inline_codes) - 1}\x00"
+    
+    # Extract code blocks and inline code
+    text = re.sub(r'```(\w*)\n?([\s\S]*?)```', save_code_block, text)
+    text = re.sub(r'`([^`]+)`', save_inline_code, text)
+    
+    # Escape HTML in remaining text
+    text = html.escape(text)
+    
+    # Convert markdown to HTML
+    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)  # bold
+    text = re.sub(r'\*(.+?)\*', r'<i>\1</i>', text)      # italic
+    text = re.sub(r'~~(.+?)~~', r'<s>\1</s>', text)      # strikethrough
+    
+    # Restore code blocks
+    for i, block in enumerate(code_blocks):
+        match = re.match(r'```(\w*)\n?([\s\S]*?)```', block)
+        if match:
+            lang = match.group(1)
+            code = html.escape(match.group(2).strip())
+            if lang:
+                replacement = f'<pre><code class="language-{lang}">{code}</code></pre>'
+            else:
+                replacement = f'<pre>{code}</pre>'
+            text = text.replace(f"\x00CODEBLOCK{i}\x00", replacement)
+    
+    # Restore inline code
+    for i, code in enumerate(inline_codes):
+        escaped_code = html.escape(code)
+        text = text.replace(f"\x00INLINECODE{i}\x00", f'<code>{escaped_code}</code>')
+    
+    return text
+
+
+def truncate_message(text: str, max_length: int = 40) -> str:
+    """Truncate message with ellipsis."""
+    if len(text) <= max_length:
+        return text
+    return text[:max_length] + "..."
+
+
+def format_session_list(sessions: list[dict], summaries: dict[str, str]) -> str:
+    """Format session list with summaries."""
+    if not sessions:
+        return "📭 저장된 세션이 없습니다."
+    
+    lines = []
+    for s in sessions:
+        current_mark = " ⬅️" if s.get("is_current") else ""
+        summary = summaries.get(s["full_session_id"], "(내용 없음)")
+        
+        lines.append(
+            f"<b>/s_{s['session_id']}</b> ({s['history_count']}개){current_mark}\n"
+            f"{summary}"
+        )
+    
+    return f"📋 <b>저장된 세션 ({len(sessions)}개)</b>\n\n" + "\n\n".join(lines)
+
+
+def format_session_quick_list(sessions: list[dict], histories: dict[str, list[str]]) -> str:
+    """Format quick session list with last messages."""
+    if not sessions:
+        return "📭 저장된 세션이 없습니다."
+    
+    lines = []
+    for s in sessions:
+        history = histories.get(s["full_session_id"], [])
+        last_msg = truncate_message(history[-1]) if history else "-"
+        current_mark = " ⬅️" if s.get("is_current") else ""
+        
+        lines.append(
+            f"/s_{s['session_id']} ({s['history_count']}개){current_mark}\n"
+            f"   └ 최근: {last_msg}"
+        )
+    
+    return f"📋 <b>저장된 세션 ({len(sessions)}개)</b>\n\n" + "\n\n".join(lines)

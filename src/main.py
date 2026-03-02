@@ -1,0 +1,95 @@
+"""Main entry point for Telegram Claude Bot."""
+
+import logging
+import sys
+from pathlib import Path
+
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+)
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.config import get_settings
+from src.claude.client import ClaudeClient
+from src.claude.session import SessionStore
+from src.bot.handlers import BotHandlers
+from src.bot.middleware import AuthManager
+
+# Configure logging
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
+
+
+def create_app() -> Application:
+    """Create and configure the Telegram application."""
+    settings = get_settings()
+    
+    # Initialize components
+    session_store = SessionStore(
+        file_path=settings.sessions_file,
+        timeout_hours=settings.session_timeout_hours,
+    )
+    
+    claude_client = ClaudeClient(
+        command=settings.claude_command,
+        system_prompt_file=settings.telegram_prompt_file,
+        timeout=300,
+    )
+    
+    auth_manager = AuthManager(
+        secret_key=settings.auth_secret_key,
+        timeout_minutes=settings.auth_timeout_minutes,
+    )
+    
+    handlers = BotHandlers(
+        session_store=session_store,
+        claude_client=claude_client,
+        auth_manager=auth_manager,
+        require_auth=settings.require_auth,
+        allowed_chat_ids=settings.allowed_chat_ids,
+    )
+    
+    # Create application
+    app = Application.builder().token(settings.telegram_token).build()
+    
+    # Register handlers
+    app.add_handler(CommandHandler("start", handlers.start))
+    app.add_handler(CommandHandler("help", handlers.help_command))
+    app.add_handler(CommandHandler("auth", handlers.auth_command))
+    app.add_handler(CommandHandler("status", handlers.status_command))
+    app.add_handler(CommandHandler("new", handlers.new_session))
+    app.add_handler(CommandHandler("session", handlers.session_command))
+    app.add_handler(CommandHandler("session_list", handlers.session_list_command))
+    app.add_handler(MessageHandler(filters.Regex(r'^/s_'), handlers.switch_session_command))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_message))
+    
+    app.add_error_handler(handlers.error_handler)
+    
+    return app
+
+
+def main() -> None:
+    """Run the bot."""
+    settings = get_settings()
+    
+    if not settings.telegram_token:
+        logger.error("TELEGRAM_TOKEN is not set")
+        sys.exit(1)
+    
+    logger.info("Starting Telegram Claude Bot...")
+    
+    app = create_app()
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+if __name__ == "__main__":
+    main()
