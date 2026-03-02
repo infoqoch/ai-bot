@@ -81,6 +81,7 @@ def create_app() -> Application:
     app.add_handler(CommandHandler("session_list", handlers.session_list_command))
     app.add_handler(CommandHandler("chatid", handlers.chatid_command))
     app.add_handler(CommandHandler("plugins", handlers.plugins_command))
+    app.add_handler(CommandHandler("ai", handlers.ai_command))
 
     # 동적 플러그인 명령어 (예: /memo)
     if plugin_loader.plugins:

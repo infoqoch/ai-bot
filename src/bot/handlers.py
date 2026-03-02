@@ -279,6 +279,84 @@ class BotHandlers:
         if plugin:
             await update.message.reply_text(plugin.usage, parse_mode="HTML")
 
+    async def ai_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /ai command - force Claude conversation (bypass plugins)."""
+        if not self._is_authorized(update.effective_chat.id):
+            await update.message.reply_text("⛔ 권한이 없습니다.")
+            return
+
+        user_id = str(update.effective_chat.id)
+
+        if not self._is_authenticated(user_id):
+            await update.message.reply_text(
+                "🔒 인증이 필요합니다.\n"
+                f"/auth <키>로 인증하세요. ({self.auth.timeout_minutes}분간 유효)\n"
+                "/help 도움말"
+            )
+            return
+
+        # /ai 뒤의 메시지 추출
+        if not context.args:
+            await update.message.reply_text(
+                "🤖 <b>/ai 사용법</b>\n\n"
+                "<code>/ai 질문내용</code>\n\n"
+                "플러그인을 건너뛰고 Claude에게 직접 질문합니다.",
+                parse_mode="HTML"
+            )
+            return
+
+        message = " ".join(context.args)
+        chat_id = update.effective_chat.id
+
+        # 메시지 길이 제한
+        if len(message) > self.MAX_MESSAGE_LENGTH:
+            message = message[:self.MAX_MESSAGE_LENGTH]
+
+        # 세션 결정
+        async with self._user_locks[user_id]:
+            session_id = self.sessions.get_current_session_id(user_id)
+
+            if not session_id:
+                logger.info(f"[{user_id}] Creating new Claude session...")
+                session_id = await self.claude.create_session()
+
+                if not session_id:
+                    await update.message.reply_text("❌ Claude 세션 생성 실패. 다시 시도해주세요.")
+                    return
+
+                self.sessions.create_session(user_id, session_id, message)
+                is_new_session = True
+            else:
+                is_new_session = False
+
+        logger.info(f"[{user_id}] /ai 메시지: {message[:50]}... (session: {session_id[:8]})")
+
+        self._ensure_watchdog()
+
+        # 동시 요청 제한 체크
+        semaphore = self._user_semaphores[user_id]
+        if semaphore.locked():
+            active_count = self.get_active_task_count(user_id)
+            await update.message.reply_text(
+                f"⏳ 현재 {active_count}개 요청 처리 중입니다. 잠시 후 다시 시도해주세요."
+            )
+            return
+
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+
+        # 백그라운드에서 Claude 호출
+        task = asyncio.create_task(
+            self._process_claude_request_with_semaphore(
+                bot=context.bot,
+                chat_id=chat_id,
+                user_id=user_id,
+                session_id=session_id,
+                message=message,
+                is_new_session=is_new_session,
+            )
+        )
+        self._register_task(task, user_id, session_id)
+
     async def auth_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /auth command."""
         if not self._is_authorized(update.effective_chat.id):
