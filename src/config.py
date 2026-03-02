@@ -39,6 +39,19 @@ class Settings(BaseSettings):
     # Paths
     base_dir: Path = Field(default_factory=lambda: Path(__file__).parent.parent)
     
+    @field_validator("auth_secret_key", mode="after")
+    @classmethod
+    def validate_auth_secret_key(cls, v, info):
+        """REQUIRE_AUTH=true일 때 빈 AUTH_SECRET_KEY 방지."""
+        # info.data에서 require_auth 값 확인
+        require_auth = info.data.get("require_auth", True)
+        if require_auth and not v:
+            raise ValueError(
+                "AUTH_SECRET_KEY is required when REQUIRE_AUTH=true. "
+                "Set AUTH_SECRET_KEY in .env or set REQUIRE_AUTH=false."
+            )
+        return v
+
     @field_validator("allowed_chat_ids", mode="before")
     @classmethod
     def parse_chat_ids(cls, v):

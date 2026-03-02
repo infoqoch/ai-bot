@@ -1,6 +1,8 @@
 """Telegram bot command handlers."""
 
+import asyncio
 import logging
+from collections import defaultdict
 from typing import TYPE_CHECKING
 
 from telegram import Update
@@ -18,7 +20,10 @@ logger = logging.getLogger(__name__)
 
 class BotHandlers:
     """Container for all bot command handlers."""
-    
+
+    # 유저별 Lock: 동시 메시지 처리 시 세션 데이터 유실 방지
+    _user_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+
     def __init__(
         self,
         session_store: "SessionStore",
@@ -281,58 +286,60 @@ class BotHandlers:
         if not self._is_authorized(update.effective_chat.id):
             await update.message.reply_text("⛔ 권한이 없습니다.")
             return
-        
+
         user_id = str(update.effective_chat.id)
         message = update.message.text
-        
+
         if not self._is_authenticated(user_id):
             await update.message.reply_text(
                 "🔒 인증이 필요합니다.\n"
                 "/auth <키>로 인증하세요. (30분간 유효)"
             )
             return
-        
-        logger.info(f"[{user_id}] 메시지: {message[:50]}...")
-        
-        # Show typing indicator
-        await context.bot.send_chat_action(
-            chat_id=update.effective_chat.id,
-            action="typing"
-        )
-        
-        # Check for existing session
-        session_id = self.sessions.get_current_session_id(user_id)
-        
-        if session_id:
-            # Resume existing session
-            response, error = await self.claude.chat(message, session_id, resume=True)
-            
-            if error == "SESSION_NOT_FOUND":
-                # Session expired, create new one
-                self.sessions.clear_current(user_id)
+
+        # 유저별 Lock으로 동시 요청 순차 처리
+        async with self._user_locks[user_id]:
+            logger.info(f"[{user_id}] 메시지: {message[:50]}...")
+
+            # Show typing indicator
+            await context.bot.send_chat_action(
+                chat_id=update.effective_chat.id,
+                action="typing"
+            )
+
+            # Check for existing session
+            session_id = self.sessions.get_current_session_id(user_id)
+
+            if session_id:
+                # Resume existing session
+                response, error = await self.claude.chat(message, session_id, resume=True)
+
+                if error == "SESSION_NOT_FOUND":
+                    # Session expired, create new one
+                    self.sessions.clear_current(user_id)
+                    new_session_id = self.sessions.create_session(user_id, message)
+                    response, error = await self.claude.chat(message, new_session_id, resume=False)
+                else:
+                    self.sessions.add_message(user_id, message)
+            else:
+                # Create new session
                 new_session_id = self.sessions.create_session(user_id, message)
                 response, error = await self.claude.chat(message, new_session_id, resume=False)
-            else:
-                self.sessions.add_message(user_id, message)
-        else:
-            # Create new session
-            new_session_id = self.sessions.create_session(user_id, message)
-            response, error = await self.claude.chat(message, new_session_id, resume=False)
-        
-        if error == "TIMEOUT":
-            response = "⏱️ 응답 시간 초과 (5분). 다시 시도해주세요."
-        elif error and error != "SESSION_NOT_FOUND":
-            response = f"❌ 오류 발생: {error}"
-        
-        # Add session info prefix
-        session_info = self.sessions.get_current_session_info(user_id)
-        history_count = self.sessions.get_history_count(user_id)
-        prefix = f"<b>[{session_info}|#{history_count}]</b>\n\n"
-        
-        full_response = prefix + response
-        
-        # Handle message length limit (4096 chars)
-        await self._send_long_message(update, full_response)
+
+            if error == "TIMEOUT":
+                response = "⏱️ 응답 시간 초과 (5분). 다시 시도해주세요."
+            elif error and error != "SESSION_NOT_FOUND":
+                response = f"❌ 오류 발생: {error}"
+
+            # Add session info prefix
+            session_info = self.sessions.get_current_session_info(user_id)
+            history_count = self.sessions.get_history_count(user_id)
+            prefix = f"<b>[{session_info}|#{history_count}]</b>\n\n"
+
+            full_response = prefix + response
+
+            # Handle message length limit (4096 chars)
+            await self._send_long_message(update, full_response)
     
     async def _send_long_message(self, update: Update, text: str, max_length: int = 4000) -> None:
         """Send message, splitting if too long."""
