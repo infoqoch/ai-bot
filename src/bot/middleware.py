@@ -1,5 +1,6 @@
 """Authentication and authorization middleware."""
 
+import hmac
 from datetime import datetime, timedelta
 from functools import wraps
 from typing import Callable, Optional
@@ -24,7 +25,8 @@ class AuthManager:
         return datetime.now() - last_auth < timedelta(minutes=self.timeout_minutes)
     
     def authenticate(self, user_id: str, key: str) -> bool:
-        if key == self.secret_key:
+        # 타이밍 공격 방지를 위해 상수 시간 비교 사용
+        if hmac.compare_digest(key, self.secret_key):
             self._sessions[user_id] = datetime.now()
             return True
         return False
