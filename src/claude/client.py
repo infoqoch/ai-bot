@@ -4,10 +4,34 @@ import asyncio
 import json
 import logging
 import shlex
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+class ChatError(Enum):
+    """Claude CLI 에러 타입."""
+
+    TIMEOUT = "TIMEOUT"
+    SESSION_NOT_FOUND = "SESSION_NOT_FOUND"
+    CLI_ERROR = "CLI_ERROR"
+
+
+@dataclass
+class ChatResponse:
+    """Claude CLI 응답."""
+
+    text: str
+    error: Optional[ChatError] = None
+    session_id: Optional[str] = None
+
+    def __iter__(self):
+        """하위 호환성을 위한 tuple 언패킹 지원."""
+        error_str = self.error.value if self.error else None
+        return iter((self.text, error_str, self.session_id))
 
 
 class ClaudeClient:
@@ -28,14 +52,35 @@ class ClaudeClient:
             return path.read_text(encoding="utf-8")
         return None
 
+    async def _run_command(
+        self,
+        cmd: list[str],
+        timeout: int,
+    ) -> tuple[str, str, int]:
+        """Execute command and return (stdout, stderr, returncode)."""
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(),
+            timeout=timeout,
+        )
+        return (
+            stdout.decode("utf-8").strip(),
+            stderr.decode("utf-8").strip(),
+            process.returncode,
+        )
+
     async def create_session(self) -> Optional[str]:
         """Create a new Claude session and return session_id."""
-        response, error, session_id = await self.chat("answer 'hi'", None)
-        if error:
-            logger.error(f"Failed to create Claude session: {error}")
+        response = await self.chat("answer 'hi'", None)
+        if response.error:
+            logger.error(f"Failed to create Claude session: {response.error.value}")
             return None
-        logger.info(f"Created new Claude session: {session_id}")
-        return session_id
+        logger.info(f"Created new Claude session: {response.session_id}")
+        return response.session_id
 
     async def chat(
         self,

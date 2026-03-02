@@ -4,9 +4,17 @@ import json
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TypedDict
 
 logger = logging.getLogger(__name__)
+
+
+class SessionData(TypedDict):
+    """Type definition for session data structure."""
+
+    created_at: str
+    last_used: str
+    history: list[str]
 
 
 class SessionStore:
@@ -42,10 +50,19 @@ class SessionStore:
                 logger.error(f"Failed to load sessions: {e}")
         return {}
 
-    def _save(self) -> None:
-        self.file_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.file_path, "w", encoding="utf-8") as f:
-            json.dump(self._data, f, indent=2, ensure_ascii=False, default=str)
+    def _save(self) -> bool:
+        """Save session data. Returns True on success."""
+        try:
+            self.file_path.parent.mkdir(parents=True, exist_ok=True)
+            # atomic write: 임시 파일에 쓴 후 이동
+            temp_file = self.file_path.with_suffix('.tmp')
+            with open(temp_file, "w", encoding="utf-8") as f:
+                json.dump(self._data, f, indent=2, ensure_ascii=False, default=str)
+            temp_file.replace(self.file_path)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save sessions: {e}")
+            return False
 
     def _ensure_user(self, user_id: str) -> dict:
         """Ensure user data structure exists."""
@@ -68,7 +85,12 @@ class SessionStore:
             return None
 
         # Check expiration
-        last_used = datetime.fromisoformat(session["last_used"])
+        try:
+            last_used = datetime.fromisoformat(session["last_used"])
+        except (ValueError, KeyError, TypeError):
+            logger.warning(f"Invalid timestamp for session {session_id[:8]}")
+            return None
+
         if datetime.now() - last_used > timedelta(hours=self.timeout_hours):
             logger.info(f"[{user_id}] Session expired: {session_id[:8]}")
             return None
