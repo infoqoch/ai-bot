@@ -18,12 +18,13 @@
 git add -A && git commit -m "type: msg"   # 2. 커밋
 git push origin main                      # 3. 푸시
 ./run.sh restart                          # 4. 재시작
-python -m src.notify "변경1" -- "file1"   # 5. 리포트 (필수!)
+source venv/bin/activate && \
+  python -m src.notify "변경1" -- "file1" # 5. 리포트 (필수!)
 ```
 
 **리포트 형식:**
 ```bash
-python -m src.notify "주요변경1" "변경2" -- "file1.py" "file2.py"
+source venv/bin/activate && python -m src.notify "주요변경1" "변경2" -- "file1.py" "file2.py"
 ```
 - `--` 앞: 변경사항 설명 (여러 개 가능)
 - `--` 뒤: 수정된 파일 목록
