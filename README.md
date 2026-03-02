@@ -1,6 +1,8 @@
 # AI Bot
 
-AI CLI를 텔레그램으로 사용하는 봇. 세션 유지 지원.
+Claude Code CLI를 텔레그램에서 사용할 수 있는 봇. 세션 유지 및 멀티 세션 지원.
+
+**요구사항:** Python 3.11+
 
 ## 기능
 
@@ -55,6 +57,30 @@ python -m src.main
 | `AI_COMMAND` | `claude` | AI CLI 명령어 |
 | `SESSION_TIMEOUT_HOURS` | `24` | 세션 만료 |
 | `REQUIRE_AUTH` | `true` | 인증 필요 여부 |
+| `AUTH_SECRET_KEY` | (조건부) | 인증 키 (`REQUIRE_AUTH=true` 시 필수) |
+| `AUTH_TIMEOUT_MINUTES` | `30` | 인증 유효 시간 |
+
+## 사용 예시
+
+### 기본 대화
+```
+사용자: 파이썬으로 피보나치 함수 만들어줘
+봇: [Claude의 코드 응답]
+```
+
+### 세션 관리
+```
+/new                    # 새 세션 시작
+/session                # 현재 세션 정보
+/session_list           # 전체 세션 목록 (AI 요약 포함)
+/s_abc123               # 세션 전환
+```
+
+### 인증 (REQUIRE_AUTH=true 시)
+```
+/auth your_secret_key   # 인증 (30분간 유효)
+/status                 # 인증 상태 확인
+```
 
 ## 개발
 

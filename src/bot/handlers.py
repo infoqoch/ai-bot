@@ -24,6 +24,9 @@ class BotHandlers:
     # 유저별 Lock: 동시 메시지 처리 시 세션 데이터 유실 방지
     _user_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
+    # 메시지 최대 길이 (DoS 방지)
+    MAX_MESSAGE_LENGTH = 4096
+
     def __init__(
         self,
         session_store: "SessionStore",
@@ -290,6 +293,12 @@ class BotHandlers:
         user_id = str(update.effective_chat.id)
         message = update.message.text
 
+        # 메시지 길이 제한 (DoS 방지)
+        if len(message) > self.MAX_MESSAGE_LENGTH:
+            original_len = len(message)
+            message = message[:self.MAX_MESSAGE_LENGTH]
+            logger.warning(f"[{user_id}] 메시지 길이 제한 적용: {original_len} -> {self.MAX_MESSAGE_LENGTH}")
+
         if not self._is_authenticated(user_id):
             await update.message.reply_text(
                 "🔒 인증이 필요합니다.\n"
@@ -360,9 +369,12 @@ class BotHandlers:
     
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle errors."""
-        logger.error(f"Error: {context.error}")
+        # 내부 로그에는 상세 오류 기록
+        logger.error(f"Error: {context.error}", exc_info=context.error)
+
         if update and update.effective_chat:
+            # 사용자에게는 일반적인 오류 메시지만 표시 (보안)
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text=f"❌ 오류 발생: {str(context.error)}"
+                text="❌ 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
             )
