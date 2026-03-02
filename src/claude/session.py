@@ -12,26 +12,29 @@ logger = logging.getLogger(__name__)
 
 class SessionData:
     """Single session data container."""
-    
+
     def __init__(
         self,
         session_id: str,
         created_at: str,
         last_used: str,
         history: list[str],
+        claude_session_id: Optional[str] = None,
     ):
         self.session_id = session_id
         self.created_at = created_at
         self.last_used = last_used
         self.history = history
-    
+        self.claude_session_id = claude_session_id  # Claude CLI's session ID
+
     def to_dict(self) -> dict:
         return {
             "created_at": self.created_at,
             "last_used": self.last_used,
             "history": self.history,
+            "claude_session_id": self.claude_session_id,
         }
-    
+
     @classmethod
     def from_dict(cls, session_id: str, data: dict) -> "SessionData":
         return cls(
@@ -39,6 +42,7 @@ class SessionData:
             created_at=data.get("created_at", ""),
             last_used=data.get("last_used", ""),
             history=data.get("history", []),
+            claude_session_id=data.get("claude_session_id"),
         )
 
 
@@ -252,7 +256,7 @@ class SessionStore:
         session = self._get_current_session(user_id)
         if not session:
             return None
-        
+
         return {
             "session_id": session.session_id,
             "created_at": session.created_at,
@@ -260,3 +264,21 @@ class SessionStore:
             "history": session.history,
             "history_count": len(session.history),
         }
+
+    def get_claude_session_id(self, user_id: str) -> Optional[str]:
+        """Get Claude CLI's session ID for current session."""
+        session = self._get_current_session(user_id)
+        return session.claude_session_id if session else None
+
+    def set_claude_session_id(self, user_id: str, claude_session_id: str) -> None:
+        """Store Claude CLI's session ID for current session."""
+        user_data = self._get_user_data(user_id)
+        if not user_data:
+            return
+
+        current_id = user_data.get("current")
+        if not current_id:
+            return
+
+        self._data[user_id]["all"][current_id]["claude_session_id"] = claude_session_id
+        self._save()

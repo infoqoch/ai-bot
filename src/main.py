@@ -56,10 +56,11 @@ def create_app() -> Application:
         auth_manager=auth_manager,
         require_auth=settings.require_auth,
         allowed_chat_ids=settings.allowed_chat_ids,
+        response_notify_seconds=settings.response_notify_seconds,
     )
     
-    # Create application
-    app = Application.builder().token(settings.telegram_token).build()
+    # Create application (concurrent_updates=True로 동시 메시지 처리 활성화)
+    app = Application.builder().token(settings.telegram_token).concurrent_updates(True).build()
     
     # Register handlers
     app.add_handler(CommandHandler("start", handlers.start))

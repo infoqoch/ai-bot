@@ -42,35 +42,27 @@ class TestClaudeClient:
 
     def test_build_command_basic(self, client):
         """기본 명령어 빌드 확인."""
-        cmd = client._build_command("Hello", None, False)
+        cmd = client._build_command("Hello")
 
         assert cmd[0] == "claude"
         assert "--print" in cmd
         assert "--output-format" in cmd
-        assert "text" in cmd
+        assert "json" in cmd
         assert cmd[-1] == "Hello"
-
-    def test_build_command_with_session(self, client):
-        """세션 ID 포함 명령어 빌드."""
-        cmd = client._build_command("Hello", "session-123", False)
-
-        assert "--session-id" in cmd
-        assert "session-123" in cmd
-
-    def test_build_command_resume(self, client):
-        """세션 재개 명령어 빌드."""
-        cmd = client._build_command("Hello", "session-123", True)
-
-        assert "--resume" in cmd
-        assert "session-123" in cmd
-        assert "--session-id" not in cmd
 
     def test_build_command_with_system_prompt(self, client_with_prompt):
         """시스템 프롬프트 포함 명령어 빌드."""
-        cmd = client_with_prompt._build_command("Hello", None, False)
+        cmd = client_with_prompt._build_command("Hello")
 
         assert "--system-prompt" in cmd
         assert "You are a helpful assistant." in cmd
+
+    def test_build_command_with_resume(self, client):
+        """세션 재개 명령어 빌드 확인."""
+        cmd = client._build_command("Hello", claude_session_id="abc-123")
+
+        assert "--resume" in cmd
+        assert "abc-123" in cmd
 
     def test_command_parsing(self):
         """복잡한 명령어 파싱 확인."""
@@ -99,10 +91,11 @@ class TestClaudeClient:
             mock_exec.return_value = mock_process
 
             with patch('asyncio.wait_for', side_effect=TimeoutError()):
-                response, error = await client.chat("Hello")
+                response, error, session_id = await client.chat("Hello")
 
             assert error == "TIMEOUT"
             assert response == ""
+            assert session_id is None
 
     @pytest.mark.asyncio
     async def test_summarize_empty_questions(self, client):
