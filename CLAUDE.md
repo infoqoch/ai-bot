@@ -73,22 +73,19 @@ src/
 | `REQUIRE_AUTH` | `true` | 인증 필요 여부 |
 | `AUTH_SECRET_KEY` | (조건부 필수) | 인증 키 (`REQUIRE_AUTH=true` 시 필수) |
 | `AUTH_TIMEOUT_MINUTES` | `30` | 인증 유효 시간 |
-| `WORKING_DIR` | (봇 디렉토리) | 플러그인/파일 작업 디렉토리 |
-
-## 샌드박스 아키텍처
+## 플러그인 아키텍처
 
 ### 디렉토리 구조
 ```
-telegram-claude-bot/           # 봇 코드 (Git 관리)
+telegram-claude-bot/
 ├── src/
 │   └── plugins/
 │       └── loader.py          # 플러그인 로더
-
-telegram-claude-bot-sandbox/   # 작업 디렉토리 (Git 미관리)
-├── plugins/                   # 동적 플러그인
-│   ├── calculator.py
-│   └── weather.py
-└── projects/                  # 생성된 프로젝트
+└── plugins/
+    ├── default/               # Git 관리 ✅ (기본 제공)
+    │   └── example.py
+    └── custom/                # Git 무시 ❌ (개인용)
+        └── my_plugin.py
 ```
 
 ### 플러그인 규칙 (CRITICAL)
@@ -98,7 +95,7 @@ telegram-claude-bot-sandbox/   # 작업 디렉토리 (Git 미관리)
    - 실패한 플러그인만 스킵, 나머지 정상 로드
    - 에러 로그로 알림
 
-2. **검증 후 배포**: Claude가 sandbox에 코드 작성 시
+2. **검증 후 배포**: Claude가 custom에 코드 작성 시
    - 반드시 문법 검증 (`python -m py_compile`)
    - 검증 실패해도 기존 봇은 정상 동작 보장
    - 실패 시 사용자에게 알림
