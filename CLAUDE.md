@@ -56,6 +56,10 @@ src/
 - I/O → `async/await`
 - subprocess → `asyncio.create_subprocess_exec`
 
+### 테스트 코드
+- 모듈: 테스트 의도 설명 (docstring)
+- 메서드: 간단한 설명 (docstring)
+
 ## 환경변수
 
 | 변수 | 설명 |
