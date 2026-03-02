@@ -28,22 +28,31 @@ class ClaudeClient:
             return path.read_text(encoding="utf-8")
         return None
 
+    async def create_session(self) -> Optional[str]:
+        """Create a new Claude session and return session_id."""
+        response, error, session_id = await self.chat("answer 'hi'", None)
+        if error:
+            logger.error(f"Failed to create Claude session: {error}")
+            return None
+        logger.info(f"Created new Claude session: {session_id}")
+        return session_id
+
     async def chat(
         self,
         message: str,
-        claude_session_id: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> tuple[str, Optional[str], Optional[str]]:
         """
         Send a message to Claude.
 
         Args:
             message: User message
-            claude_session_id: Claude's session ID (for resume)
+            session_id: Claude's session ID (always use --resume if provided)
 
         Returns:
-            Tuple of (response_text, error_message, claude_session_id)
+            Tuple of (response_text, error_message, session_id)
         """
-        cmd = self._build_command(message, claude_session_id)
+        cmd = self._build_command(message, session_id)
 
         try:
             process = await asyncio.create_subprocess_exec(
@@ -71,9 +80,11 @@ class ClaudeClient:
                 data = json.loads(output)
                 result = data.get("result", "(응답 없음)")
                 new_session_id = data.get("session_id")
+                logger.info(f"Claude response - session_id: {new_session_id}")
                 return result, None, new_session_id
             except json.JSONDecodeError:
                 # JSON 파싱 실패 시 원본 반환
+                logger.warning(f"JSON parse failed, output: {output[:200]}")
                 return output or "(응답 없음)", None, None
 
         except asyncio.TimeoutError:
@@ -86,14 +97,14 @@ class ClaudeClient:
     def _build_command(
         self,
         message: str,
-        claude_session_id: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> list[str]:
         """Build Claude CLI command."""
         cmd = list(self.command_parts)
 
-        # 세션 처리: resume 또는 새 세션
-        if claude_session_id:
-            cmd.extend(["--resume", claude_session_id])
+        # 세션이 있으면 항상 resume 사용
+        if session_id:
+            cmd.extend(["--resume", session_id])
 
         # JSON 출력 (session_id 파싱용)
         cmd.extend(["--print", "--output-format", "json"])
