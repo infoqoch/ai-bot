@@ -82,7 +82,7 @@ telegram-claude-bot/
 │   └── plugins/
 │       └── loader.py          # 플러그인 로더
 └── plugins/
-    ├── default/               # Git 관리 ✅ (기본 제공)
+    ├── builtin/               # Git 관리 ✅ (내장 플러그인)
     │   └── example.py
     └── custom/                # Git 무시 ❌ (개인용)
         └── my_plugin.py
