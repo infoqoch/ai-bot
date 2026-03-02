@@ -53,6 +53,10 @@ class PluginLoader:
     def load_all(self) -> list[str]:
         """모든 플러그인 로드 (builtin + custom).
 
+        플러그인 구조:
+        - 디렉토리 기반: plugins/builtin/memo/__init__.py
+        - 파일 기반 (레거시): plugins/builtin/memo.py
+
         Returns:
             로드된 플러그인 이름 목록
         """
@@ -64,6 +68,18 @@ class PluginLoader:
             if not dir_path.exists():
                 continue
 
+            # 1. 디렉토리 기반 플러그인 로드 (우선)
+            for item in dir_path.iterdir():
+                if item.is_dir() and not item.name.startswith("_"):
+                    init_file = item / "__init__.py"
+                    if init_file.exists():
+                        plugin = self._load_plugin_from_package(item)
+                        if plugin:
+                            self.plugins.append(plugin)
+                            loaded.append(f"{plugin_dir}/{plugin.name}")
+                            logger.info(f"플러그인 로드됨: {plugin_dir}/{plugin.name}")
+
+            # 2. 파일 기반 플러그인 로드 (레거시)
             for py_file in dir_path.glob("*.py"):
                 if py_file.name.startswith("_"):
                     continue
@@ -75,6 +91,50 @@ class PluginLoader:
                     logger.info(f"플러그인 로드됨: {plugin_dir}/{plugin.name}")
 
         return loaded
+
+    def _load_plugin_from_package(self, package_path: Path) -> Optional[Plugin]:
+        """디렉토리 기반 플러그인 로드.
+
+        Args:
+            package_path: 플러그인 패키지 디렉토리 (예: plugins/builtin/memo/)
+
+        Returns:
+            Plugin 인스턴스 또는 None (실패 시)
+        """
+        try:
+            init_file = package_path / "__init__.py"
+            spec = importlib.util.spec_from_file_location(
+                package_path.name, init_file
+            )
+            if not spec or not spec.loader:
+                logger.warning(f"플러그인 패키지 로드 실패 (spec 없음): {package_path}")
+                return None
+
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+
+            # Plugin 클래스 찾기
+            for attr_name in dir(module):
+                attr = getattr(module, attr_name)
+                if (
+                    isinstance(attr, type)
+                    and issubclass(attr, Plugin)
+                    and attr is not Plugin
+                ):
+                    plugin = attr()
+                    plugin._base_dir = self.base_dir
+                    self._loaded_modules[package_path.name] = module
+                    return plugin
+
+            logger.warning(f"플러그인 클래스 없음: {package_path}")
+            return None
+
+        except SyntaxError as e:
+            logger.error(f"플러그인 문법 오류: {package_path} - {e}")
+            return None
+        except Exception as e:
+            logger.error(f"플러그인 패키지 로드 실패: {package_path} - {e}")
+            return None
 
     def _load_plugin_safe(self, file_path: Path) -> Optional[Plugin]:
         """안전하게 플러그인 로드 (실패해도 봇 계속 동작).
