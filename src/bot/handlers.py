@@ -420,6 +420,53 @@ class BotHandlers:
         else:
             await update.message.reply_text("❌ 세션 전환 실패")
 
+    async def history_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /h_<id> command for viewing session history."""
+        if not self._is_authorized(update.effective_chat.id):
+            await update.message.reply_text("⛔ 권한이 없습니다.")
+            return
+
+        user_id = str(update.effective_chat.id)
+
+        if not self._is_authenticated(user_id):
+            await update.message.reply_text("🔒 먼저 인증이 필요합니다.\n/auth <키>")
+            return
+
+        text = update.message.text
+        if not text.startswith("/h_"):
+            return
+
+        target = text[3:]  # Extract session prefix
+
+        target_info = self.sessions.get_session_by_prefix(user_id, target)
+        if not target_info:
+            await update.message.reply_text(f"❌ 세션 '{target}'을 찾을 수 없습니다.")
+            return
+
+        # 히스토리 조회
+        history = self.sessions.get_session_history(user_id, target_info["full_session_id"])
+        if not history:
+            await update.message.reply_text("📭 히스토리가 없습니다.")
+            return
+
+        # 히스토리 포맷팅
+        history_lines = []
+        for i, q in enumerate(history, start=1):
+            short_q = truncate_message(q, 60)
+            history_lines.append(f"{i}. {short_q}")
+
+        history_text = "\n".join(history_lines)
+
+        await update.message.reply_text(
+            f"📜 <b>세션 히스토리</b>\n"
+            f"• ID: <code>{target_info['session_id']}</code>\n"
+            f"• 질문: {len(history)}개\n\n"
+            f"{history_text}\n\n"
+            f"---\n"
+            f"/s_{target_info['session_id']} 세션이동",
+            parse_mode="HTML"
+        )
+
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle regular text messages.
 
@@ -564,7 +611,13 @@ class BotHandlers:
             history_count = self.sessions.get_history_count(user_id, session_id)
             prefix = f"<b>[{session_info}|#{history_count}]</b>\n\n"
 
-            full_response = prefix + response
+            # 세션 커맨드 suffix 추가
+            suffix = (
+                f"\n\n---\n"
+                f"/s_{session_info} 세션이동 | /h_{session_info} 히스토리"
+            )
+
+            full_response = prefix + response + suffix
 
             # 응답 전송 (chat_id로 직접 전송)
             await self._send_message_to_chat(bot, chat_id, full_response)
