@@ -275,10 +275,11 @@ class BotHandlers:
             "📖 <b>명령어 목록</b>\n\n"
             f"{auth_section}"
             "💬 세션\n"
-            "/new - 새 세션 (Sonnet 기본)\n"
-            "/new_opus - 🧠 Opus 세션 (최고 품질)\n"
-            "/new_sonnet - ⚡ Sonnet 세션 (균형)\n"
-            "/new_haiku - 🚀 Haiku 세션 (빠름)\n"
+            "/new [모델] [이름] - 새 세션\n"
+            "  예: /new haiku 빠른봇\n"
+            "/new_opus - 🧠 Opus\n"
+            "/new_sonnet - ⚡ Sonnet\n"
+            "/new_haiku - 🚀 Haiku\n"
             "/model - 현재 세션 모델 변경\n"
             "/rename - 현재 세션 이름 변경\n"
             "/session - 현재 세션 정보\n"
@@ -540,10 +541,9 @@ class BotHandlers:
         """Handle /new command.
 
         Usage:
-            /new         - 기본 모델 (sonnet)
-            /new opus    - Opus 모델
-            /new sonnet  - Sonnet 모델
-            /new haiku   - Haiku 모델
+            /new              - 기본 모델 (sonnet)
+            /new opus         - Opus 모델
+            /new haiku 이름   - Haiku 모델 + 세션 이름
         """
         from src.claude.session import SUPPORTED_MODELS, DEFAULT_MODEL
 
@@ -551,22 +551,26 @@ class BotHandlers:
         user_id = str(chat_id)
         self._setup_request_context(chat_id)
 
-        # 모델 파싱
+        # 모델과 이름 파싱: /new [model] [name...]
         model = DEFAULT_MODEL
-        if context.args:
-            requested_model = context.args[0].lower()
-            if requested_model in SUPPORTED_MODELS:
-                model = requested_model
-            else:
-                await update.message.reply_text(
-                    f"❌ 지원하지 않는 모델: {requested_model}\n\n"
-                    f"사용 가능: {', '.join(SUPPORTED_MODELS)}\n"
-                    f"예: /new opus",
-                )
-                clear_context()
-                return
+        session_name = ""
 
-        logger.info(f"/new 명령 수신 - 새 세션 요청 (model={model})")
+        if context.args:
+            first_arg = context.args[0].lower()
+            if first_arg in SUPPORTED_MODELS:
+                model = first_arg
+                # 나머지는 이름
+                if len(context.args) > 1:
+                    session_name = " ".join(context.args[1:])
+            else:
+                # 첫 번째 인자가 모델이 아니면 전체가 이름
+                session_name = " ".join(context.args)
+
+        # 이름 길이 제한
+        if len(session_name) > 50:
+            session_name = session_name[:50]
+
+        logger.info(f"/new 명령 수신 - 새 세션 요청 (model={model}, name={session_name or '(없음)'})")
 
         if not self._is_authorized(chat_id):
             logger.debug("/new 거부 - 권한 없음")
@@ -595,13 +599,14 @@ class BotHandlers:
 
         logger.info(f"새 세션 생성됨: {session_id[:8]}, model={model}")
 
-        # 세션 저장 (모델 포함)
+        # 세션 저장 (모델, 이름 포함)
         logger.trace("세션 저장 중")
-        self.sessions.create_session(user_id, session_id, "(새 세션)", model=model)
+        self.sessions.create_session(user_id, session_id, "(새 세션)", model=model, name=session_name)
 
+        name_line = f"\n• 이름: {session_name}" if session_name else ""
         await update.message.reply_text(
             f"✅ 새 세션 시작!\n"
-            f"• ID: <code>{session_id[:8]}</code>\n"
+            f"• ID: <code>{session_id[:8]}</code>{name_line}\n"
             f"• 모델: {model_emoji} {model}",
             parse_mode="HTML"
         )
@@ -759,7 +764,7 @@ class BotHandlers:
             logger.trace("활성 세션 없음")
             await update.message.reply_text(
                 "📭 활성 세션이 없습니다.\n\n"
-                "• 메시지를 보내면 새 세션 시작\n"
+                "• /new - 새 세션 시작\n"
                 "• /session_list - 저장된 세션 목록",
                 parse_mode="HTML"
             )
