@@ -1008,11 +1008,16 @@ class BotHandlers:
             clear_context()
             return
 
-        # 매니저 세션 확인/생성
+        # 매니저 세션 확인/생성 (기존 haiku면 sonnet으로 재생성)
         manager_session_id = self.sessions.get_manager_session_id(user_id)
-        if not manager_session_id:
-            logger.info("매니저 세션 생성 중...")
-            await update.message.reply_text("📋 매니저 세션 생성 중...")
+        manager_model = self.sessions.get_session_model(user_id, manager_session_id) if manager_session_id else None
+
+        if not manager_session_id or manager_model == "haiku":
+            if manager_session_id:
+                logger.info(f"기존 매니저 세션(haiku) 삭제 후 sonnet으로 재생성")
+                self.sessions.hard_delete_session(user_id, manager_session_id)
+            logger.info("매니저 세션 생성 중... (sonnet)")
+            await update.message.reply_text("📋 매니저 세션 생성 중... (⚡ Sonnet)")
             manager_session_id = await self.claude.create_session()
             if not manager_session_id:
                 await update.message.reply_text("❌ 매니저 세션 생성 실패")
@@ -1035,7 +1040,7 @@ class BotHandlers:
 
             await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
-            response = await self.claude.chat(full_message, manager_session_id, model="haiku")
+            response = await self.claude.chat(full_message, manager_session_id, model="sonnet")
             if response.error:
                 await update.message.reply_text(f"❌ 오류: {response.error.value}")
             else:
