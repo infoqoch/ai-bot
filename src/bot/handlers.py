@@ -1019,7 +1019,7 @@ class BotHandlers:
 
             await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
-            response = await self.claude.chat(full_message, manager_session_id, model="sonnet")
+            response = await self.claude.chat(full_message, manager_session_id, model="haiku")
             if response.error:
                 await update.message.reply_text(f"❌ 오류: {response.error.value}")
             else:
