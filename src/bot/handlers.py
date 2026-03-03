@@ -19,6 +19,26 @@ if TYPE_CHECKING:
     from src.plugins.loader import PluginLoader
     from .middleware import AuthManager
 
+# 매니저 세션 시스템 프롬프트
+MANAGER_SYSTEM_PROMPT = """[세션 관리자 역할]
+너는 사용자의 Claude 세션을 관리하는 비서야.
+
+[가능한 작업]
+1. 세션 검색: 히스토리 내용으로 세션 찾기
+2. 세션 정리: 오래된/불필요한 세션 삭제 추천
+3. 작업 요약: 최근 작업 내용 정리
+4. 세션 추천: 어떤 세션으로 돌아갈지 추천
+
+[응답 규칙]
+- 간결하게 답변 (3-5줄)
+- 세션 ID는 8자리 코드로 표시
+- 삭제 추천 시 /delete_<id> 형식으로 안내
+- 세션 이동 추천 시 /s_<id> 형식으로 안내
+
+[주의사항]
+- 직접 세션을 수정하지 않음 (사용자가 명령어로 실행)
+- 확실하지 않으면 확인 질문"""
+
 
 @dataclass
 class TaskInfo:
@@ -992,9 +1012,9 @@ class BotHandlers:
             # 세션 컨텍스트 주입
             sessions_summary = self.sessions.get_all_sessions_summary(user_id)
             full_message = (
-                f"[세션 관리자 모드]\n"
-                f"사용자의 세션 목록:\n{sessions_summary}\n\n"
-                f"질문: {message}"
+                f"{MANAGER_SYSTEM_PROMPT}\n\n"
+                f"[현재 세션 목록]\n{sessions_summary}\n\n"
+                f"[사용자 요청]\n{message}"
             )
 
             await context.bot.send_chat_action(chat_id=chat_id, action="typing")
@@ -1501,9 +1521,9 @@ class BotHandlers:
             if is_manager:
                 sessions_summary = self.sessions.get_all_sessions_summary(user_id)
                 actual_message = (
-                    f"[세션 관리자 모드]\n"
-                    f"사용자의 세션 목록:\n{sessions_summary}\n\n"
-                    f"사용자 요청: {message}"
+                    f"{MANAGER_SYSTEM_PROMPT}\n\n"
+                    f"[현재 세션 목록]\n{sessions_summary}\n\n"
+                    f"[사용자 요청]\n{message}"
                 )
                 logger.trace("매니저 세션 - 세션 정보 주입됨")
 
