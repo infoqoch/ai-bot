@@ -137,10 +137,10 @@ class SessionStore:
         logger.trace(f"유효한 세션 반환 - {session_id[:8]}")
         return session_id
 
-    def create_session(self, user_id: str, session_id: str, first_message: str, model: str = None) -> None:
+    def create_session(self, user_id: str, session_id: str, first_message: str, model: str = None, name: str = "") -> None:
         """Create a new session with Claude's session_id."""
         model = model or DEFAULT_MODEL
-        logger.trace(f"create_session() - user={user_id}, session={session_id[:8]}, model={model}")
+        logger.trace(f"create_session() - user={user_id}, session={session_id[:8]}, model={model}, name={name or '(없음)'}")
         logger.trace(f"first_message length={len(first_message)}")
 
         user_data = self._ensure_user(user_id)
@@ -152,10 +152,11 @@ class SessionStore:
             "last_used": now,
             "history": [first_message],
             "model": model,
+            "name": name,
         }
 
         self._save()
-        logger.info(f"세션 생성됨 - user={user_id}, session={session_id[:8]}, model={model}")
+        logger.info(f"세션 생성됨 - user={user_id}, session={session_id[:8]}, model={model}, name={name or '(없음)'}")
 
     def add_message(self, user_id: str, session_id: str, message: str) -> None:
         """Add a message to specific session (not current!)."""
