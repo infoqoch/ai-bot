@@ -159,6 +159,26 @@ class SessionStore:
         self._save()
         logger.info(f"세션 생성됨 - user={user_id}, session={session_id[:8]}, model={model}, name={name or '(없음)'}")
 
+    def create_session_without_switch(self, user_id: str, session_id: str, first_message: str, model: str = None, name: str = "") -> None:
+        """Create a new session WITHOUT switching current (for manager use)."""
+        model = model or DEFAULT_MODEL
+        logger.trace(f"create_session_without_switch() - user={user_id}, session={session_id[:8]}, model={model}, name={name or '(없음)'}")
+
+        user_data = self._ensure_user(user_id)
+        now = datetime.now().isoformat()
+
+        # current는 변경하지 않음!
+        user_data["sessions"][session_id] = {
+            "created_at": now,
+            "last_used": now,
+            "history": [first_message],
+            "model": model,
+            "name": name,
+        }
+
+        self._save()
+        logger.info(f"세션 생성됨 (전환없음) - user={user_id}, session={session_id[:8]}, model={model}, name={name or '(없음)'}")
+
     def add_message(self, user_id: str, session_id: str, message: str) -> None:
         """Add a message to specific session (not current!)."""
         short_msg = message[:30] + "..." if len(message) > 30 else message
@@ -465,6 +485,27 @@ class SessionStore:
 
         self._save()
         logger.info(f"매니저 세션 생성됨 - user={user_id}, session={session_id[:8]}")
+
+    def trim_manager_history(self, user_id: str, max_history: int = 5) -> None:
+        """Trim manager session history to keep only recent N messages."""
+        manager_session_id = self.get_manager_session_id(user_id)
+        if not manager_session_id:
+            return
+
+        user_data = self._data.get(user_id)
+        if not user_data:
+            return
+
+        session = user_data.get("sessions", {}).get(manager_session_id)
+        if not session:
+            return
+
+        history = session.get("history", [])
+        if len(history) > max_history:
+            trimmed_count = len(history) - max_history
+            session["history"] = history[-max_history:]
+            self._save()
+            logger.info(f"매니저 히스토리 정리 - {trimmed_count}개 삭제, {max_history}개 유지")
 
     def get_previous_session_id(self, user_id: str) -> Optional[str]:
         """Get previous session ID (stored when switching to manager)."""
