@@ -77,10 +77,21 @@ class ClaudeClient:
         logger.trace(f"subprocess 생성됨 - pid={process.pid}")
 
         logger.trace("프로세스 실행 대기 중")
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(),
-            timeout=timeout,
-        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            # 타임아웃 시 프로세스 강제 종료
+            logger.warning(f"프로세스 타임아웃 - pid={process.pid}, 강제 종료 시도")
+            try:
+                process.kill()
+                await process.wait()  # 좀비 프로세스 방지
+                logger.info(f"프로세스 종료됨 - pid={process.pid}")
+            except Exception as e:
+                logger.warning(f"프로세스 종료 실패 - pid={process.pid}: {e}")
+            raise  # TimeoutError 다시 raise
         stdout_str = stdout.decode("utf-8").strip()
         stderr_str = stderr.decode("utf-8").strip()
 

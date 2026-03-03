@@ -1198,10 +1198,10 @@ class BotHandlers:
 
         self._ensure_watchdog()
 
-        # 동시 요청 제한 체크
+        # 동시 요청 제한 체크 (Semaphore._value가 0이면 모든 슬롯 사용 중)
         semaphore = self._user_semaphores[user_id]
-        logger.trace(f"Semaphore 상태 - locked={semaphore.locked()}")
-        if semaphore.locked():
+        logger.trace(f"Semaphore 상태 - available={semaphore._value}")
+        if semaphore._value == 0:
             active_count = self.get_active_task_count(user_id)
             logger.warning(f"동시 요청 제한 - 활성 태스크: {active_count}개")
             await update.message.reply_text(
@@ -1331,10 +1331,10 @@ class BotHandlers:
         # Watchdog 지연 시작
         self._ensure_watchdog()
 
-        # 동시 요청 제한 체크
+        # 동시 요청 제한 체크 (Semaphore._value가 0이면 모든 슬롯 사용 중)
         semaphore = self._user_semaphores[user_id]
-        logger.trace(f"Semaphore 상태 - locked={semaphore.locked()}")
-        if semaphore.locked():
+        logger.trace(f"Semaphore 상태 - available={semaphore._value}")
+        if semaphore._value == 0:
             active_count = self.get_active_task_count(user_id)
             logger.warning(f"동시 요청 제한 - 활성 태스크: {active_count}개")
             await update.message.reply_text(
