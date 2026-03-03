@@ -46,6 +46,7 @@ class DailyTodo:
         TimeSlot.EVENING.value: [],
     })
     pending_input: bool = False  # 할일 입력 대기 중
+    pending_input_timestamp: Optional[str] = None  # 입력 대기 시작 시간
     last_reminder: Optional[str] = None  # 마지막 리마인더 시간대
 
     def to_dict(self) -> dict:
@@ -53,6 +54,7 @@ class DailyTodo:
             "date": self.date,
             "tasks": self.tasks,
             "pending_input": self.pending_input,
+            "pending_input_timestamp": self.pending_input_timestamp,
             "last_reminder": self.last_reminder,
         }
 
@@ -66,6 +68,7 @@ class DailyTodo:
                 TimeSlot.EVENING.value: [],
             }),
             pending_input=data.get("pending_input", False),
+            pending_input_timestamp=data.get("pending_input_timestamp"),
             last_reminder=data.get("last_reminder"),
         )
 
@@ -169,12 +172,44 @@ class TodoManager:
         """입력 대기 상태 설정."""
         daily = self.get_today(chat_id)
         daily.pending_input = pending
+        if pending:
+            daily.pending_input_timestamp = datetime.now().isoformat()
+        else:
+            daily.pending_input_timestamp = None
         self.save_today(chat_id, daily)
 
     def is_pending_input(self, chat_id: int) -> bool:
-        """입력 대기 상태 확인."""
+        """입력 대기 상태 확인 (2시간 타임아웃)."""
         daily = self.get_today(chat_id)
-        return daily.pending_input
+
+        if not daily.pending_input:
+            return False
+
+        # 타임스탬프가 없으면 레거시 데이터 - 무효화
+        if not daily.pending_input_timestamp:
+            daily.pending_input = False
+            self.save_today(chat_id, daily)
+            return False
+
+        # 2시간 경과 체크
+        try:
+            pending_time = datetime.fromisoformat(daily.pending_input_timestamp)
+            elapsed = datetime.now() - pending_time
+
+            # 2시간(7200초) 경과 시 자동 만료
+            if elapsed.total_seconds() > 7200:
+                daily.pending_input = False
+                daily.pending_input_timestamp = None
+                self.save_today(chat_id, daily)
+                return False
+        except Exception:
+            # 파싱 실패 시 안전하게 만료
+            daily.pending_input = False
+            daily.pending_input_timestamp = None
+            self.save_today(chat_id, daily)
+            return False
+
+        return True
 
     def add_tasks_from_text(self, chat_id: int, tasks_by_slot: dict[TimeSlot, list[str]]) -> DailyTodo:
         """파싱된 할일 추가."""
@@ -187,17 +222,43 @@ class TodoManager:
         return daily
 
     def mark_done_by_text(self, chat_id: int, text: str) -> bool:
-        """텍스트로 할일 완료 처리."""
+        """텍스트로 할일 완료 처리 (개선된 매칭)."""
         daily = self.get_today(chat_id)
         text_lower = text.lower().strip()
 
         for slot_name, items in daily.tasks.items():
             for i, item in enumerate(items):
-                if not item.get("done") and text_lower in item["text"].lower():
+                if item.get("done"):
+                    continue
+
+                item_text_lower = item["text"].lower()
+
+                # 매칭 조건 (우선순위):
+                # 1. 정확히 일치
+                if text_lower == item_text_lower:
                     items[i]["done"] = True
                     items[i]["completed_at"] = datetime.now().isoformat()
                     self.save_today(chat_id, daily)
                     return True
+
+                # 2. 단어 시작 부분 일치 (공백으로 구분된 단어의 시작)
+                if item_text_lower.startswith(text_lower + " ") or \
+                   " " + text_lower in item_text_lower:
+                    items[i]["done"] = True
+                    items[i]["completed_at"] = datetime.now().isoformat()
+                    self.save_today(chat_id, daily)
+                    return True
+
+                # 3. 50% 이상 매칭 (짧은 문자열은 제외)
+                if len(text_lower) >= 2:
+                    # 간단한 유사도: 검색어가 할일 텍스트의 50% 이상 포함
+                    match_count = sum(1 for char in text_lower if char in item_text_lower)
+                    if match_count / len(text_lower) >= 0.7:
+                        items[i]["done"] = True
+                        items[i]["completed_at"] = datetime.now().isoformat()
+                        self.save_today(chat_id, daily)
+                        return True
+
         return False
 
     def mark_done_by_index(self, chat_id: int, slot: TimeSlot, index: int) -> bool:
@@ -207,6 +268,43 @@ class TodoManager:
             self.save_today(chat_id, daily)
             return True
         return False
+
+    def mark_done_by_global_index(self, chat_id: int, global_index: int) -> Optional[tuple[str, str]]:
+        """전역 인덱스로 할일 완료 처리.
+
+        Args:
+            chat_id: 채팅 ID
+            global_index: 전체 목록에서의 번호 (1-based)
+
+        Returns:
+            성공 시 (시간대명, 할일텍스트), 실패 시 None
+        """
+        daily = self.get_today(chat_id)
+
+        # 전체 할일을 시간대 순서대로 순회
+        current_global = 0
+        slot_names = {
+            TimeSlot.MORNING.value: "🌅 오전",
+            TimeSlot.AFTERNOON.value: "☀️ 오후",
+            TimeSlot.EVENING.value: "🌙 저녁",
+        }
+
+        for slot_value in [TimeSlot.MORNING.value, TimeSlot.AFTERNOON.value, TimeSlot.EVENING.value]:
+            items = daily.tasks.get(slot_value, [])
+            for i, item in enumerate(items):
+                current_global += 1
+                if current_global == global_index:
+                    # 찾았음!
+                    if not item.get("done"):
+                        items[i]["done"] = True
+                        items[i]["completed_at"] = datetime.now().isoformat()
+                        self.save_today(chat_id, daily)
+                        return (slot_names.get(slot_value, slot_value), item["text"])
+                    else:
+                        # 이미 완료된 항목
+                        return (slot_names.get(slot_value, slot_value), item["text"])
+
+        return None
 
     def get_slot_summary(self, chat_id: int, slot: TimeSlot) -> str:
         """시간대별 요약."""
@@ -257,6 +355,68 @@ class TodoManager:
             lines.append(f"\n📊 전체: {done}/{total} 완료")
 
         return "\n".join(lines)
+
+    def delete_by_index(self, chat_id: int, slot: TimeSlot, index: int) -> bool:
+        """인덱스로 할일 삭제."""
+        daily = self.get_today(chat_id)
+        items = daily.tasks.get(slot.value, [])
+        if 0 <= index < len(items):
+            items.pop(index)
+            self.save_today(chat_id, daily)
+            return True
+        return False
+
+    def delete_by_global_index(self, chat_id: int, global_index: int) -> Optional[tuple[str, str]]:
+        """전역 인덱스로 할일 삭제."""
+        daily = self.get_today(chat_id)
+        current_global = 0
+        slot_names = {
+            TimeSlot.MORNING.value: "🌅 오전",
+            TimeSlot.AFTERNOON.value: "☀️ 오후",
+            TimeSlot.EVENING.value: "🌙 저녁",
+        }
+
+        for slot_value in [TimeSlot.MORNING.value, TimeSlot.AFTERNOON.value, TimeSlot.EVENING.value]:
+            items = daily.tasks.get(slot_value, [])
+            for i, item in enumerate(items):
+                current_global += 1
+                if current_global == global_index:
+                    task_text = item["text"]
+                    items.pop(i)
+                    self.save_today(chat_id, daily)
+                    return (slot_names.get(slot_value, slot_value), task_text)
+
+        return None
+
+    def delete_by_text(self, chat_id: int, text: str) -> bool:
+        """텍스트로 할일 삭제 (mark_done_by_text와 동일한 매칭 로직)."""
+        daily = self.get_today(chat_id)
+        text_lower = text.lower().strip()
+
+        for slot_name, items in daily.tasks.items():
+            for i, item in enumerate(items):
+                item_text_lower = item["text"].lower()
+
+                # 매칭 조건 (mark_done_by_text와 동일)
+                if text_lower == item_text_lower:
+                    items.pop(i)
+                    self.save_today(chat_id, daily)
+                    return True
+
+                if item_text_lower.startswith(text_lower + " ") or \
+                   " " + text_lower in item_text_lower:
+                    items.pop(i)
+                    self.save_today(chat_id, daily)
+                    return True
+
+                if len(text_lower) >= 2:
+                    match_count = sum(1 for char in text_lower if char in item_text_lower)
+                    if match_count / len(text_lower) >= 0.7:
+                        items.pop(i)
+                        self.save_today(chat_id, daily)
+                        return True
+
+        return False
 
     def get_registered_chat_ids(self) -> list[int]:
         """등록된 모든 chat_id 목록."""
