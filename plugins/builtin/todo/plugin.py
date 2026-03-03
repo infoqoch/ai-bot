@@ -275,13 +275,16 @@ class TodoPlugin(Plugin):
         msg = message.strip()
 
         # 패턴 1: "오후에 축구 해야" / "오전에 회의 추가" (시간대 + 할일 + 동사)
-        match = re.search(r'(오전|오후|저녁)에?\s+(.+?)\s*(해야|추가|등록|하기)', msg)
+        # "~으로 추가", "~를 추가" 등도 처리
+        match = re.search(r'(오전|오후|저녁)에?\s+(.+?)(?:[으로를을]?\s*)?(해야|추가|등록|하기)', msg)
         if match:
             slot = self._text_to_slot(match.group(1))
             task_text = match.group(2).strip()
 
-            # "할일", "할 일" 등 제거
-            task_text = re.sub(r'할\s*일\s*', '', task_text).strip()
+            # "할일", "할 일", "할일로", "할일을" 등 제거
+            task_text = re.sub(r'할\s*일[로을은는이가]?\s*', '', task_text).strip()
+            # 끝에 붙은 조사 제거 ("운동으" -> "운동")
+            task_text = re.sub(r'[으로를을은는이가]$', '', task_text).strip()
 
             if slot and task_text and len(task_text) > 1:
                 daily = self.manager.get_today(chat_id)
