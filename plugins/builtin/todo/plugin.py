@@ -274,19 +274,16 @@ class TodoPlugin(Plugin):
         """할일 추가."""
         msg = message.strip()
 
-        # 패턴: "할일 추가: XXX", "할일 추가 XXX"
-        match = re.search(r'할\s*일\s*(추가|등록)[:\s]*(.+)', msg)
+        # 패턴 1: "오후에 축구 해야" / "오전에 회의 추가" (시간대 + 할일 + 동사)
+        match = re.search(r'(오전|오후|저녁)에?\s+(.+?)\s*(해야|추가|등록|하기)', msg)
         if match:
+            slot = self._text_to_slot(match.group(1))
             task_text = match.group(2).strip()
-            slot = self._detect_slot(task_text) or TimeSlot.MORNING
 
-            # 시간대 키워드 제거
-            for keywords in self.SLOT_KEYWORDS.values():
-                for kw in keywords:
-                    task_text = re.sub(rf'\b{kw}에?\s*', '', task_text, flags=re.IGNORECASE)
+            # "할일", "할 일" 등 제거
+            task_text = re.sub(r'할\s*일\s*', '', task_text).strip()
 
-            task_text = task_text.strip()
-            if task_text:
+            if slot and task_text and len(task_text) > 1:
                 daily = self.manager.get_today(chat_id)
                 daily.add_task(slot, task_text)
                 self.manager.save_today(chat_id, daily)
@@ -296,8 +293,33 @@ class TodoPlugin(Plugin):
                     response=f"✅ {self._get_slot_name(slot)}에 추가됨!\n• {task_text}"
                 )
 
-        # 패턴: "오전에 회의 추가"
-        match = re.search(r'(오전|오후|저녁)에?\s*(.+?)\s*(추가|등록|해야)', msg)
+        # 패턴 2: "할일 추가: XXX", "할일 추가 XXX"
+        match = re.search(r'할\s*일\s*(추가|등록)[:\s]+(.+?)(?:\s+해야|\s+하기|$)', msg)
+        if match:
+            task_text = match.group(2).strip()
+            # 질문형이면 무시 ("할일 추가 가능?" 등)
+            if task_text.endswith('?') or task_text in ['가능', '돼', '되', '할까']:
+                return None
+
+            slot = self._detect_slot(task_text) or TimeSlot.MORNING
+
+            # 시간대 키워드 제거
+            for pattern in self.SLOT_REMOVE_PATTERNS:
+                task_text = re.sub(pattern, '', task_text, flags=re.IGNORECASE)
+
+            task_text = task_text.strip()
+            if task_text and len(task_text) > 1:
+                daily = self.manager.get_today(chat_id)
+                daily.add_task(slot, task_text)
+                self.manager.save_today(chat_id, daily)
+
+                return PluginResult(
+                    handled=True,
+                    response=f"✅ {self._get_slot_name(slot)}에 추가됨!\n• {task_text}"
+                )
+
+        # 패턴 3: "오전에 회의 추가" (레거시)
+        match = re.search(r'(오전|오후|저녁)에?\s*(.+?)\s*(추가|등록)', msg)
         if match:
             slot = self._text_to_slot(match.group(1))
             task_text = match.group(2).strip()
