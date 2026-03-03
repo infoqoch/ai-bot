@@ -7,7 +7,7 @@ from typing import Optional
 from src.plugins.loader import Plugin, PluginResult
 from src.logging_config import logger
 
-from .manager import TodoManager, TimeSlot, DailyTodo
+from plugins.builtin.todo.manager import TodoManager, TimeSlot, DailyTodo
 
 
 class TodoPlugin(Plugin):
