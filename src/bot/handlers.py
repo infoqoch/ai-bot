@@ -1,7 +1,6 @@
 """Telegram bot command handlers."""
 
 import asyncio
-import re
 import subprocess
 import time
 from collections import defaultdict
@@ -12,57 +11,35 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from src.logging_config import logger, set_trace_id, set_user_id, set_session_id, clear_context
+from .constants import (
+    ACTION_DELETE_PATTERN,
+    ACTION_RENAME_PATTERN,
+    ACTION_CREATE_PATTERN,
+    ACTION_SWITCH_PATTERN,
+    MAX_MESSAGE_LENGTH,
+    WATCHDOG_INTERVAL_SECONDS,
+    TASK_TIMEOUT_SECONDS,
+    get_model_emoji,
+    remove_action_tags,
+)
 from .formatters import format_session_quick_list, truncate_message
+from .middleware import authorized_only, authenticated_only
+from .prompts import MANAGER_SYSTEM_PROMPT
 
-# ACTION 패턴 (매니저 세션용)
-ACTION_DELETE_PATTERN = re.compile(r'\[ACTION:DELETE:([a-zA-Z0-9]+)\]')
-ACTION_RENAME_PATTERN = re.compile(r'\[ACTION:RENAME:([a-zA-Z0-9]+):([^\]]+)\]')
-ACTION_CREATE_PATTERN = re.compile(r'\[ACTION:CREATE:(opus|sonnet|haiku):([^\]]+)\]')
-ACTION_SWITCH_PATTERN = re.compile(r'\[ACTION:SWITCH:([a-zA-Z0-9]+)\]')
+# Re-export for backwards compatibility (tests import from here)
+__all__ = [
+    "ACTION_DELETE_PATTERN",
+    "ACTION_RENAME_PATTERN",
+    "ACTION_CREATE_PATTERN",
+    "ACTION_SWITCH_PATTERN",
+    "BotHandlers",
+]
 
 if TYPE_CHECKING:
     from src.claude.client import ClaudeClient
     from src.claude.session import SessionStore
     from src.plugins.loader import PluginLoader
     from .middleware import AuthManager
-
-# 매니저 세션 시스템 프롬프트
-MANAGER_SYSTEM_PROMPT = """[필수 규칙 - 반드시 준수]
-1. 너는 Telegram Claude Bot의 "세션 관리 전용" 비서야
-2. 오직 세션/봇 관리만 담당 - 파일, 코드, 일반 질문은 거절
-3. [ACTION:...] 명령어는 봇이 실제 실행함
-
-[절대 금지]
-- 파일 시스템 탐색/조작
-- 코드 작성/분석
-- 일반적인 질문 답변
-- 프로젝트/작업 관련 대화
-→ 이런 요청 시: "세션으로 전환 후 질문해주세요" 안내
-
-[너의 ACTION 명령어]
-- 삭제: [ACTION:DELETE:세션ID]
-- 이름변경: [ACTION:RENAME:세션ID:새이름]
-- 세션생성: [ACTION:CREATE:모델:이름]  (모델: opus/sonnet/haiku)
-- 세션전환: [ACTION:SWITCH:세션ID]
-
-[봇 명령어 참고]
-- /new [모델] [이름] - 새 세션
-- /session_list - 세션 목록
-- /s_<id> - 세션 전환
-- /m - 매니저 모드
-- /back, /exit - 매니저 종료
-
-[응답 규칙]
-- 세션 관리 요청만 처리
-- 간결하게 (2-3줄)
-- 바로 ACTION 실행
-- 세션 ID는 8자리
-
-[예시]
-"주식돌이 오푸스로 만들어" → "생성! [ACTION:CREATE:opus:주식돌이]"
-"a1b2c3d4로 전환" → "전환! [ACTION:SWITCH:a1b2c3d4]"
-"파일 찾아줘" → "❌ 세션 관리만 가능해요. 세션 전환 후 질문해주세요."
-"""
 
 
 @dataclass
@@ -90,13 +67,6 @@ class BotHandlers:
     _active_tasks: dict[int, TaskInfo] = {}  # task_id -> TaskInfo
     _watchdog_task: Optional[asyncio.Task] = None
 
-    # 메시지 최대 길이 (DoS 방지)
-    MAX_MESSAGE_LENGTH = 4096
-
-    # Watchdog 설정
-    WATCHDOG_INTERVAL_SECONDS = 60  # 1분마다 체크
-    TASK_TIMEOUT_SECONDS = 30 * 60  # 30분 타임아웃
-
     def __init__(
         self,
         session_store: "SessionStore",
@@ -119,6 +89,8 @@ class BotHandlers:
         self.plugins = plugin_loader
         self._watchdog_started = False
         logger.trace(f"BotHandlers 설정 - require_auth={require_auth}, allowed_ids={allowed_chat_ids}")
+
+    # ==================== 유틸리티 메서드 ====================
 
     def _setup_request_context(self, chat_id: int) -> str:
         """요청 컨텍스트 설정 (trace_id, user_id). trace_id 반환."""
@@ -148,7 +120,7 @@ class BotHandlers:
         logger.trace("_watchdog_loop() 시작")
         while True:
             try:
-                await asyncio.sleep(self.WATCHDOG_INTERVAL_SECONDS)
+                await asyncio.sleep(WATCHDOG_INTERVAL_SECONDS)
                 logger.trace(f"Watchdog 체크 - 활성 태스크: {len(self._active_tasks)}개")
                 await self._cleanup_zombie_tasks()
             except asyncio.CancelledError:
@@ -166,7 +138,7 @@ class BotHandlers:
         for task_id, info in list(self._active_tasks.items()):
             elapsed = now - info.started_at
             logger.trace(f"태스크 체크 - id={task_id}, user={info.user_id}, elapsed={elapsed:.0f}s")
-            if elapsed > self.TASK_TIMEOUT_SECONDS:
+            if elapsed > TASK_TIMEOUT_SECONDS:
                 zombie_tasks.append((task_id, info))
 
         logger.trace(f"좀비 태스크 발견: {len(zombie_tasks)}개")
@@ -249,6 +221,8 @@ class BotHandlers:
         result = self.auth.is_authenticated(user_id)
         logger.trace(f"인증 체크 결과: {result}")
         return result
+
+    # ==================== 정보 명령어 ====================
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
@@ -416,128 +390,14 @@ class BotHandlers:
 
         clear_context()
 
-    async def ai_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /ai command - force Claude conversation (bypass plugins)."""
-        chat_id = update.effective_chat.id
-        trace_id = self._setup_request_context(chat_id)
-        logger.info("/ai 명령 수신")
+    # ==================== 인증 명령어 ====================
 
-        if not self._is_authorized(chat_id):
-            logger.debug("/ai 거부 - 권한 없음")
-            await update.message.reply_text("⛔ 권한이 없습니다.")
-            clear_context()
-            return
-
-        user_id = str(chat_id)
-
-        if not self._is_authenticated(user_id):
-            logger.debug("/ai 거부 - 인증 필요")
-            await update.message.reply_text(
-                "🔒 인증이 필요합니다.\n"
-                f"/auth <키>로 인증하세요. ({self.auth.timeout_minutes}분간 유효)\n"
-                "/help 도움말"
-            )
-            clear_context()
-            return
-
-        # /ai 뒤의 메시지 추출
-        if not context.args:
-            logger.trace("/ai 인자 없음 - 사용법 표시")
-            await update.message.reply_text(
-                "🤖 <b>/ai 사용법</b>\n\n"
-                "<code>/ai 질문내용</code>\n\n"
-                "플러그인을 건너뛰고 Claude에게 직접 질문합니다.",
-                parse_mode="HTML"
-            )
-            clear_context()
-            return
-
-        message = " ".join(context.args)
-        short_msg = message[:50] + "..." if len(message) > 50 else message
-        logger.info(f"/ai 메시지: '{short_msg}'")
-        logger.trace(f"전체 메시지 길이: {len(message)}")
-
-        # 메시지 길이 제한
-        if len(message) > self.MAX_MESSAGE_LENGTH:
-            logger.warning(f"메시지 길이 제한 적용: {len(message)} -> {self.MAX_MESSAGE_LENGTH}")
-            message = message[:self.MAX_MESSAGE_LENGTH]
-
-        # 세션 결정
-        logger.trace("세션 결정 시작 - Lock 획득 대기")
-        async with self._user_locks[user_id]:
-            logger.trace("Lock 획득됨")
-            session_id = self.sessions.get_current_session_id(user_id)
-            logger.trace(f"현재 세션: {session_id[:8] if session_id else 'None'}")
-
-            if not session_id:
-                logger.info("새 Claude 세션 생성 중...")
-                session_id = await self.claude.create_session()
-
-                if not session_id:
-                    logger.error("Claude 세션 생성 실패")
-                    await update.message.reply_text("❌ Claude 세션 생성 실패. 다시 시도해주세요.")
-                    clear_context()
-                    return
-
-                logger.trace(f"세션 저장 중 - session_id={session_id[:8]}")
-                self.sessions.create_session(user_id, session_id, message)
-                is_new_session = True
-            else:
-                is_new_session = False
-
-        # 세션 모델 가져오기
-        model = self.sessions.get_session_model(user_id, session_id)
-
-        # 세션 ID 컨텍스트 설정
-        set_session_id(session_id)
-        logger.info(f"세션 결정 완료 - model={model}, new={is_new_session}")
-
-        self._ensure_watchdog()
-
-        # 동시 요청 제한 체크
-        semaphore = self._user_semaphores[user_id]
-        logger.trace(f"Semaphore 상태 - locked={semaphore.locked()}")
-        if semaphore.locked():
-            active_count = self.get_active_task_count(user_id)
-            logger.warning(f"동시 요청 제한 - 활성 태스크: {active_count}개")
-            await update.message.reply_text(
-                f"⏳ 현재 {active_count}개 요청 처리 중입니다. 잠시 후 다시 시도해주세요."
-            )
-            clear_context()
-            return
-
-        logger.trace("typing 액션 전송")
-        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-
-        # 백그라운드에서 Claude 호출
-        logger.trace(f"백그라운드 태스크 생성 - model={model}")
-        task = asyncio.create_task(
-            self._process_claude_request_with_semaphore(
-                bot=context.bot,
-                chat_id=chat_id,
-                user_id=user_id,
-                session_id=session_id,
-                message=message,
-                is_new_session=is_new_session,
-                trace_id=trace_id,
-                model=model,
-            )
-        )
-        self._register_task(task, user_id, session_id, trace_id)
-        logger.trace("/ai 핸들러 종료 - 백그라운드 처리 중")
-        # 컨텍스트는 백그라운드 태스크에서 정리
-
+    @authorized_only
     async def auth_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /auth command."""
         chat_id = update.effective_chat.id
         self._setup_request_context(chat_id)
         logger.info("/auth 명령 수신")
-
-        if not self._is_authorized(chat_id):
-            logger.debug("/auth 거부 - 권한 없음")
-            await update.message.reply_text("⛔ 권한이 없습니다.")
-            clear_context()
-            return
 
         user_id = str(chat_id)
 
@@ -559,17 +419,12 @@ class BotHandlers:
 
         clear_context()
 
+    @authorized_only
     async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /status command."""
         chat_id = update.effective_chat.id
         self._setup_request_context(chat_id)
         logger.info("/status 명령 수신")
-
-        if not self._is_authorized(chat_id):
-            logger.debug("/status 거부 - 권한 없음")
-            await update.message.reply_text("⛔ 권한이 없습니다.")
-            clear_context()
-            return
 
         user_id = str(chat_id)
 
@@ -583,6 +438,10 @@ class BotHandlers:
 
         clear_context()
 
+    # ==================== 세션 명령어 ====================
+
+    @authorized_only
+    @authenticated_only
     async def new_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /new command.
 
@@ -618,19 +477,7 @@ class BotHandlers:
 
         logger.info(f"/new 명령 수신 - 새 세션 요청 (model={model}, name={session_name or '(없음)'})")
 
-        if not self._is_authorized(chat_id):
-            logger.debug("/new 거부 - 권한 없음")
-            await update.message.reply_text("⛔ 권한이 없습니다.")
-            clear_context()
-            return
-
-        if not self._is_authenticated(user_id):
-            logger.debug("/new 거부 - 인증 필요")
-            await update.message.reply_text("🔒 먼저 인증이 필요합니다.\n/auth <키>")
-            clear_context()
-            return
-
-        model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(model, "")
+        model_emoji = get_model_emoji(model)
         logger.trace("세션 생성 안내 메시지 전송")
         await update.message.reply_text(f"🔄 새 Claude 세션 생성 중... {model_emoji} {model}")
 
@@ -699,6 +546,8 @@ class BotHandlers:
         context.args = ["haiku"]
         await self.model_command(update, context)
 
+    @authorized_only
+    @authenticated_only
     async def model_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /model command - change current session's model.
 
@@ -714,18 +563,6 @@ class BotHandlers:
         user_id = str(chat_id)
         self._setup_request_context(chat_id)
         logger.info("/model 명령 수신")
-
-        if not self._is_authorized(chat_id):
-            logger.debug("/model 거부 - 권한 없음")
-            await update.message.reply_text("⛔ 권한이 없습니다.")
-            clear_context()
-            return
-
-        if not self._is_authenticated(user_id):
-            logger.debug("/model 거부 - 인증 필요")
-            await update.message.reply_text("🔒 먼저 인증이 필요합니다.\n/auth <키>")
-            clear_context()
-            return
 
         # 현재 세션 확인
         session_id = self.sessions.get_current_session_id(user_id)
@@ -746,7 +583,7 @@ class BotHandlers:
 
         # 인자 없으면 현재 모델 표시
         if not context.args:
-            model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(current_model, "")
+            model_emoji = get_model_emoji(current_model)
             logger.trace(f"현재 모델 표시: {current_model}")
             await update.message.reply_text(
                 f"🔧 <b>현재 모델</b>: {model_emoji} {current_model}\n\n"
@@ -770,7 +607,7 @@ class BotHandlers:
             return
 
         if new_model == current_model:
-            model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(current_model, "")
+            model_emoji = get_model_emoji(current_model)
             await update.message.reply_text(f"ℹ️ 이미 {model_emoji} {current_model} 모델입니다.")
             clear_context()
             return
@@ -782,7 +619,7 @@ class BotHandlers:
             self.sessions._save()
             logger.info(f"모델 변경: {current_model} -> {new_model}, session={session_id[:8]}")
 
-            model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(new_model, "")
+            model_emoji = get_model_emoji(new_model)
             await update.message.reply_text(
                 f"✅ 모델 변경 완료!\n\n"
                 f"• 이전: {current_model}\n"
@@ -794,25 +631,15 @@ class BotHandlers:
 
         clear_context()
 
+    @authorized_only
+    @authenticated_only
     async def session_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /session command - show current session info."""
         chat_id = update.effective_chat.id
         self._setup_request_context(chat_id)
         logger.info("/session 명령 수신")
 
-        if not self._is_authorized(chat_id):
-            logger.debug("/session 거부 - 권한 없음")
-            await update.message.reply_text("⛔ 권한이 없습니다.")
-            clear_context()
-            return
-
         user_id = str(chat_id)
-
-        if not self._is_authenticated(user_id):
-            logger.debug("/session 거부 - 인증 필요")
-            await update.message.reply_text("🔒 먼저 인증이 필요합니다.\n/auth <키>")
-            clear_context()
-            return
 
         logger.trace("현재 세션 조회 중")
         session_id = self.sessions.get_current_session_id(user_id)
@@ -831,7 +658,7 @@ class BotHandlers:
         history = self.sessions.get_session_history(user_id, session_id)
         count = len(history)
         model = self.sessions.get_session_model(user_id, session_id)
-        model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(model, "")
+        model_emoji = get_model_emoji(model)
         session_name = self.sessions.get_session_name(user_id, session_id)
         logger.trace(f"히스토리 수: {count}, 모델: {model}, 이름: {session_name or '(없음)'}")
 
@@ -862,25 +689,15 @@ class BotHandlers:
         logger.trace("/session 완료")
         clear_context()
 
+    @authorized_only
+    @authenticated_only
     async def session_list_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /session_list command."""
         chat_id = update.effective_chat.id
         self._setup_request_context(chat_id)
         logger.info("/session_list 명령 수신")
 
-        if not self._is_authorized(chat_id):
-            logger.debug("/session_list 거부 - 권한 없음")
-            await update.message.reply_text("⛔ 권한이 없습니다.")
-            clear_context()
-            return
-
         user_id = str(chat_id)
-
-        if not self._is_authenticated(user_id):
-            logger.debug("/session_list 거부 - 인증 필요")
-            await update.message.reply_text("🔒 먼저 인증이 필요합니다.\n/auth <키>")
-            clear_context()
-            return
 
         logger.trace("세션 목록 조회 중")
         sessions = self.sessions.list_sessions(user_id)
@@ -943,24 +760,14 @@ class BotHandlers:
         logger.trace("/session_list 완료")
         clear_context()
 
+    @authorized_only
+    @authenticated_only
     async def switch_session_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /s_<id> command for session switching."""
         chat_id = update.effective_chat.id
         self._setup_request_context(chat_id)
 
-        if not self._is_authorized(chat_id):
-            logger.debug("세션 전환 거부 - 권한 없음")
-            await update.message.reply_text("⛔ 권한이 없습니다.")
-            clear_context()
-            return
-
         user_id = str(chat_id)
-
-        if not self._is_authenticated(user_id):
-            logger.debug("세션 전환 거부 - 인증 필요")
-            await update.message.reply_text("🔒 먼저 인증이 필요합니다.\n/auth <키>")
-            clear_context()
-            return
 
         text = update.message.text
         if not text.startswith("/s_"):
@@ -993,6 +800,161 @@ class BotHandlers:
 
         clear_context()
 
+    @authorized_only
+    @authenticated_only
+    async def rename_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /rename command - rename current session."""
+        chat_id = update.effective_chat.id
+        user_id = str(chat_id)
+        self._setup_request_context(chat_id)
+        logger.info("/rename 명령 수신")
+
+        session_id = self.sessions.get_current_session_id(user_id)
+        if not session_id:
+            logger.trace("활성 세션 없음")
+            await update.message.reply_text("📭 활성 세션이 없습니다.")
+            clear_context()
+            return
+
+        # /rename_새이름 형태 지원
+        text = update.message.text
+        if text.startswith("/rename_"):
+            new_name = text[8:]  # /rename_ 이후 전체
+        elif context.args:
+            new_name = " ".join(context.args)
+        else:
+            current_name = self.sessions.get_session_name(user_id, session_id)
+            logger.trace(f"현재 이름: {current_name or '(없음)'}")
+            await update.message.reply_text(
+                f"✏️ <b>세션 이름 변경</b>\n\n"
+                f"• 현재: {current_name or '(이름 없음)'}\n"
+                f"• 세션: <code>{session_id[:8]}</code>\n\n"
+                f"사용법: <code>/rename_새이름</code>",
+                parse_mode="HTML"
+            )
+            clear_context()
+            return
+        if len(new_name) > 50:
+            await update.message.reply_text("❌ 이름이 너무 깁니다. (최대 50자)")
+            clear_context()
+            return
+
+        if self.sessions.rename_session(user_id, session_id, new_name):
+            await update.message.reply_text(
+                f"✅ 세션 이름 변경 완료!\n\n"
+                f"• 세션: <code>{session_id[:8]}</code>\n"
+                f"• 이름: {new_name}",
+                parse_mode="HTML"
+            )
+        else:
+            await update.message.reply_text("❌ 이름 변경 실패")
+
+        clear_context()
+
+    @authorized_only
+    @authenticated_only
+    async def delete_session_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /d_<id> command for deleting a session."""
+        chat_id = update.effective_chat.id
+        user_id = str(chat_id)
+        self._setup_request_context(chat_id)
+
+        text = update.message.text
+        if text.startswith("/delete_"):
+            target = text[8:]  # /delete_xxxxx
+        elif text.startswith("/d_"):
+            target = text[3:]  # /d_xxxxx
+        else:
+            clear_context()
+            return
+
+        logger.info(f"세션 삭제 요청: {target}")
+
+        target_info = self.sessions.get_session_by_prefix(user_id, target)
+        if not target_info:
+            logger.debug(f"세션 없음: {target}")
+            await update.message.reply_text(f"❌ 세션 '{target}'을 찾을 수 없습니다.")
+            clear_context()
+            return
+
+        full_session_id = target_info["full_session_id"]
+        session_name = target_info.get("name", "")
+
+        if self.sessions.delete_session(user_id, full_session_id):
+            name_info = f" ({session_name})" if session_name else ""
+            await update.message.reply_text(
+                f"🗑️ 세션 삭제 완료!\n\n"
+                f"• ID: <code>{target_info['session_id']}</code>{name_info}\n"
+                f"• 질문: {target_info['history_count']}개",
+                parse_mode="HTML"
+            )
+        else:
+            await update.message.reply_text("❌ 세션 삭제 실패")
+
+        clear_context()
+
+    @authorized_only
+    @authenticated_only
+    async def history_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /h_<id> command for viewing session history."""
+        chat_id = update.effective_chat.id
+        self._setup_request_context(chat_id)
+
+        user_id = str(chat_id)
+
+        text = update.message.text
+        if text.startswith("/history_"):
+            target = text[9:]  # /history_xxxxx
+        elif text.startswith("/h_"):
+            target = text[3:]  # /h_xxxxx
+        else:
+            clear_context()
+            return
+
+        logger.info(f"히스토리 조회 요청: {target}")
+
+        logger.trace(f"세션 검색 중 - prefix={target}")
+        target_info = self.sessions.get_session_by_prefix(user_id, target)
+        if not target_info:
+            logger.debug(f"세션 없음: {target}")
+            await update.message.reply_text(f"❌ 세션 '{target}'을 찾을 수 없습니다.")
+            clear_context()
+            return
+
+        # 히스토리 조회
+        logger.trace(f"히스토리 조회 - session={target_info['full_session_id'][:8]}")
+        history = self.sessions.get_session_history(user_id, target_info["full_session_id"])
+        if not history:
+            logger.trace("히스토리 없음")
+            await update.message.reply_text("📭 히스토리가 없습니다.")
+            clear_context()
+            return
+
+        logger.trace(f"히스토리 수: {len(history)}")
+
+        # 히스토리 포맷팅
+        history_lines = []
+        for i, q in enumerate(history, start=1):
+            short_q = truncate_message(q, 60)
+            history_lines.append(f"{i}. {short_q}")
+
+        history_text = "\n".join(history_lines)
+
+        await update.message.reply_text(
+            f"📜 <b>세션 히스토리</b>\n"
+            f"• ID: <code>{target_info['session_id']}</code>\n"
+            f"• 질문: {len(history)}개\n\n"
+            f"{history_text}\n\n"
+            f"/s_{target_info['session_id']} 세션이동",
+            parse_mode="HTML"
+        )
+        logger.trace("히스토리 조회 완료")
+        clear_context()
+
+    # ==================== 매니저 명령어 ====================
+
+    @authorized_only
+    @authenticated_only
     async def manager_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /m command - manager session.
 
@@ -1004,18 +966,6 @@ class BotHandlers:
         user_id = str(chat_id)
         trace_id = self._setup_request_context(chat_id)
         logger.info("/m 명령 수신")
-
-        if not self._is_authorized(chat_id):
-            logger.debug("/m 거부 - 권한 없음")
-            await update.message.reply_text("⛔ 권한이 없습니다.")
-            clear_context()
-            return
-
-        if not self._is_authenticated(user_id):
-            logger.debug("/m 거부 - 인증 필요")
-            await update.message.reply_text("🔒 먼저 인증이 필요합니다.\n/auth <키>")
-            clear_context()
-            return
 
         # 매니저 세션 확인/생성 (기존 haiku/sonnet이면 opus로 재생성)
         manager_session_id = self.sessions.get_manager_session_id(user_id)
@@ -1080,17 +1030,13 @@ class BotHandlers:
         logger.info(f"매니저 모드 전환됨")
         clear_context()
 
+    @authorized_only
     async def back_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /back command - return to previous session."""
         chat_id = update.effective_chat.id
         user_id = str(chat_id)
         self._setup_request_context(chat_id)
         logger.info("/back 명령 수신")
-
-        if not self._is_authorized(chat_id):
-            await update.message.reply_text("⛔ 권한이 없습니다.")
-            clear_context()
-            return
 
         prev_session_id = self.sessions.get_previous_session_id(user_id)
         if not prev_session_id:
@@ -1122,17 +1068,13 @@ class BotHandlers:
         )
         clear_context()
 
+    @authorized_only
     async def exit_manager_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /exit command - exit manager mode."""
         chat_id = update.effective_chat.id
         user_id = str(chat_id)
         self._setup_request_context(chat_id)
         logger.info("/exit 명령 수신")
-
-        if not self._is_authorized(chat_id):
-            await update.message.reply_text("⛔ 권한이 없습니다.")
-            clear_context()
-            return
 
         # 매니저 세션인지 확인
         current_session_id = self.sessions.get_current_session_id(user_id)
@@ -1165,186 +1107,106 @@ class BotHandlers:
 
         clear_context()
 
-    async def rename_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /rename command - rename current session."""
+    # ==================== /ai 명령어 ====================
+
+    @authorized_only
+    @authenticated_only
+    async def ai_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /ai command - force Claude conversation (bypass plugins)."""
         chat_id = update.effective_chat.id
+        trace_id = self._setup_request_context(chat_id)
+        logger.info("/ai 명령 수신")
+
         user_id = str(chat_id)
-        self._setup_request_context(chat_id)
-        logger.info("/rename 명령 수신")
 
-        if not self._is_authorized(chat_id):
-            logger.debug("/rename 거부 - 권한 없음")
-            await update.message.reply_text("⛔ 권한이 없습니다.")
-            clear_context()
-            return
-
-        if not self._is_authenticated(user_id):
-            logger.debug("/rename 거부 - 인증 필요")
-            await update.message.reply_text("🔒 먼저 인증이 필요합니다.\n/auth <키>")
-            clear_context()
-            return
-
-        session_id = self.sessions.get_current_session_id(user_id)
-        if not session_id:
-            logger.trace("활성 세션 없음")
-            await update.message.reply_text("📭 활성 세션이 없습니다.")
-            clear_context()
-            return
-
-        # /rename_새이름 형태 지원
-        text = update.message.text
-        if text.startswith("/rename_"):
-            new_name = text[8:]  # /rename_ 이후 전체
-        elif context.args:
-            new_name = " ".join(context.args)
-        else:
-            current_name = self.sessions.get_session_name(user_id, session_id)
-            logger.trace(f"현재 이름: {current_name or '(없음)'}")
+        # /ai 뒤의 메시지 추출
+        if not context.args:
+            logger.trace("/ai 인자 없음 - 사용법 표시")
             await update.message.reply_text(
-                f"✏️ <b>세션 이름 변경</b>\n\n"
-                f"• 현재: {current_name or '(이름 없음)'}\n"
-                f"• 세션: <code>{session_id[:8]}</code>\n\n"
-                f"사용법: <code>/rename_새이름</code>",
+                "🤖 <b>/ai 사용법</b>\n\n"
+                "<code>/ai 질문내용</code>\n\n"
+                "플러그인을 건너뛰고 Claude에게 직접 질문합니다.",
                 parse_mode="HTML"
             )
             clear_context()
             return
-        if len(new_name) > 50:
-            await update.message.reply_text("❌ 이름이 너무 깁니다. (최대 50자)")
-            clear_context()
-            return
 
-        if self.sessions.rename_session(user_id, session_id, new_name):
+        message = " ".join(context.args)
+        short_msg = message[:50] + "..." if len(message) > 50 else message
+        logger.info(f"/ai 메시지: '{short_msg}'")
+        logger.trace(f"전체 메시지 길이: {len(message)}")
+
+        # 메시지 길이 제한
+        if len(message) > MAX_MESSAGE_LENGTH:
+            logger.warning(f"메시지 길이 제한 적용: {len(message)} -> {MAX_MESSAGE_LENGTH}")
+            message = message[:MAX_MESSAGE_LENGTH]
+
+        # 세션 결정
+        logger.trace("세션 결정 시작 - Lock 획득 대기")
+        async with self._user_locks[user_id]:
+            logger.trace("Lock 획득됨")
+            session_id = self.sessions.get_current_session_id(user_id)
+            logger.trace(f"현재 세션: {session_id[:8] if session_id else 'None'}")
+
+            if not session_id:
+                logger.info("새 Claude 세션 생성 중...")
+                session_id = await self.claude.create_session()
+
+                if not session_id:
+                    logger.error("Claude 세션 생성 실패")
+                    await update.message.reply_text("❌ Claude 세션 생성 실패. 다시 시도해주세요.")
+                    clear_context()
+                    return
+
+                logger.trace(f"세션 저장 중 - session_id={session_id[:8]}")
+                self.sessions.create_session(user_id, session_id, message)
+                is_new_session = True
+            else:
+                is_new_session = False
+
+        # 세션 모델 가져오기
+        model = self.sessions.get_session_model(user_id, session_id)
+
+        # 세션 ID 컨텍스트 설정
+        set_session_id(session_id)
+        logger.info(f"세션 결정 완료 - model={model}, new={is_new_session}")
+
+        self._ensure_watchdog()
+
+        # 동시 요청 제한 체크
+        semaphore = self._user_semaphores[user_id]
+        logger.trace(f"Semaphore 상태 - locked={semaphore.locked()}")
+        if semaphore.locked():
+            active_count = self.get_active_task_count(user_id)
+            logger.warning(f"동시 요청 제한 - 활성 태스크: {active_count}개")
             await update.message.reply_text(
-                f"✅ 세션 이름 변경 완료!\n\n"
-                f"• 세션: <code>{session_id[:8]}</code>\n"
-                f"• 이름: {new_name}",
-                parse_mode="HTML"
+                f"⏳ 현재 {active_count}개 요청 처리 중입니다. 잠시 후 다시 시도해주세요."
             )
-        else:
-            await update.message.reply_text("❌ 이름 변경 실패")
-
-        clear_context()
-
-    async def delete_session_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /d_<id> command for deleting a session."""
-        chat_id = update.effective_chat.id
-        user_id = str(chat_id)
-        self._setup_request_context(chat_id)
-
-        if not self._is_authorized(chat_id):
-            logger.debug("세션 삭제 거부 - 권한 없음")
-            await update.message.reply_text("⛔ 권한이 없습니다.")
             clear_context()
             return
 
-        if not self._is_authenticated(user_id):
-            logger.debug("세션 삭제 거부 - 인증 필요")
-            await update.message.reply_text("🔒 먼저 인증이 필요합니다.\n/auth <키>")
-            clear_context()
-            return
+        logger.trace("typing 액션 전송")
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
-        text = update.message.text
-        if text.startswith("/delete_"):
-            target = text[8:]  # /delete_xxxxx
-        elif text.startswith("/d_"):
-            target = text[3:]  # /d_xxxxx
-        else:
-            clear_context()
-            return
-
-        logger.info(f"세션 삭제 요청: {target}")
-
-        target_info = self.sessions.get_session_by_prefix(user_id, target)
-        if not target_info:
-            logger.debug(f"세션 없음: {target}")
-            await update.message.reply_text(f"❌ 세션 '{target}'을 찾을 수 없습니다.")
-            clear_context()
-            return
-
-        full_session_id = target_info["full_session_id"]
-        session_name = target_info.get("name", "")
-
-        if self.sessions.delete_session(user_id, full_session_id):
-            name_info = f" ({session_name})" if session_name else ""
-            await update.message.reply_text(
-                f"🗑️ 세션 삭제 완료!\n\n"
-                f"• ID: <code>{target_info['session_id']}</code>{name_info}\n"
-                f"• 질문: {target_info['history_count']}개",
-                parse_mode="HTML"
+        # 백그라운드에서 Claude 호출
+        logger.trace(f"백그라운드 태스크 생성 - model={model}")
+        task = asyncio.create_task(
+            self._process_claude_request_with_semaphore(
+                bot=context.bot,
+                chat_id=chat_id,
+                user_id=user_id,
+                session_id=session_id,
+                message=message,
+                is_new_session=is_new_session,
+                trace_id=trace_id,
+                model=model,
             )
-        else:
-            await update.message.reply_text("❌ 세션 삭제 실패")
-
-        clear_context()
-
-    async def history_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /h_<id> command for viewing session history."""
-        chat_id = update.effective_chat.id
-        self._setup_request_context(chat_id)
-
-        if not self._is_authorized(chat_id):
-            logger.debug("히스토리 조회 거부 - 권한 없음")
-            await update.message.reply_text("⛔ 권한이 없습니다.")
-            clear_context()
-            return
-
-        user_id = str(chat_id)
-
-        if not self._is_authenticated(user_id):
-            logger.debug("히스토리 조회 거부 - 인증 필요")
-            await update.message.reply_text("🔒 먼저 인증이 필요합니다.\n/auth <키>")
-            clear_context()
-            return
-
-        text = update.message.text
-        if text.startswith("/history_"):
-            target = text[9:]  # /history_xxxxx
-        elif text.startswith("/h_"):
-            target = text[3:]  # /h_xxxxx
-        else:
-            clear_context()
-            return
-
-        logger.info(f"히스토리 조회 요청: {target}")
-
-        logger.trace(f"세션 검색 중 - prefix={target}")
-        target_info = self.sessions.get_session_by_prefix(user_id, target)
-        if not target_info:
-            logger.debug(f"세션 없음: {target}")
-            await update.message.reply_text(f"❌ 세션 '{target}'을 찾을 수 없습니다.")
-            clear_context()
-            return
-
-        # 히스토리 조회
-        logger.trace(f"히스토리 조회 - session={target_info['full_session_id'][:8]}")
-        history = self.sessions.get_session_history(user_id, target_info["full_session_id"])
-        if not history:
-            logger.trace("히스토리 없음")
-            await update.message.reply_text("📭 히스토리가 없습니다.")
-            clear_context()
-            return
-
-        logger.trace(f"히스토리 수: {len(history)}")
-
-        # 히스토리 포맷팅
-        history_lines = []
-        for i, q in enumerate(history, start=1):
-            short_q = truncate_message(q, 60)
-            history_lines.append(f"{i}. {short_q}")
-
-        history_text = "\n".join(history_lines)
-
-        await update.message.reply_text(
-            f"📜 <b>세션 히스토리</b>\n"
-            f"• ID: <code>{target_info['session_id']}</code>\n"
-            f"• 질문: {len(history)}개\n\n"
-            f"{history_text}\n\n"
-            f"/s_{target_info['session_id']} 세션이동",
-            parse_mode="HTML"
         )
-        logger.trace("히스토리 조회 완료")
-        clear_context()
+        self._register_task(task, user_id, session_id, trace_id)
+        logger.trace("/ai 핸들러 종료 - 백그라운드 처리 중")
+        # 컨텍스트는 백그라운드 태스크에서 정리
+
+    # ==================== 메시지 처리 ====================
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle regular text messages.
@@ -1371,10 +1233,10 @@ class BotHandlers:
             return
 
         # 메시지 길이 제한 (DoS 방지)
-        if len(message) > self.MAX_MESSAGE_LENGTH:
+        if len(message) > MAX_MESSAGE_LENGTH:
             original_len = len(message)
-            message = message[:self.MAX_MESSAGE_LENGTH]
-            logger.warning(f"메시지 길이 제한 적용: {original_len} -> {self.MAX_MESSAGE_LENGTH}")
+            message = message[:MAX_MESSAGE_LENGTH]
+            logger.warning(f"메시지 길이 제한 적용: {original_len} -> {MAX_MESSAGE_LENGTH}")
 
         # 플러그인 처리 시도 (인증 전에 처리 - 플러그인은 인증 불필요)
         if self.plugins:
@@ -1586,78 +1448,12 @@ class BotHandlers:
             # ACTION 패턴 처리 (매니저 세션)
             action_results = []
             if is_manager and response:
-                # DELETE 액션 처리 (include_deleted=True로 soft-deleted 세션도 찾음)
-                for match in ACTION_DELETE_PATTERN.finditer(response):
-                    target_id = match.group(1)
-                    logger.info(f"ACTION:DELETE 감지 - target={target_id}")
-                    target_info = self.sessions.get_session_by_prefix(user_id, target_id, include_deleted=True)
-                    if target_info:
-                        if self.sessions.hard_delete_session(user_id, target_info["full_session_id"]):
-                            action_results.append(f"✅ {target_id} 삭제됨")
-                            logger.info(f"ACTION:DELETE 성공 - {target_id}")
-                        else:
-                            action_results.append(f"❌ {target_id} 삭제 실패")
-                            logger.warning(f"ACTION:DELETE 실패 - {target_id}")
-                    else:
-                        action_results.append(f"❌ {target_id} 찾을 수 없음")
-                        logger.warning(f"ACTION:DELETE 세션 없음 - {target_id}")
-
-                # RENAME 액션 처리
-                for match in ACTION_RENAME_PATTERN.finditer(response):
-                    target_id = match.group(1)
-                    new_name = match.group(2).strip()
-                    logger.info(f"ACTION:RENAME 감지 - target={target_id}, name={new_name}")
-                    target_info = self.sessions.get_session_by_prefix(user_id, target_id, include_deleted=True)
-                    if target_info:
-                        if self.sessions.rename_session(user_id, target_info["full_session_id"], new_name):
-                            action_results.append(f"✅ {target_id} → {new_name}")
-                            logger.info(f"ACTION:RENAME 성공 - {target_id} -> {new_name}")
-                        else:
-                            action_results.append(f"❌ {target_id} 이름 변경 실패")
-                            logger.warning(f"ACTION:RENAME 실패 - {target_id}")
-                    else:
-                        action_results.append(f"❌ {target_id} 찾을 수 없음")
-                        logger.warning(f"ACTION:RENAME 세션 없음 - {target_id}")
-
-                # CREATE 액션 처리 (새 세션 생성 - 매니저 세션 유지)
-                for match in ACTION_CREATE_PATTERN.finditer(response):
-                    model = match.group(1)
-                    name = match.group(2).strip()
-                    logger.info(f"ACTION:CREATE 감지 - model={model}, name={name}")
-                    try:
-                        new_session_id = await self.claude.create_session()
-                        if new_session_id:
-                            # 세션 생성 (current 변경 없이)
-                            self.sessions.create_session_without_switch(user_id, new_session_id, f"(매니저가 생성: {name})", model=model, name=name)
-                            action_results.append(f"✅ 생성: {new_session_id[:8]} ({name}, {model})")
-                            logger.info(f"ACTION:CREATE 성공 - {new_session_id[:8]}, model={model}, name={name}")
-                        else:
-                            action_results.append(f"❌ 세션 생성 실패")
-                            logger.warning(f"ACTION:CREATE 실패 - Claude 세션 생성 오류")
-                    except Exception as e:
-                        action_results.append(f"❌ 세션 생성 오류: {e}")
-                        logger.error(f"ACTION:CREATE 예외 - {e}")
-
-                # SWITCH 액션 처리 (세션 전환)
-                for match in ACTION_SWITCH_PATTERN.finditer(response):
-                    target_id = match.group(1)
-                    logger.info(f"ACTION:SWITCH 감지 - target={target_id}")
-                    target_info = self.sessions.get_session_by_prefix(user_id, target_id)
-                    if target_info:
-                        self.sessions.set_current(user_id, target_info["full_session_id"])
-                        self.sessions.set_previous_session_id(user_id, session_id)  # 매니저를 이전 세션으로
-                        action_results.append(f"✅ 전환됨: {target_id}")
-                        logger.info(f"ACTION:SWITCH 성공 - {target_id}")
-                    else:
-                        action_results.append(f"❌ {target_id} 찾을 수 없음")
-                        logger.warning(f"ACTION:SWITCH 세션 없음 - {target_id}")
+                action_results = await self._process_manager_actions(
+                    user_id, session_id, response
+                )
 
                 # ACTION 태그 제거 (사용자에게는 깔끔하게 표시)
-                response = ACTION_DELETE_PATTERN.sub('', response)
-                response = ACTION_RENAME_PATTERN.sub('', response)
-                response = ACTION_CREATE_PATTERN.sub('', response)
-                response = ACTION_SWITCH_PATTERN.sub('', response)
-                response = response.strip()
+                response = remove_action_tags(response)
 
                 # 액션 결과 추가
                 if action_results:
@@ -1695,6 +1491,80 @@ class BotHandlers:
                 chat_id=chat_id,
                 text="❌ 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
             )
+
+    async def _process_manager_actions(
+        self, user_id: str, session_id: str, response: str
+    ) -> list[str]:
+        """매니저 응답에서 ACTION 패턴을 처리하고 결과 반환."""
+        action_results = []
+
+        # DELETE 액션 처리 (include_deleted=True로 soft-deleted 세션도 찾음)
+        for match in ACTION_DELETE_PATTERN.finditer(response):
+            target_id = match.group(1)
+            logger.info(f"ACTION:DELETE 감지 - target={target_id}")
+            target_info = self.sessions.get_session_by_prefix(user_id, target_id, include_deleted=True)
+            if target_info:
+                if self.sessions.hard_delete_session(user_id, target_info["full_session_id"]):
+                    action_results.append(f"✅ {target_id} 삭제됨")
+                    logger.info(f"ACTION:DELETE 성공 - {target_id}")
+                else:
+                    action_results.append(f"❌ {target_id} 삭제 실패")
+                    logger.warning(f"ACTION:DELETE 실패 - {target_id}")
+            else:
+                action_results.append(f"❌ {target_id} 찾을 수 없음")
+                logger.warning(f"ACTION:DELETE 세션 없음 - {target_id}")
+
+        # RENAME 액션 처리
+        for match in ACTION_RENAME_PATTERN.finditer(response):
+            target_id = match.group(1)
+            new_name = match.group(2).strip()
+            logger.info(f"ACTION:RENAME 감지 - target={target_id}, name={new_name}")
+            target_info = self.sessions.get_session_by_prefix(user_id, target_id, include_deleted=True)
+            if target_info:
+                if self.sessions.rename_session(user_id, target_info["full_session_id"], new_name):
+                    action_results.append(f"✅ {target_id} → {new_name}")
+                    logger.info(f"ACTION:RENAME 성공 - {target_id} -> {new_name}")
+                else:
+                    action_results.append(f"❌ {target_id} 이름 변경 실패")
+                    logger.warning(f"ACTION:RENAME 실패 - {target_id}")
+            else:
+                action_results.append(f"❌ {target_id} 찾을 수 없음")
+                logger.warning(f"ACTION:RENAME 세션 없음 - {target_id}")
+
+        # CREATE 액션 처리 (새 세션 생성 - 매니저 세션 유지)
+        for match in ACTION_CREATE_PATTERN.finditer(response):
+            model = match.group(1)
+            name = match.group(2).strip()
+            logger.info(f"ACTION:CREATE 감지 - model={model}, name={name}")
+            try:
+                new_session_id = await self.claude.create_session()
+                if new_session_id:
+                    # 세션 생성 (current 변경 없이)
+                    self.sessions.create_session_without_switch(user_id, new_session_id, f"(매니저가 생성: {name})", model=model, name=name)
+                    action_results.append(f"✅ 생성: {new_session_id[:8]} ({name}, {model})")
+                    logger.info(f"ACTION:CREATE 성공 - {new_session_id[:8]}, model={model}, name={name}")
+                else:
+                    action_results.append(f"❌ 세션 생성 실패")
+                    logger.warning(f"ACTION:CREATE 실패 - Claude 세션 생성 오류")
+            except Exception as e:
+                action_results.append(f"❌ 세션 생성 오류: {e}")
+                logger.error(f"ACTION:CREATE 예외 - {e}")
+
+        # SWITCH 액션 처리 (세션 전환)
+        for match in ACTION_SWITCH_PATTERN.finditer(response):
+            target_id = match.group(1)
+            logger.info(f"ACTION:SWITCH 감지 - target={target_id}")
+            target_info = self.sessions.get_session_by_prefix(user_id, target_id)
+            if target_info:
+                self.sessions.set_current(user_id, target_info["full_session_id"])
+                self.sessions.set_previous_session_id(user_id, session_id)  # 매니저를 이전 세션으로
+                action_results.append(f"✅ 전환됨: {target_id}")
+                logger.info(f"ACTION:SWITCH 성공 - {target_id}")
+            else:
+                action_results.append(f"❌ {target_id} 찾을 수 없음")
+                logger.warning(f"ACTION:SWITCH 세션 없음 - {target_id}")
+
+        return action_results
 
     async def _send_message_to_chat(
         self,
@@ -1746,6 +1616,8 @@ class BotHandlers:
                 await update.message.reply_text(chunk, parse_mode="HTML")
             except Exception:
                 await update.message.reply_text(chunk)
+
+    # ==================== 오류 처리 ====================
 
     async def unknown_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle unknown commands starting with /."""
