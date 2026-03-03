@@ -8,12 +8,21 @@ from typing import Optional, TypedDict
 from src.logging_config import logger
 
 
+class HistoryEntry(TypedDict):
+    """Type definition for history entry."""
+
+    message: str  # 사용자 메시지
+    timestamp: str  # ISO format
+    processed: bool  # 처리 완료 여부
+    processor: str  # 처리자: "command", "plugin:{name}", "claude", "rejected"
+
+
 class SessionData(TypedDict):
     """Type definition for session data structure."""
 
     created_at: str
     last_used: str
-    history: list[str]
+    history: list[HistoryEntry]  # 객체 리스트로 변경
     model: str  # opus, sonnet, haiku
     name: str  # 사용자 지정 세션 이름 (선택)
     deleted: bool  # soft delete 상태
@@ -138,7 +147,7 @@ class SessionStore:
         logger.trace(f"유효한 세션 반환 - {session_id[:8]}")
         return session_id
 
-    def create_session(self, user_id: str, session_id: str, first_message: str, model: str = None, name: str = "") -> None:
+    def create_session(self, user_id: str, session_id: str, first_message: str, model: str = None, name: str = "", processor: str = "claude") -> None:
         """Create a new session with Claude's session_id."""
         model = model or DEFAULT_MODEL
         logger.trace(f"create_session() - user={user_id}, session={session_id[:8]}, model={model}, name={name or '(없음)'}")
@@ -147,11 +156,18 @@ class SessionStore:
         user_data = self._ensure_user(user_id)
         now = datetime.now().isoformat()
 
+        first_entry: HistoryEntry = {
+            "message": first_message,
+            "timestamp": now,
+            "processed": True,
+            "processor": processor,
+        }
+
         user_data["current"] = session_id
         user_data["sessions"][session_id] = {
             "created_at": now,
             "last_used": now,
-            "history": [first_message],
+            "history": [first_entry],
             "model": model,
             "name": name,
         }
@@ -159,7 +175,7 @@ class SessionStore:
         self._save()
         logger.info(f"세션 생성됨 - user={user_id}, session={session_id[:8]}, model={model}, name={name or '(없음)'}")
 
-    def create_session_without_switch(self, user_id: str, session_id: str, first_message: str, model: str = None, name: str = "") -> None:
+    def create_session_without_switch(self, user_id: str, session_id: str, first_message: str, model: str = None, name: str = "", processor: str = "claude") -> None:
         """Create a new session WITHOUT switching current (for manager use)."""
         model = model or DEFAULT_MODEL
         logger.trace(f"create_session_without_switch() - user={user_id}, session={session_id[:8]}, model={model}, name={name or '(없음)'}")
@@ -167,11 +183,18 @@ class SessionStore:
         user_data = self._ensure_user(user_id)
         now = datetime.now().isoformat()
 
+        first_entry: HistoryEntry = {
+            "message": first_message,
+            "timestamp": now,
+            "processed": True,
+            "processor": processor,
+        }
+
         # current는 변경하지 않음!
         user_data["sessions"][session_id] = {
             "created_at": now,
             "last_used": now,
-            "history": [first_message],
+            "history": [first_entry],
             "model": model,
             "name": name,
         }
@@ -179,10 +202,10 @@ class SessionStore:
         self._save()
         logger.info(f"세션 생성됨 (전환없음) - user={user_id}, session={session_id[:8]}, model={model}, name={name or '(없음)'}")
 
-    def add_message(self, user_id: str, session_id: str, message: str) -> None:
+    def add_message(self, user_id: str, session_id: str, message: str, processor: str = "claude") -> None:
         """Add a message to specific session (not current!)."""
         short_msg = message[:30] + "..." if len(message) > 30 else message
-        logger.trace(f"add_message() - user={user_id}, session={session_id[:8]}")
+        logger.trace(f"add_message() - user={user_id}, session={session_id[:8]}, processor={processor}")
         logger.trace(f"message='{short_msg}'")
 
         user_data = self._data.get(user_id)
@@ -195,11 +218,19 @@ class SessionStore:
             logger.warning(f"메시지 추가 실패 - 세션 없음: {session_id[:8]}")
             return
 
-        session["last_used"] = datetime.now().isoformat()
-        session["history"].append(message)
+        now = datetime.now().isoformat()
+        entry: HistoryEntry = {
+            "message": message,
+            "timestamp": now,
+            "processed": True,
+            "processor": processor,
+        }
+
+        session["last_used"] = now
+        session["history"].append(entry)
         history_count = len(session["history"])
 
-        logger.trace(f"메시지 추가됨 - 총 {history_count}개")
+        logger.trace(f"메시지 추가됨 - 총 {history_count}개, processor={processor}")
         self._save()
 
     def set_current(self, user_id: str, session_id: str) -> None:
@@ -356,7 +387,7 @@ class SessionStore:
         return None
 
     def get_session_history(self, user_id: str, session_id: str) -> list[str]:
-        """Get history for a specific session."""
+        """Get history messages for a specific session (backward compatible - returns strings)."""
         logger.trace(f"get_session_history() - user={user_id}, session={session_id[:8] if session_id else 'None'}")
 
         user_data = self._data.get(user_id)
@@ -365,9 +396,48 @@ class SessionStore:
             return []
 
         session = user_data.get("sessions", {}).get(session_id)
-        history = session.get("history", []) if session else []
-        logger.trace(f"히스토리 반환: {len(history)}개")
-        return history
+        raw_history = session.get("history", []) if session else []
+
+        # 하위 호환성: 문자열이면 그대로, 객체면 message만 추출
+        messages = []
+        for item in raw_history:
+            if isinstance(item, str):
+                messages.append(item)
+            elif isinstance(item, dict):
+                messages.append(item.get("message", ""))
+            else:
+                messages.append(str(item))
+
+        logger.trace(f"히스토리 반환: {len(messages)}개")
+        return messages
+
+    def get_session_history_entries(self, user_id: str, session_id: str) -> list[HistoryEntry]:
+        """Get full history entries for a specific session (with metadata)."""
+        logger.trace(f"get_session_history_entries() - user={user_id}, session={session_id[:8] if session_id else 'None'}")
+
+        user_data = self._data.get(user_id)
+        if not user_data:
+            logger.trace("사용자 없음 -> []")
+            return []
+
+        session = user_data.get("sessions", {}).get(session_id)
+        raw_history = session.get("history", []) if session else []
+
+        # 하위 호환성: 문자열이면 객체로 변환
+        entries = []
+        for item in raw_history:
+            if isinstance(item, str):
+                entries.append({
+                    "message": item,
+                    "timestamp": "",
+                    "processed": True,
+                    "processor": "claude",  # 기존 데이터는 claude로 가정
+                })
+            elif isinstance(item, dict):
+                entries.append(item)
+
+        logger.trace(f"히스토리 엔트리 반환: {len(entries)}개")
+        return entries
 
     def rename_session(self, user_id: str, session_id: str, name: str) -> bool:
         """Rename a session."""
@@ -484,10 +554,17 @@ class SessionStore:
         user_data = self._ensure_user(user_id)
         now = datetime.now().isoformat()
 
+        first_entry: HistoryEntry = {
+            "message": "(매니저 세션 시작)",
+            "timestamp": now,
+            "processed": True,
+            "processor": "command",
+        }
+
         user_data["sessions"][session_id] = {
             "created_at": now,
             "last_used": now,
-            "history": ["(매니저 세션 시작)"],
+            "history": [first_entry],
             "model": model,
             "name": "📋 Manager",
             "is_manager": True,
