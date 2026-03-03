@@ -190,6 +190,7 @@ def create_app() -> Application:
     app.add_handler(CommandHandler("model_haiku", handlers.model_haiku_command))
     app.add_handler(CommandHandler("session", handlers.session_command))
     app.add_handler(CommandHandler("session_list", handlers.session_list_command))
+    app.add_handler(CommandHandler("sl", handlers.session_list_command))  # 단축 명령어
     app.add_handler(CommandHandler("m", handlers.manager_command))
     app.add_handler(CommandHandler("back", handlers.back_command))
     app.add_handler(CommandHandler("exit", handlers.exit_manager_command))
