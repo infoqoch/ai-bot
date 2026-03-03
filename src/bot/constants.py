@@ -7,6 +7,7 @@ import re
 ACTION_DELETE_PATTERN = re.compile(r'\[ACTION:DELETE:([a-zA-Z0-9]+)\]')
 ACTION_RENAME_PATTERN = re.compile(r'\[ACTION:RENAME:([a-zA-Z0-9]+):([^\]]+)\]')
 ACTION_CREATE_PATTERN = re.compile(r'\[ACTION:CREATE:(opus|sonnet|haiku):([^\]]+)\]')
+ACTION_CREATE_SWITCH_PATTERN = re.compile(r'\[ACTION:CREATE_AND_SWITCH:(opus|sonnet|haiku):([^\]]+)\]')
 ACTION_SWITCH_PATTERN = re.compile(r'\[ACTION:SWITCH:([a-zA-Z0-9]+)\]')
 
 # 메시지 제한
@@ -39,5 +40,6 @@ def remove_action_tags(text: str) -> str:
     result = ACTION_DELETE_PATTERN.sub('', result)
     result = ACTION_RENAME_PATTERN.sub('', result)
     result = ACTION_CREATE_PATTERN.sub('', result)
+    result = ACTION_CREATE_SWITCH_PATTERN.sub('', result)
     result = ACTION_SWITCH_PATTERN.sub('', result)
     return result.strip()

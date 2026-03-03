@@ -16,6 +16,7 @@ from .constants import (
     ACTION_DELETE_PATTERN,
     ACTION_RENAME_PATTERN,
     ACTION_CREATE_PATTERN,
+    ACTION_CREATE_SWITCH_PATTERN,
     ACTION_SWITCH_PATTERN,
     MAX_MESSAGE_LENGTH,
     WATCHDOG_INTERVAL_SECONDS,
@@ -33,6 +34,7 @@ __all__ = [
     "ACTION_DELETE_PATTERN",
     "ACTION_RENAME_PATTERN",
     "ACTION_CREATE_PATTERN",
+    "ACTION_CREATE_SWITCH_PATTERN",
     "ACTION_SWITCH_PATTERN",
     "BotHandlers",
 ]
@@ -1642,6 +1644,26 @@ class BotHandlers:
             except Exception as e:
                 action_results.append(f"❌ 세션 생성 오류: {e}")
                 logger.error(f"ACTION:CREATE 예외 - {e}")
+
+        # CREATE_AND_SWITCH 액션 처리 (새 세션 생성 후 즉시 전환)
+        for match in ACTION_CREATE_SWITCH_PATTERN.finditer(response):
+            model = match.group(1)
+            name = match.group(2).strip()
+            logger.info(f"ACTION:CREATE_AND_SWITCH 감지 - model={model}, name={name}")
+            try:
+                new_session_id = await self.claude.create_session()
+                if new_session_id:
+                    # 세션 생성 후 즉시 전환
+                    self.sessions.create_session(user_id, new_session_id, f"(매니저가 생성: {name})", model=model, name=name)
+                    self.sessions.set_previous_session_id(user_id, session_id)  # 매니저를 이전 세션으로
+                    action_results.append(f"✅ 생성+전환: {new_session_id[:8]} ({name}, {model})")
+                    logger.info(f"ACTION:CREATE_AND_SWITCH 성공 - {new_session_id[:8]}, model={model}, name={name}")
+                else:
+                    action_results.append(f"❌ 세션 생성 실패")
+                    logger.warning(f"ACTION:CREATE_AND_SWITCH 실패 - Claude 세션 생성 오류")
+            except Exception as e:
+                action_results.append(f"❌ 세션 생성 오류: {e}")
+                logger.error(f"ACTION:CREATE_AND_SWITCH 예외 - {e}")
 
         # SWITCH 액션 처리 (세션 전환)
         for match in ACTION_SWITCH_PATTERN.finditer(response):
