@@ -20,6 +20,7 @@ from .constants import (
     MAX_MESSAGE_LENGTH,
     WATCHDOG_INTERVAL_SECONDS,
     TASK_TIMEOUT_SECONDS,
+    LONG_TASK_THRESHOLD_SECONDS,
     get_model_emoji,
     remove_action_tags,
 )
@@ -1440,9 +1441,35 @@ class BotHandlers:
                 actual_message = self._build_manager_context(user_id, message)
                 logger.trace("매니저 세션 - 세션 정보 + 파일 경로 힌트 주입됨")
 
+            # 장시간 작업 알림 태스크
+            long_task_notified = False
+
+            async def notify_long_task():
+                nonlocal long_task_notified
+                await asyncio.sleep(LONG_TASK_THRESHOLD_SECONDS)
+                if not long_task_notified:
+                    long_task_notified = True
+                    elapsed_min = LONG_TASK_THRESHOLD_SECONDS // 60
+                    logger.info(f"장시간 작업 알림 - {elapsed_min}분 경과")
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=f"⏳ 작업이 {elapsed_min}분 이상 걸리고 있어요. 완료되면 알려드릴게요!"
+                    )
+
+            # 알림 태스크 시작
+            notify_task = asyncio.create_task(notify_long_task())
+
             # Claude 호출
             logger.trace(f"claude.chat() 호출 - model={model}")
-            response, error, _ = await self.claude.chat(actual_message, session_id, model=model)
+            try:
+                response, error, _ = await self.claude.chat(actual_message, session_id, model=model)
+            finally:
+                # Claude 완료 시 알림 태스크 취소
+                notify_task.cancel()
+                try:
+                    await notify_task
+                except asyncio.CancelledError:
+                    pass
 
             elapsed = time.time() - start_time
             logger.info(f"Claude 응답 완료 - session={session_id[:8]}, elapsed={elapsed:.1f}s, length={len(response)}")
@@ -1499,6 +1526,15 @@ class BotHandlers:
 
             full_response = prefix + response + suffix
             logger.trace(f"최종 응답 길이: {len(full_response)}")
+
+            # 장시간 작업 완료 알림 (5분 넘게 걸렸으면)
+            if long_task_notified:
+                elapsed_min = int(elapsed // 60)
+                elapsed_sec = int(elapsed % 60)
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=f"✅ 작업 완료! ({elapsed_min}분 {elapsed_sec}초 소요)"
+                )
 
             # 응답 전송 (chat_id로 직접 전송)
             logger.trace("응답 전송 시작")
