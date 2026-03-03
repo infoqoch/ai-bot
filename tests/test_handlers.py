@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.bot.handlers import BotHandlers
+from src.bot.constants import MAX_MESSAGE_LENGTH
 
 
 @pytest.fixture
@@ -98,7 +99,7 @@ class TestBotHandlers:
 
     def test_max_message_length_constant(self, handlers):
         """메시지 최대 길이 상수 확인."""
-        assert handlers.MAX_MESSAGE_LENGTH == 4096
+        assert MAX_MESSAGE_LENGTH == 4096
 
     @pytest.mark.asyncio
     async def test_start_unauthorized(self, handlers):

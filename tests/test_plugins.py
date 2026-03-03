@@ -1,0 +1,329 @@
+"""플러그인 시스템 테스트.
+
+플러그인 로더 및 개별 플러그인 검증:
+- PluginLoader 로딩/리로딩
+- 메시지 처리 흐름
+- MemoPlugin 기능
+"""
+
+import json
+import tempfile
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from src.plugins.loader import Plugin, PluginLoader, PluginResult
+
+
+class MockPlugin(Plugin):
+    """테스트용 모의 플러그인."""
+
+    name = "mock"
+    description = "Mock plugin for testing"
+    usage = "Test usage"
+
+    def __init__(self, can_handle_result: bool = True, handle_result: str = "handled"):
+        self._can_handle_result = can_handle_result
+        self._handle_result = handle_result
+
+    async def can_handle(self, message: str, chat_id: int) -> bool:
+        return self._can_handle_result
+
+    async def handle(self, message: str, chat_id: int) -> PluginResult:
+        return PluginResult(handled=True, response=self._handle_result)
+
+
+class TestPluginResult:
+    """PluginResult 데이터클래스 테스트."""
+
+    def test_plugin_result_creation(self):
+        """기본 생성."""
+        result = PluginResult(handled=True, response="응답")
+
+        assert result.handled is True
+        assert result.response == "응답"
+        assert result.error is None
+
+    def test_plugin_result_with_error(self):
+        """에러 포함 생성."""
+        result = PluginResult(handled=False, error="오류 발생")
+
+        assert result.handled is False
+        assert result.response is None
+        assert result.error == "오류 발생"
+
+    def test_plugin_result_defaults(self):
+        """기본값 확인."""
+        result = PluginResult(handled=True)
+
+        assert result.response is None
+        assert result.error is None
+
+
+class TestPlugin:
+    """Plugin 기본 클래스 테스트."""
+
+    def test_plugin_get_data_dir(self):
+        """데이터 디렉토리 생성."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_dir = Path(tmpdir)
+            plugin = MockPlugin()
+            plugin._base_dir = base_dir
+
+            data_dir = plugin.get_data_dir(base_dir)
+
+            assert data_dir.exists()
+            assert data_dir.name == "mock"
+            assert data_dir.parent.name == ".data"
+
+
+class TestPluginLoader:
+    """PluginLoader 테스트."""
+
+    @pytest.fixture
+    def temp_plugin_dir(self):
+        """임시 플러그인 디렉토리 생성."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_dir = Path(tmpdir)
+
+            # 플러그인 디렉토리 구조 생성
+            builtin_dir = base_dir / "plugins" / "builtin"
+            builtin_dir.mkdir(parents=True)
+
+            custom_dir = base_dir / "plugins" / "custom"
+            custom_dir.mkdir(parents=True)
+
+            yield base_dir
+
+    def test_loader_init(self, temp_plugin_dir):
+        """로더 초기화."""
+        loader = PluginLoader(temp_plugin_dir)
+
+        assert loader.base_dir == temp_plugin_dir
+        assert loader.plugins == []
+
+    def test_load_all_empty(self, temp_plugin_dir):
+        """플러그인 없을 때 빈 목록."""
+        loader = PluginLoader(temp_plugin_dir)
+        loaded = loader.load_all()
+
+        assert loaded == []
+        assert loader.plugins == []
+
+    def test_get_plugin_list(self, temp_plugin_dir):
+        """플러그인 목록 조회."""
+        loader = PluginLoader(temp_plugin_dir)
+
+        # 수동으로 플러그인 추가
+        mock_plugin = MockPlugin()
+        mock_plugin._base_dir = temp_plugin_dir
+        loader.plugins.append(mock_plugin)
+
+        plugin_list = loader.get_plugin_list()
+
+        assert len(plugin_list) == 1
+        assert plugin_list[0]["name"] == "mock"
+        assert plugin_list[0]["description"] == "Mock plugin for testing"
+
+    def test_get_plugin_by_name_found(self, temp_plugin_dir):
+        """이름으로 플러그인 찾기 - 성공."""
+        loader = PluginLoader(temp_plugin_dir)
+
+        mock_plugin = MockPlugin()
+        mock_plugin._base_dir = temp_plugin_dir
+        loader.plugins.append(mock_plugin)
+
+        result = loader.get_plugin_by_name("mock")
+
+        assert result is not None
+        assert result.name == "mock"
+
+    def test_get_plugin_by_name_not_found(self, temp_plugin_dir):
+        """이름으로 플러그인 찾기 - 실패."""
+        loader = PluginLoader(temp_plugin_dir)
+
+        result = loader.get_plugin_by_name("nonexistent")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_process_message_handled(self, temp_plugin_dir):
+        """메시지 처리 - 플러그인이 처리."""
+        loader = PluginLoader(temp_plugin_dir)
+
+        mock_plugin = MockPlugin(can_handle_result=True, handle_result="처리됨")
+        mock_plugin._base_dir = temp_plugin_dir
+        loader.plugins.append(mock_plugin)
+
+        result = await loader.process_message("테스트", 12345)
+
+        assert result is not None
+        assert result.handled is True
+        assert result.response == "처리됨"
+
+    @pytest.mark.asyncio
+    async def test_process_message_not_handled(self, temp_plugin_dir):
+        """메시지 처리 - 플러그인이 처리 안 함."""
+        loader = PluginLoader(temp_plugin_dir)
+
+        mock_plugin = MockPlugin(can_handle_result=False)
+        mock_plugin._base_dir = temp_plugin_dir
+        loader.plugins.append(mock_plugin)
+
+        result = await loader.process_message("테스트", 12345)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_process_message_plugin_error(self, temp_plugin_dir):
+        """메시지 처리 - 플러그인 오류 시 다음 플러그인 시도."""
+        loader = PluginLoader(temp_plugin_dir)
+
+        # 오류 발생하는 플러그인
+        error_plugin = MockPlugin()
+        error_plugin._base_dir = temp_plugin_dir
+        error_plugin.can_handle = MagicMock(side_effect=Exception("테스트 오류"))
+        loader.plugins.append(error_plugin)
+
+        # 정상 플러그인
+        normal_plugin = MockPlugin(can_handle_result=True, handle_result="정상")
+        normal_plugin._base_dir = temp_plugin_dir
+        loader.plugins.append(normal_plugin)
+
+        result = await loader.process_message("테스트", 12345)
+
+        # 오류 플러그인 스킵하고 정상 플러그인 처리
+        assert result is not None
+        assert result.response == "정상"
+
+    @pytest.mark.asyncio
+    async def test_process_message_no_plugins(self, temp_plugin_dir):
+        """메시지 처리 - 플러그인 없음."""
+        loader = PluginLoader(temp_plugin_dir)
+
+        result = await loader.process_message("테스트", 12345)
+
+        assert result is None
+
+
+class TestMemoPluginPatterns:
+    """MemoPlugin 패턴 테스트."""
+
+    @pytest.fixture
+    def memo_plugin(self):
+        """MemoPlugin 인스턴스 생성."""
+        from plugins.builtin.memo.plugin import MemoPlugin
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugin = MemoPlugin()
+            plugin._base_dir = Path(tmpdir)
+            yield plugin
+
+    @pytest.mark.asyncio
+    async def test_can_handle_save_patterns(self, memo_plugin):
+        """저장 패턴 인식."""
+        save_messages = [
+            "내일 회의 메모해줘",
+            "메모해줘: 장보기 목록",
+            "오늘 할일 저장해줘",
+            "메모: 중요한 내용",
+        ]
+
+        for msg in save_messages:
+            result = await memo_plugin.can_handle(msg, 12345)
+            assert result is True, f"Should handle: {msg}"
+
+    @pytest.mark.asyncio
+    async def test_can_handle_list_patterns(self, memo_plugin):
+        """목록 패턴 인식."""
+        list_messages = [
+            "메모 목록",
+            "메모 보여줘",
+            "메모 리스트",
+            "메모들 보여",
+            "저장된 메모",
+        ]
+
+        for msg in list_messages:
+            result = await memo_plugin.can_handle(msg, 12345)
+            assert result is True, f"Should handle: {msg}"
+
+    @pytest.mark.asyncio
+    async def test_can_handle_delete_patterns(self, memo_plugin):
+        """삭제 패턴 인식."""
+        delete_messages = [
+            "메모 1 삭제",
+            "메모 2 지워",
+            "1번 메모 삭제",
+            "3번 메모 지워",
+        ]
+
+        for msg in delete_messages:
+            result = await memo_plugin.can_handle(msg, 12345)
+            assert result is True, f"Should handle: {msg}"
+
+    @pytest.mark.asyncio
+    async def test_can_handle_exclude_patterns(self, memo_plugin):
+        """제외 패턴 - AI에게 넘김."""
+        exclude_messages = [
+            "메모란 뭐야",
+            "메모가 뭔가요",
+            "메모 영어로",
+            "메모 어떻게 해",
+            "메모의 뜻",
+        ]
+
+        for msg in exclude_messages:
+            result = await memo_plugin.can_handle(msg, 12345)
+            assert result is False, f"Should NOT handle (exclude): {msg}"
+
+    @pytest.mark.asyncio
+    async def test_handle_save(self, memo_plugin):
+        """메모 저장."""
+        result = await memo_plugin.handle("테스트 내용 메모해줘", 12345)
+
+        assert result.handled is True
+        assert "메모 저장됨" in result.response
+        assert "테스트 내용" in result.response
+
+    @pytest.mark.asyncio
+    async def test_handle_list_empty(self, memo_plugin):
+        """빈 메모 목록."""
+        result = await memo_plugin.handle("메모 목록", 12345)
+
+        assert result.handled is True
+        assert "저장된 메모가 없습니다" in result.response
+
+    @pytest.mark.asyncio
+    async def test_handle_list_with_memos(self, memo_plugin):
+        """메모 있을 때 목록."""
+        # 먼저 메모 저장
+        await memo_plugin.handle("첫번째 메모 메모해줘", 12345)
+        await memo_plugin.handle("두번째 메모 메모해줘", 12345)
+
+        result = await memo_plugin.handle("메모 목록", 12345)
+
+        assert result.handled is True
+        assert "메모 목록" in result.response
+        assert "#1" in result.response
+        assert "#2" in result.response
+
+    @pytest.mark.asyncio
+    async def test_handle_delete(self, memo_plugin):
+        """메모 삭제."""
+        # 먼저 메모 저장
+        await memo_plugin.handle("삭제할 메모 메모해줘", 12345)
+
+        result = await memo_plugin.handle("메모 1 삭제", 12345)
+
+        assert result.handled is True
+        assert "삭제됨" in result.response
+
+    @pytest.mark.asyncio
+    async def test_handle_delete_not_found(self, memo_plugin):
+        """존재하지 않는 메모 삭제."""
+        result = await memo_plugin.handle("메모 999 삭제", 12345)
+
+        assert result.handled is True
+        assert "찾을 수 없습니다" in result.response
