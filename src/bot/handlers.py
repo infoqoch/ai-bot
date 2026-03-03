@@ -1205,10 +1205,13 @@ class BotHandlers:
         if semaphore._value == 0:
             active_count = self.get_active_task_count(user_id)
             logger.warning(f"동시 요청 제한 - 활성 태스크: {active_count}개")
+            # 거절된 메시지 미리보기 (최대 50자)
+            rejected_preview = message[:50] + "..." if len(message) > 50 else message
             await update.message.reply_text(
                 f"⚠️ <b>메시지 처리 불가</b>\n\n"
-                f"현재 {active_count}개 요청이 처리 중이에요.\n"
-                f"이 메시지는 <b>처리되지 않습니다</b>.\n\n"
+                f"현재 {active_count}개 요청이 처리 중이에요.\n\n"
+                f"❌ <b>거절된 메시지:</b>\n"
+                f"<code>{rejected_preview}</code>\n\n"
                 f"완료 후 다시 보내주세요!",
                 parse_mode="HTML"
             )
@@ -1274,7 +1277,12 @@ class BotHandlers:
             try:
                 result = await self.plugins.process_message(message, chat_id)
                 if result and result.handled:
-                    logger.info(f"플러그인 처리 완료")
+                    plugin_name = result.plugin_name if hasattr(result, 'plugin_name') else "plugin"
+                    logger.info(f"플러그인 처리 완료: {plugin_name}")
+                    # 플러그인 처리도 히스토리에 기록
+                    session_id = self.sessions.get_current_session_id(user_id)
+                    if session_id:
+                        self.sessions.add_message(user_id, session_id, message, processor=f"plugin:{plugin_name}")
                     if result.response:
                         try:
                             await update.message.reply_text(result.response, parse_mode="HTML")
@@ -1342,10 +1350,13 @@ class BotHandlers:
         if semaphore._value == 0:
             active_count = self.get_active_task_count(user_id)
             logger.warning(f"동시 요청 제한 - 활성 태스크: {active_count}개")
+            # 거절된 메시지 미리보기 (최대 50자)
+            rejected_preview = message[:50] + "..." if len(message) > 50 else message
             await update.message.reply_text(
                 f"⚠️ <b>메시지 처리 불가</b>\n\n"
-                f"현재 {active_count}개 요청이 처리 중이에요.\n"
-                f"이 메시지는 <b>처리되지 않습니다</b>.\n\n"
+                f"현재 {active_count}개 요청이 처리 중이에요.\n\n"
+                f"❌ <b>거절된 메시지:</b>\n"
+                f"<code>{rejected_preview}</code>\n\n"
                 f"완료 후 다시 보내주세요!",
                 parse_mode="HTML"
             )
@@ -1490,7 +1501,7 @@ class BotHandlers:
             # 기존 세션이면 메시지 추가 (명시적 session_id 사용)
             if not is_new_session:
                 logger.trace("세션 히스토리에 메시지 추가")
-                self.sessions.add_message(user_id, session_id, message)
+                self.sessions.add_message(user_id, session_id, message, processor="claude")
 
             # 에러 처리
             if error == "TIMEOUT":

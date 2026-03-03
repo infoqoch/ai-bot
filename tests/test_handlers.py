@@ -179,7 +179,7 @@ class TestProcessClaudeRequest:
 
         # 기존 세션이므로 메시지 추가 확인
         mock_session_store.add_message.assert_called_once_with(
-            "user1", "session-123", "테스트 질문"
+            "user1", "session-123", "테스트 질문", processor="claude"
         )
 
         # 응답 전송 확인
@@ -252,7 +252,7 @@ class TestProcessClaudeRequest:
         )
 
         mock_session_store.add_message.assert_called_once_with(
-            "user1", "session-123", "질문"
+            "user1", "session-123", "질문", processor="claude"
         )
 
     @pytest.mark.asyncio
