@@ -84,21 +84,6 @@ class TestClaudeClient:
         assert client.system_prompt is None
 
     @pytest.mark.asyncio
-    async def test_chat_timeout(self, client):
-        """타임아웃 처리 확인."""
-        with patch('asyncio.create_subprocess_exec') as mock_exec:
-            mock_process = AsyncMock()
-            mock_process.communicate = AsyncMock(side_effect=TimeoutError())
-            mock_exec.return_value = mock_process
-
-            with patch('asyncio.wait_for', side_effect=TimeoutError()):
-                response, error, session_id = await client.chat("Hello", "test-session")
-
-            assert error == "TIMEOUT"
-            assert response == ""
-            assert session_id is None
-
-    @pytest.mark.asyncio
     async def test_summarize_empty_questions(self, client):
         """빈 질문 목록 요약."""
         result = await client.summarize([])
@@ -315,25 +300,6 @@ class TestChatMethod:
             assert response.text == "Plain text response"
             assert response.error is None
             assert response.session_id is None
-
-    @pytest.mark.asyncio
-    async def test_chat_timeout_returns_chat_response(self, client):
-        """타임아웃 시 ChatResponse 반환 검증."""
-        from src.claude.client import ChatError
-
-        with patch('asyncio.create_subprocess_exec') as mock_exec:
-            mock_process = AsyncMock()
-            mock_process.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
-            mock_exec.return_value = mock_process
-
-            with patch('asyncio.wait_for', side_effect=asyncio.TimeoutError()):
-                response = await client.chat("Hello")
-
-            assert isinstance(response, ChatError) is False
-            assert response.error == ChatError.TIMEOUT
-            assert response.text == ""
-            assert response.session_id is None
-
 
 class TestCreateSession:
     """create_session() 메서드 테스트."""

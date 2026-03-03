@@ -61,12 +61,17 @@ class ClaudeClient:
     async def _run_command(
         self,
         cmd: list[str],
-        timeout: int,
+        timeout: Optional[int] = None,
     ) -> tuple[str, str, int]:
-        """Execute command and return (stdout, stderr, returncode)."""
+        """Execute command and return (stdout, stderr, returncode).
+
+        Args:
+            cmd: Command to execute
+            timeout: Optional timeout in seconds. If None, wait indefinitely.
+        """
         cmd_preview = " ".join(cmd[:5]) + f" ... ({len(cmd)} parts)"
         logger.trace(f"_run_command() - cmd={cmd_preview}")
-        logger.trace(f"timeout={timeout}초")
+        logger.trace(f"timeout={timeout}초" if timeout else "timeout=None (무제한)")
 
         logger.trace("subprocess 생성 중")
         process = await asyncio.create_subprocess_exec(
@@ -77,21 +82,14 @@ class ClaudeClient:
         logger.trace(f"subprocess 생성됨 - pid={process.pid}")
 
         logger.trace("프로세스 실행 대기 중")
-        try:
+        if timeout:
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(),
                 timeout=timeout,
             )
-        except asyncio.TimeoutError:
-            # 타임아웃 시 프로세스 강제 종료
-            logger.warning(f"프로세스 타임아웃 - pid={process.pid}, 강제 종료 시도")
-            try:
-                process.kill()
-                await process.wait()  # 좀비 프로세스 방지
-                logger.info(f"프로세스 종료됨 - pid={process.pid}")
-            except Exception as e:
-                logger.warning(f"프로세스 종료 실패 - pid={process.pid}: {e}")
-            raise  # TimeoutError 다시 raise
+        else:
+            # 타임아웃 없이 무제한 대기
+            stdout, stderr = await process.communicate()
         stdout_str = stdout.decode("utf-8").strip()
         stderr_str = stderr.decode("utf-8").strip()
 
@@ -145,7 +143,7 @@ class ClaudeClient:
 
         try:
             logger.trace("CLI 실행 시작")
-            output, error, returncode = await self._run_command(cmd, self.timeout)
+            output, error, returncode = await self._run_command(cmd, timeout=None)
 
             logger.trace(f"CLI 결과 - returncode={returncode}")
 
@@ -187,10 +185,6 @@ class ClaudeClient:
                 logger.warning(f"JSON 파싱 실패: {e}")
                 logger.trace(f"원본 output: {output[:200]}")
                 return ChatResponse(output or "(응답 없음)", None, None)
-
-        except asyncio.TimeoutError:
-            logger.error(f"Claude CLI 타임아웃 - {self.timeout}초 초과")
-            return ChatResponse("", ChatError.TIMEOUT, None)
 
         except Exception as e:
             logger.exception(f"Claude CLI 오류: {e}")
