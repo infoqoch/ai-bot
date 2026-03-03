@@ -17,6 +17,8 @@ from .formatters import format_session_quick_list, truncate_message
 # ACTION 패턴 (매니저 세션용)
 ACTION_DELETE_PATTERN = re.compile(r'\[ACTION:DELETE:([a-zA-Z0-9]+)\]')
 ACTION_RENAME_PATTERN = re.compile(r'\[ACTION:RENAME:([a-zA-Z0-9]+):([^\]]+)\]')
+ACTION_CREATE_PATTERN = re.compile(r'\[ACTION:CREATE:(opus|sonnet|haiku):([^\]]+)\]')
+ACTION_SWITCH_PATTERN = re.compile(r'\[ACTION:SWITCH:([a-zA-Z0-9]+)\]')
 
 if TYPE_CHECKING:
     from src.claude.client import ClaudeClient
@@ -25,34 +27,53 @@ if TYPE_CHECKING:
     from .middleware import AuthManager
 
 # 매니저 세션 시스템 프롬프트
-MANAGER_SYSTEM_PROMPT = """[중요: 이것은 역할극이 아님]
-너는 Telegram 봇의 세션 관리 시스템과 연결된 실제 관리자야.
-네가 [ACTION:...] 형식으로 응답하면, 봇 시스템이 자동으로 파싱해서 실제로 실행해.
+MANAGER_SYSTEM_PROMPT = """[중요: 이것은 역할극이 아님 - 실제 시스템 연동]
+너는 Telegram Claude Bot의 세션 관리자야. 봇 시스템과 직접 연결되어 있어.
+네가 [ACTION:...] 형식으로 응답하면, 봇이 자동으로 파싱해서 실제 실행해.
 
-[네 역할]
-- 세션 목록을 분석하고 관리
-- 사용자 요청에 따라 세션 삭제/이름변경 실행
-- 세션 내용 기반으로 추천/정리
+[봇 전체 기능]
+1. 세션 관리
+   - /new [모델] [이름] - 새 세션 (예: /new opus 주식돌이)
+   - /new_opus, /new_sonnet, /new_haiku - 모델별 새 세션
+   - /session - 현재 세션 정보
+   - /session_list - 세션 목록
+   - /s_<id> - 세션 전환
+   - /rename_<이름> - 세션 이름 변경
+   - /delete_<id> - 세션 삭제
 
-[명령어 - 이걸 응답에 포함하면 시스템이 실제 실행함]
+2. 모델 변경
+   - /model - 현재 모델 확인
+   - /model_opus, /model_sonnet, /model_haiku - 모델 변경
+
+3. 매니저
+   - /m - 매니저 모드 (현재)
+   - /back - 이전 세션으로
+   - /exit - 매니저 종료
+
+[너의 ACTION 명령어 - 응답에 포함하면 봇이 실행]
 - 삭제: [ACTION:DELETE:세션ID]
 - 이름변경: [ACTION:RENAME:세션ID:새이름]
+- 세션생성: [ACTION:CREATE:모델:이름]  (모델: opus/sonnet/haiku)
+- 세션전환: [ACTION:SWITCH:세션ID]
 
 [응답 규칙]
 - 간결하게 (3-5줄)
 - 세션 ID는 8자리
-- 사용자가 삭제 요청하면 바로 [ACTION:DELETE:xxx] 실행
-- 여러 개 삭제 시 여러 ACTION 태그 사용
+- 사용자 요청 시 바로 ACTION 실행
+- 여러 작업 시 여러 ACTION 사용 가능
 
 [예시]
-사용자: "1a2b3c4d 삭제해"
-너: "삭제 완료! [ACTION:DELETE:1a2b3c4d]"
+사용자: "주식돌이 오푸스로 만들어줘"
+너: "세션 생성할게요! [ACTION:CREATE:opus:주식돌이]"
+
+사용자: "a1b2c3d4로 전환해줘"
+너: "전환 완료! [ACTION:SWITCH:a1b2c3d4]"
 
 사용자: "오래된 세션 정리해줘"
-너: "다음 세션들을 삭제할게요:
-[ACTION:DELETE:aaaa1111]
-[ACTION:DELETE:bbbb2222]
-정리 완료!"
+너: "정리할게요:
+[ACTION:DELETE:xxxx1111]
+[ACTION:DELETE:yyyy2222]
+완료!"
 """
 
 
@@ -1008,16 +1029,16 @@ class BotHandlers:
             clear_context()
             return
 
-        # 매니저 세션 확인/생성 (기존 haiku면 sonnet으로 재생성)
+        # 매니저 세션 확인/생성 (기존 haiku/sonnet이면 opus로 재생성)
         manager_session_id = self.sessions.get_manager_session_id(user_id)
         manager_model = self.sessions.get_session_model(user_id, manager_session_id) if manager_session_id else None
 
-        if not manager_session_id or manager_model == "haiku":
+        if not manager_session_id or manager_model in ("haiku", "sonnet"):
             if manager_session_id:
-                logger.info(f"기존 매니저 세션(haiku) 삭제 후 sonnet으로 재생성")
+                logger.info(f"기존 매니저 세션({manager_model}) 삭제 후 opus로 재생성")
                 self.sessions.hard_delete_session(user_id, manager_session_id)
-            logger.info("매니저 세션 생성 중... (sonnet)")
-            await update.message.reply_text("📋 매니저 세션 생성 중... (⚡ Sonnet)")
+            logger.info("매니저 세션 생성 중... (opus)")
+            await update.message.reply_text("📋 매니저 세션 생성 중... (🧠 Opus)")
             manager_session_id = await self.claude.create_session()
             if not manager_session_id:
                 await update.message.reply_text("❌ 매니저 세션 생성 실패")
@@ -1040,7 +1061,7 @@ class BotHandlers:
 
             await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
-            response = await self.claude.chat(full_message, manager_session_id, model="sonnet")
+            response = await self.claude.chat(full_message, manager_session_id, model="opus")
             if response.error:
                 await update.message.reply_text(f"❌ 오류: {response.error.value}")
             else:
@@ -1610,9 +1631,43 @@ class BotHandlers:
                         action_results.append(f"❌ {target_id} 찾을 수 없음")
                         logger.warning(f"ACTION:RENAME 세션 없음 - {target_id}")
 
+                # CREATE 액션 처리 (새 세션 생성)
+                for match in ACTION_CREATE_PATTERN.finditer(response):
+                    model = match.group(1)
+                    name = match.group(2).strip()
+                    logger.info(f"ACTION:CREATE 감지 - model={model}, name={name}")
+                    try:
+                        new_session_id = await self.claude.create_session()
+                        if new_session_id:
+                            self.sessions.create_session(user_id, new_session_id, f"(매니저가 생성: {name})", model=model, name=name)
+                            action_results.append(f"✅ 세션 생성: {new_session_id[:8]} ({name}, {model})")
+                            logger.info(f"ACTION:CREATE 성공 - {new_session_id[:8]}, model={model}, name={name}")
+                        else:
+                            action_results.append(f"❌ 세션 생성 실패")
+                            logger.warning(f"ACTION:CREATE 실패 - Claude 세션 생성 오류")
+                    except Exception as e:
+                        action_results.append(f"❌ 세션 생성 오류: {e}")
+                        logger.error(f"ACTION:CREATE 예외 - {e}")
+
+                # SWITCH 액션 처리 (세션 전환)
+                for match in ACTION_SWITCH_PATTERN.finditer(response):
+                    target_id = match.group(1)
+                    logger.info(f"ACTION:SWITCH 감지 - target={target_id}")
+                    target_info = self.sessions.get_session_by_prefix(user_id, target_id)
+                    if target_info:
+                        self.sessions.set_current(user_id, target_info["full_session_id"])
+                        self.sessions.set_previous_session_id(user_id, session_id)  # 매니저를 이전 세션으로
+                        action_results.append(f"✅ 전환됨: {target_id}")
+                        logger.info(f"ACTION:SWITCH 성공 - {target_id}")
+                    else:
+                        action_results.append(f"❌ {target_id} 찾을 수 없음")
+                        logger.warning(f"ACTION:SWITCH 세션 없음 - {target_id}")
+
                 # ACTION 태그 제거 (사용자에게는 깔끔하게 표시)
                 response = ACTION_DELETE_PATTERN.sub('', response)
                 response = ACTION_RENAME_PATTERN.sub('', response)
+                response = ACTION_CREATE_PATTERN.sub('', response)
+                response = ACTION_SWITCH_PATTERN.sub('', response)
                 response = response.strip()
 
                 # 액션 결과 추가

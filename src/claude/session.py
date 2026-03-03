@@ -447,7 +447,7 @@ class SessionStore:
         logger.trace("매니저 세션 없음")
         return None
 
-    def create_manager_session(self, user_id: str, session_id: str, model: str = "sonnet") -> None:
+    def create_manager_session(self, user_id: str, session_id: str, model: str = "opus") -> None:
         """Create a manager session."""
         logger.trace(f"create_manager_session() - user={user_id}, session={session_id[:8]}, model={model}")
 
