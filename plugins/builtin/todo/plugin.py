@@ -25,11 +25,16 @@ class TodoPlugin(Plugin):
         "<b>📝 할일 등록</b>\n"
         "• 아침에 봇이 물어보면 자유롭게 답변\n"
         "• <code>할일 추가: 회의하기</code>\n"
-        "• <code>오전에 회의 추가</code>\n\n"
+        "• <code>오전에 회의 추가해줘</code>\n"
+        "• <code>저녁에 운동 넣어줘</code>\n\n"
         "<b>✅ 완료 처리</b>\n"
         "• <code>회의 끝났어</code>\n"
         "• <code>1번 완료</code>\n"
         "• <code>오전 1번 done</code>\n\n"
+        "<b>🗑️ 삭제</b>\n"
+        "• <code>회의 삭제</code>\n"
+        "• <code>2번 지워</code>\n"
+        "• <code>오후 3번 제거</code>\n\n"
         "<b>📊 조회</b>\n"
         "• <code>할일 보여줘</code>\n"
         "• <code>오늘 할일</code>\n"
@@ -51,12 +56,16 @@ class TodoPlugin(Plugin):
         r"(오전|오후|저녁)\s*할\s*일",
         r"todo\s*(list|보여|확인)?",
         # 추가
-        r"할\s*일\s*(추가|등록)",
-        r"(오전|오후|저녁)에?\s*.+\s*(추가|등록|해야)",
+        r"할\s*일\s*(추가|등록|넣어|추가해)",
+        r"(오전|오후|저녁)에?\s*.+\s*(추가|등록|해야|넣어|추가해)",
         # 완료
         r"(\d+)번?\s*(완료|끝|done|했어|함)",
         r"(오전|오후|저녁)\s*(\d+)번?\s*(완료|끝|done)",
         r".+\s*(끝났어|완료|했어|done)",
+        # 삭제
+        r"(\d+)번?\s*(삭제|지워|제거)",
+        r"(오전|오후|저녁)\s*(\d+)번?\s*(삭제|지워|제거)",
+        r".+\s*(삭제|지워|제거)",
         # 입력 대기 상태에서의 자유 입력 (별도 처리)
     ]
 
@@ -124,12 +133,17 @@ class TodoPlugin(Plugin):
         if add_result:
             return add_result
 
-        # 3. 완료 패턴
+        # 3. 삭제 패턴
+        delete_result = await self._handle_delete(msg, chat_id)
+        if delete_result:
+            return delete_result
+
+        # 4. 완료 패턴
         done_result = await self._handle_done(msg, chat_id)
         if done_result:
             return done_result
 
-        # 4. 조회 패턴
+        # 5. 조회 패턴
         if re.search(r"(오늘|내일)?\s*할\s*일\s*(보여|목록|리스트|확인|뭐)?", msg):
             # 특정 시간대 조회
             slot = self._detect_slot(msg)
@@ -144,9 +158,66 @@ class TodoPlugin(Plugin):
             summary = self.manager.get_daily_summary(chat_id)
             return PluginResult(handled=True, response=summary)
 
-        # 5. 기본 - 전체 조회
+        # 6. 기본 - 전체 조회
         summary = self.manager.get_daily_summary(chat_id)
         return PluginResult(handled=True, response=summary)
+
+    async def _handle_delete(self, message: str, chat_id: int) -> Optional[PluginResult]:
+        """삭제 처리."""
+        msg = message.lower()
+
+        # 패턴: "N번 삭제", "오전 N번 삭제"
+        match = re.search(r'(오전|오후|저녁)?\s*(\d+)번?\s*(삭제|지워|제거)', msg)
+        if match:
+            slot_text = match.group(1)
+            user_index = int(match.group(2))
+
+            slot = self._text_to_slot(slot_text) if slot_text else None
+
+            if slot:
+                # 시간대 지정 시
+                if self.manager.delete_by_index(chat_id, slot, user_index - 1):
+                    return PluginResult(
+                        handled=True,
+                        response=f"🗑️ {self._get_slot_name(slot)} {user_index}번 삭제!"
+                    )
+                else:
+                    return PluginResult(
+                        handled=True,
+                        response=f"❌ {self._get_slot_name(slot)}에 {user_index}번 할일이 없어요."
+                    )
+            else:
+                # 전역 인덱스로 삭제
+                result = self.manager.delete_by_global_index(chat_id, user_index)
+                if result:
+                    slot_name, task_text = result
+                    return PluginResult(
+                        handled=True,
+                        response=f"🗑️ {user_index}번 삭제!\n• {task_text}"
+                    )
+                else:
+                    return PluginResult(
+                        handled=True,
+                        response=f"❌ {user_index}번 할일을 찾을 수 없어요."
+                    )
+
+        # 패턴: "회의 삭제", "운동 지워"
+        match = re.search(r'(.+?)\s*(삭제|지워|제거)', msg)
+        if match:
+            task_text = match.group(1).strip()
+            result = self.manager.delete_by_text(chat_id, task_text)
+            if result:
+                return PluginResult(
+                    handled=True,
+                    response=f"🗑️ '{task_text}' 삭제!"
+                )
+            else:
+                return PluginResult(
+                    handled=True,
+                    response=f"❌ '{task_text}' 할일을 찾을 수 없어요."
+                )
+
+        return None
 
     async def _handle_pending_input(self, message: str, chat_id: int) -> PluginResult:
         """입력 대기 상태 처리 (자유 형식 할일 입력)."""
@@ -239,33 +310,51 @@ class TodoPlugin(Plugin):
         match = re.search(r'(오전|오후|저녁)?\s*(\d+)번?\s*(완료|끝|done|했어|함)', msg)
         if match:
             slot_text = match.group(1)
-            index = int(match.group(2)) - 1  # 0-based
+            user_index = int(match.group(2))  # 1-based (사용자가 보는 번호)
 
             slot = self._text_to_slot(slot_text) if slot_text else None
 
             if slot:
-                if self.manager.mark_done_by_index(chat_id, slot, index):
+                # 시간대 지정 시 - 해당 시간대의 로컬 인덱스
+                if self.manager.mark_done_by_index(chat_id, slot, user_index - 1):
                     return PluginResult(
                         handled=True,
-                        response=f"✅ {self._get_slot_name(slot)} {index + 1}번 완료!"
+                        response=f"✅ {self._get_slot_name(slot)} {user_index}번 완료!"
+                    )
+                else:
+                    return PluginResult(
+                        handled=True,
+                        response=f"❌ {self._get_slot_name(slot)}에 {user_index}번 할일이 없어요."
                     )
             else:
-                # 시간대 없으면 전체에서 검색
-                for s in [TimeSlot.MORNING, TimeSlot.AFTERNOON, TimeSlot.EVENING]:
-                    if self.manager.mark_done_by_index(chat_id, s, index):
-                        return PluginResult(
-                            handled=True,
-                            response=f"✅ {index + 1}번 완료!"
-                        )
+                # 시간대 없으면 전역 인덱스로 처리
+                result = self.manager.mark_done_by_global_index(chat_id, user_index)
+                if result:
+                    slot_name, task_text = result
+                    return PluginResult(
+                        handled=True,
+                        response=f"✅ {user_index}번 완료!\n• {task_text}"
+                    )
+                else:
+                    return PluginResult(
+                        handled=True,
+                        response=f"❌ {user_index}번 할일을 찾을 수 없어요."
+                    )
 
         # 패턴: "회의 끝났어", "운동 완료"
         match = re.search(r'(.+?)\s*(끝났어|완료|했어|done)', msg)
         if match:
             task_text = match.group(1).strip()
-            if self.manager.mark_done_by_text(chat_id, task_text):
+            result = self.manager.mark_done_by_text(chat_id, task_text)
+            if result:
                 return PluginResult(
                     handled=True,
                     response=f"✅ '{task_text}' 완료!"
+                )
+            else:
+                return PluginResult(
+                    handled=True,
+                    response=f"❌ '{task_text}' 할일을 찾을 수 없어요."
                 )
 
         return None
@@ -275,8 +364,8 @@ class TodoPlugin(Plugin):
         msg = message.strip()
 
         # 패턴 1: "오후에 축구 해야" / "오전에 회의 추가" (시간대 + 할일 + 동사)
-        # "~으로 추가", "~를 추가" 등도 처리
-        match = re.search(r'(오전|오후|저녁)에?\s+(.+?)(?:[으로를을]?\s*)?(해야|추가|등록|하기)', msg)
+        # "~으로 추가", "~를 추가", "추가해줘", "넣어줘" 등도 처리
+        match = re.search(r'(오전|오후|저녁)에?\s+(.+?)(?:[으로를을]?\s*)?(해야|추가|등록|하기|추가해|넣어)', msg)
         if match:
             slot = self._text_to_slot(match.group(1))
             task_text = match.group(2).strip()

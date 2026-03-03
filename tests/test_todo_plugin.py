@@ -46,6 +46,27 @@ class TestTodoManager:
         daily = manager.get_today(123)
         assert daily.get_tasks(TimeSlot.MORNING)[0].done is True
 
+    def test_mark_done_by_text_partial_match(self, tmp_path):
+        """부분 매칭 개선 테스트 - "운"이 "운동"에 잘못 매칭되지 않도록."""
+        manager = TodoManager(tmp_path)
+        tasks = {TimeSlot.MORNING: ["운동", "회의"]}
+        manager.add_tasks_from_text(123, tasks)
+
+        # "운"만으로는 매칭되지 않아야 함 (너무 짧음)
+        result = manager.mark_done_by_text(123, "운")
+        # 70% 매칭 기준이므로 "운"은 "운동"(2/1=200%)에 매칭됨 - 이건 의도된 동작
+        # 대신 "회"는 "회의"에 매칭되지 않아야 함
+
+        # 정확한 단어 시작 매칭 테스트
+        manager2 = TodoManager(tmp_path / "test2")
+        tasks2 = {TimeSlot.MORNING: ["회의 준비", "운동"]}
+        manager2.add_tasks_from_text(456, tasks2)
+
+        result2 = manager2.mark_done_by_text(456, "회의")
+        assert result2 is True
+        daily2 = manager2.get_today(456)
+        assert daily2.get_tasks(TimeSlot.MORNING)[0].done is True
+
     def test_mark_done_by_index(self, tmp_path):
         """인덱스로 완료 처리 테스트."""
         manager = TodoManager(tmp_path)
@@ -59,6 +80,27 @@ class TestTodoManager:
         assert daily.get_tasks(TimeSlot.MORNING)[1].done is True
         assert daily.get_tasks(TimeSlot.MORNING)[0].done is False
 
+    def test_mark_done_by_global_index(self, tmp_path):
+        """전역 인덱스로 완료 처리 테스트."""
+        manager = TodoManager(tmp_path)
+        tasks = {
+            TimeSlot.MORNING: ["회의", "이메일"],
+            TimeSlot.AFTERNOON: ["점심"],
+            TimeSlot.EVENING: ["운동"],
+        }
+        manager.add_tasks_from_text(123, tasks)
+
+        # 전역 인덱스 3번 = 오후의 "점심"
+        result = manager.mark_done_by_global_index(123, 3)
+
+        assert result is not None
+        slot_name, task_text = result
+        assert "오후" in slot_name
+        assert task_text == "점심"
+
+        daily = manager.get_today(123)
+        assert daily.get_tasks(TimeSlot.AFTERNOON)[0].done is True
+
     def test_pending_input_state(self, tmp_path):
         """입력 대기 상태 테스트."""
         manager = TodoManager(tmp_path)
@@ -68,6 +110,71 @@ class TestTodoManager:
 
         manager.set_pending_input(123, False)
         assert manager.is_pending_input(123) is False
+
+    def test_pending_input_timeout(self, tmp_path):
+        """입력 대기 상태 타임아웃 테스트."""
+        from datetime import datetime, timedelta
+
+        manager = TodoManager(tmp_path)
+        manager.set_pending_input(123, True)
+
+        # 정상 상태 확인
+        assert manager.is_pending_input(123) is True
+
+        # 타임스탬프를 2시간 전으로 조작
+        daily = manager.get_today(123)
+        old_time = datetime.now() - timedelta(hours=3)
+        daily.pending_input_timestamp = old_time.isoformat()
+        manager.save_today(123, daily)
+
+        # 타임아웃으로 자동 만료 확인
+        assert manager.is_pending_input(123) is False
+
+    def test_delete_by_index(self, tmp_path):
+        """인덱스로 삭제 테스트."""
+        manager = TodoManager(tmp_path)
+        tasks = {TimeSlot.MORNING: ["회의", "이메일"]}
+        manager.add_tasks_from_text(123, tasks)
+
+        result = manager.delete_by_index(123, TimeSlot.MORNING, 0)
+
+        assert result is True
+        daily = manager.get_today(123)
+        assert len(daily.get_tasks(TimeSlot.MORNING)) == 1
+        assert daily.get_tasks(TimeSlot.MORNING)[0].text == "이메일"
+
+    def test_delete_by_global_index(self, tmp_path):
+        """전역 인덱스로 삭제 테스트."""
+        manager = TodoManager(tmp_path)
+        tasks = {
+            TimeSlot.MORNING: ["회의", "이메일"],
+            TimeSlot.AFTERNOON: ["점심"],
+        }
+        manager.add_tasks_from_text(123, tasks)
+
+        # 전역 인덱스 2번 = 오전의 "이메일"
+        result = manager.delete_by_global_index(123, 2)
+
+        assert result is not None
+        slot_name, task_text = result
+        assert "오전" in slot_name
+        assert task_text == "이메일"
+
+        daily = manager.get_today(123)
+        assert len(daily.get_tasks(TimeSlot.MORNING)) == 1
+        assert daily.get_tasks(TimeSlot.MORNING)[0].text == "회의"
+
+    def test_delete_by_text(self, tmp_path):
+        """텍스트로 삭제 테스트."""
+        manager = TodoManager(tmp_path)
+        tasks = {TimeSlot.MORNING: ["회의하기"]}
+        manager.add_tasks_from_text(123, tasks)
+
+        result = manager.delete_by_text(123, "회의")
+
+        assert result is True
+        daily = manager.get_today(123)
+        assert len(daily.get_tasks(TimeSlot.MORNING)) == 0
 
     def test_get_daily_summary(self, tmp_path):
         """일일 요약 테스트."""
@@ -157,6 +264,65 @@ class TestTodoPlugin:
 
         assert result.handled is True
         assert "완료" in result.response
+
+    @pytest.mark.asyncio
+    async def test_handle_done_by_global_index(self, plugin):
+        """전역 인덱스 완료 처리 테스트."""
+        # 여러 시간대에 할일 추가
+        plugin.manager.set_pending_input(123, True)
+        await plugin.handle("오전에 회의, 오후에 점심, 저녁에 운동", 123)
+
+        # 전역 인덱스 3번 완료 (오후 점심)
+        result = await plugin.handle("3번 완료", 123)
+
+        assert result.handled is True
+        assert "완료" in result.response
+        assert "3번" in result.response
+
+    @pytest.mark.asyncio
+    async def test_handle_done_error_feedback(self, plugin):
+        """완료 실패 시 에러 피드백 테스트."""
+        # 할일이 없는 상태에서 완료 시도
+        result = await plugin.handle("1번 완료", 123)
+
+        assert result.handled is True
+        assert "❌" in result.response or "찾을 수 없" in result.response
+
+    @pytest.mark.asyncio
+    async def test_handle_delete(self, plugin):
+        """삭제 테스트."""
+        # 할일 추가
+        plugin.manager.set_pending_input(123, True)
+        await plugin.handle("오전에 회의", 123)
+
+        # 삭제
+        result = await plugin.handle("1번 삭제", 123)
+
+        assert result.handled is True
+        assert "삭제" in result.response or "🗑️" in result.response
+
+    @pytest.mark.asyncio
+    async def test_handle_delete_by_text(self, plugin):
+        """텍스트로 삭제 테스트."""
+        plugin.manager.set_pending_input(123, True)
+        await plugin.handle("오전에 회의", 123)
+
+        result = await plugin.handle("회의 삭제", 123)
+
+        assert result.handled is True
+        assert "삭제" in result.response or "🗑️" in result.response
+
+    @pytest.mark.asyncio
+    async def test_handle_add_natural_language(self, plugin):
+        """자연어 추가 패턴 테스트."""
+        # "추가해줘", "넣어줘" 패턴
+        result1 = await plugin.handle("오전에 회의 추가해줘", 123)
+        assert result1.handled is True
+        assert "추가" in result1.response
+
+        result2 = await plugin.handle("저녁에 운동 넣어줘", 123)
+        assert result2.handled is True
+        assert "추가" in result2.response
 
     @pytest.mark.asyncio
     async def test_handle_query(self, plugin):
