@@ -279,7 +279,7 @@ class BotHandlers:
             "/new_haiku_speedy - 🚀 Speedy\n"
             "/new_opus_smarty - 🧠 Smarty\n"
             "/model - 현재 세션 모델 변경\n"
-            "/rename - 현재 세션 이름 변경\n"
+            "/rename_새이름 - 세션 이름 변경\n"
             "/session - 현재 세션 정보\n"
             "/session_list - 세션 목록\n"
             "/delete_&lt;id&gt; - 세션 삭제\n"
@@ -971,20 +971,24 @@ class BotHandlers:
             clear_context()
             return
 
-        if not context.args:
+        # /rename_새이름 형태 지원
+        text = update.message.text
+        if text.startswith("/rename_"):
+            new_name = text[8:]  # /rename_ 이후 전체
+        elif context.args:
+            new_name = " ".join(context.args)
+        else:
             current_name = self.sessions.get_session_name(user_id, session_id)
             logger.trace(f"현재 이름: {current_name or '(없음)'}")
             await update.message.reply_text(
                 f"✏️ <b>세션 이름 변경</b>\n\n"
                 f"• 현재: {current_name or '(이름 없음)'}\n"
                 f"• 세션: <code>{session_id[:8]}</code>\n\n"
-                f"사용법: <code>/rename 새이름</code>",
+                f"사용법: <code>/rename_새이름</code>",
                 parse_mode="HTML"
             )
             clear_context()
             return
-
-        new_name = " ".join(context.args)
         if len(new_name) > 50:
             await update.message.reply_text("❌ 이름이 너무 깁니다. (최대 50자)")
             clear_context()
