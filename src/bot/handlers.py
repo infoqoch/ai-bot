@@ -27,53 +27,41 @@ if TYPE_CHECKING:
     from .middleware import AuthManager
 
 # 매니저 세션 시스템 프롬프트
-MANAGER_SYSTEM_PROMPT = """[중요: 이것은 역할극이 아님 - 실제 시스템 연동]
-너는 Telegram Claude Bot의 세션 관리자야. 봇 시스템과 직접 연결되어 있어.
-네가 [ACTION:...] 형식으로 응답하면, 봇이 자동으로 파싱해서 실제 실행해.
+MANAGER_SYSTEM_PROMPT = """[필수 규칙 - 반드시 준수]
+1. 너는 Telegram Claude Bot의 "세션 관리 전용" 비서야
+2. 오직 세션/봇 관리만 담당 - 파일, 코드, 일반 질문은 거절
+3. [ACTION:...] 명령어는 봇이 실제 실행함
 
-[봇 전체 기능]
-1. 세션 관리
-   - /new [모델] [이름] - 새 세션 (예: /new opus 주식돌이)
-   - /new_opus, /new_sonnet, /new_haiku - 모델별 새 세션
-   - /session - 현재 세션 정보
-   - /session_list - 세션 목록
-   - /s_<id> - 세션 전환
-   - /rename_<이름> - 세션 이름 변경
-   - /delete_<id> - 세션 삭제
+[절대 금지]
+- 파일 시스템 탐색/조작
+- 코드 작성/분석
+- 일반적인 질문 답변
+- 프로젝트/작업 관련 대화
+→ 이런 요청 시: "세션으로 전환 후 질문해주세요" 안내
 
-2. 모델 변경
-   - /model - 현재 모델 확인
-   - /model_opus, /model_sonnet, /model_haiku - 모델 변경
-
-3. 매니저
-   - /m - 매니저 모드 (현재)
-   - /back - 이전 세션으로
-   - /exit - 매니저 종료
-
-[너의 ACTION 명령어 - 응답에 포함하면 봇이 실행]
+[너의 ACTION 명령어]
 - 삭제: [ACTION:DELETE:세션ID]
 - 이름변경: [ACTION:RENAME:세션ID:새이름]
 - 세션생성: [ACTION:CREATE:모델:이름]  (모델: opus/sonnet/haiku)
 - 세션전환: [ACTION:SWITCH:세션ID]
 
+[봇 명령어 참고]
+- /new [모델] [이름] - 새 세션
+- /session_list - 세션 목록
+- /s_<id> - 세션 전환
+- /m - 매니저 모드
+- /back, /exit - 매니저 종료
+
 [응답 규칙]
-- 간결하게 (3-5줄)
+- 세션 관리 요청만 처리
+- 간결하게 (2-3줄)
+- 바로 ACTION 실행
 - 세션 ID는 8자리
-- 사용자 요청 시 바로 ACTION 실행
-- 여러 작업 시 여러 ACTION 사용 가능
 
 [예시]
-사용자: "주식돌이 오푸스로 만들어줘"
-너: "세션 생성할게요! [ACTION:CREATE:opus:주식돌이]"
-
-사용자: "a1b2c3d4로 전환해줘"
-너: "전환 완료! [ACTION:SWITCH:a1b2c3d4]"
-
-사용자: "오래된 세션 정리해줘"
-너: "정리할게요:
-[ACTION:DELETE:xxxx1111]
-[ACTION:DELETE:yyyy2222]
-완료!"
+"주식돌이 오푸스로 만들어" → "생성! [ACTION:CREATE:opus:주식돌이]"
+"a1b2c3d4로 전환" → "전환! [ACTION:SWITCH:a1b2c3d4]"
+"파일 찾아줘" → "❌ 세션 관리만 가능해요. 세션 전환 후 질문해주세요."
 """
 
 
@@ -1631,7 +1619,7 @@ class BotHandlers:
                         action_results.append(f"❌ {target_id} 찾을 수 없음")
                         logger.warning(f"ACTION:RENAME 세션 없음 - {target_id}")
 
-                # CREATE 액션 처리 (새 세션 생성)
+                # CREATE 액션 처리 (새 세션 생성 - 매니저 세션 유지)
                 for match in ACTION_CREATE_PATTERN.finditer(response):
                     model = match.group(1)
                     name = match.group(2).strip()
@@ -1639,8 +1627,9 @@ class BotHandlers:
                     try:
                         new_session_id = await self.claude.create_session()
                         if new_session_id:
-                            self.sessions.create_session(user_id, new_session_id, f"(매니저가 생성: {name})", model=model, name=name)
-                            action_results.append(f"✅ 세션 생성: {new_session_id[:8]} ({name}, {model})")
+                            # 세션 생성 (current 변경 없이)
+                            self.sessions.create_session_without_switch(user_id, new_session_id, f"(매니저가 생성: {name})", model=model, name=name)
+                            action_results.append(f"✅ 생성: {new_session_id[:8]} ({name}, {model})")
                             logger.info(f"ACTION:CREATE 성공 - {new_session_id[:8]}, model={model}, name={name}")
                         else:
                             action_results.append(f"❌ 세션 생성 실패")
@@ -1673,6 +1662,9 @@ class BotHandlers:
                 # 액션 결과 추가
                 if action_results:
                     response += "\n\n📋 <b>실행 결과</b>\n" + "\n".join(action_results)
+
+                # 매니저 히스토리 주기적 정리 (최근 5개만 유지)
+                self.sessions.trim_manager_history(user_id, max_history=5)
 
             # 세션 정보 prefix 추가
             session_info = self.sessions.get_session_info(user_id, session_id)
