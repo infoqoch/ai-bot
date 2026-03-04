@@ -284,3 +284,48 @@ class ClaudeClient:
             logger.warning(f"요약 실패: {e}")
             first_q = questions[0][:50]
             return f'"{first_q}..."'
+
+    async def compact(self, session_id: str) -> ChatResponse:
+        """Compact a Claude session to reduce context size.
+
+        Args:
+            session_id: Claude's session ID to compact
+
+        Returns:
+            ChatResponse with compact result
+        """
+        logger.trace(f"compact() - session_id={session_id[:8]}")
+        logger.info(f"세션 compact 시작: {session_id[:8]}")
+
+        # Claude CLI compact 명령어: claude --resume <session_id> /compact
+        cmd = list(self.command_parts) + [
+            "--resume", session_id,
+            "--print",
+            "--output-format", "json",
+            "/compact",
+        ]
+
+        try:
+            output, error, returncode = await self._run_command(cmd, timeout=120)
+
+            if returncode != 0:
+                logger.error(f"Compact 실패 - returncode={returncode}, error={error}")
+                return ChatResponse(error or "(compact 실패)", ChatError.CLI_ERROR, session_id)
+
+            # JSON 파싱 시도
+            try:
+                data = json.loads(output)
+                result = data.get("result", "(응답 없음)")
+                logger.info(f"Compact 완료: {session_id[:8]}")
+                return ChatResponse(result, None, session_id)
+            except json.JSONDecodeError:
+                # JSON 파싱 실패 시 원본 반환
+                logger.info(f"Compact 완료 (raw): {session_id[:8]}")
+                return ChatResponse(output or "(compact 완료)", None, session_id)
+
+        except asyncio.TimeoutError:
+            logger.error(f"Compact 타임아웃: {session_id[:8]}")
+            return ChatResponse("", ChatError.TIMEOUT, session_id)
+        except Exception as e:
+            logger.exception(f"Compact 오류: {e}")
+            return ChatResponse(str(e), ChatError.CLI_ERROR, session_id)

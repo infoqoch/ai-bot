@@ -1716,8 +1716,7 @@ class BotHandlers:
                 if action_results:
                     response += "\n\n📋 <b>실행 결과</b>\n" + "\n".join(action_results)
 
-                # 매니저 히스토리 주기적 정리 (최근 5개만 유지)
-                self.sessions.trim_manager_history(user_id, max_history=5)
+                # 매니저 세션 compact는 21:00 스케줄러가 자동 처리 (trim 제거됨)
 
             # 세션 정보 prefix 추가
             session_info = self.sessions.get_session_info(user_id, session_id)
