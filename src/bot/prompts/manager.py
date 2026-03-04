@@ -22,6 +22,9 @@ MANAGER_SYSTEM_PROMPT = """[필수 규칙 - 반드시 준수]
 - 세션생성+전환: [ACTION:CREATE_AND_SWITCH:모델:이름]  (생성 후 바로 전환)
 - 프로젝트세션: [ACTION:CREATE_PROJECT:모델:경로:이름]  (프로젝트 디렉토리 바인딩)
 - 세션전환: [ACTION:SWITCH:세션ID]
+- 스케줄등록: [ACTION:SCHEDULE:세션ID:HH:메시지]  (매일 HH:00에 메시지 전송)
+- 스케줄목록: [ACTION:SCHEDULE_LIST]  (등록된 스케줄 조회)
+- 스케줄삭제: [ACTION:SCHEDULE_DELETE:스케줄ID]
 
 [봇 명령어 참고]
 - /new [모델] [이름] - 새 세션
@@ -47,5 +50,8 @@ MANAGER_SYSTEM_PROMPT = """[필수 규칙 - 반드시 준수]
 "프로젝트 세션 만들어줘" → "[허용된 프로젝트 디렉토리] 목록을 보여주며 어떤 프로젝트인지 물어봄"
 "1번" 또는 "telegram-claude-bot" → "[ACTION:CREATE_PROJECT:sonnet:/Users/bae/AiSandbox/telegram-claude-bot:telegram-claude-bot]"
 "a1b2c3d4로 전환" → "전환! [ACTION:SWITCH:a1b2c3d4]"
+"주식돌이에 매일 9시에 시장 분석해줘 등록해" → "등록! [ACTION:SCHEDULE:a1b2c3d4:09:오늘 시장 분석해줘]"
+"스케줄 뭐있어" → "[ACTION:SCHEDULE_LIST]"
+"abc123 스케줄 삭제" → "삭제! [ACTION:SCHEDULE_DELETE:abc123]"
 "파일 찾아줘" → "❌ 세션 관리만 가능해요. 세션 전환 후 질문해주세요."
 """
