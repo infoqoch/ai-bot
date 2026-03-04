@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.logging_config import logger
+from src.scheduler_manager import scheduler_manager
 
 if TYPE_CHECKING:
     from telegram.ext import Application
@@ -29,6 +30,8 @@ SCHEDULE_TIMES = {
 class TodoScheduler:
     """할일 스케줄러 (버튼 기반)."""
 
+    OWNER = "TodoScheduler"
+
     def __init__(
         self,
         todo_manager: TodoManager,
@@ -42,7 +45,6 @@ class TodoScheduler:
         self.manager = todo_manager
         self.chat_ids = chat_ids
         self._app: Optional["Application"] = None
-        self._jobs = []
 
     def set_app(self, app: "Application") -> None:
         """텔레그램 앱 설정."""
@@ -55,56 +57,54 @@ class TodoScheduler:
             logger.info(f"Todo 스케줄러에 chat_id 등록: {chat_id}")
 
     def setup_jobs(self, app: "Application") -> None:
-        """스케줄 작업 설정."""
+        """스케줄 작업 설정 (SchedulerManager 사용)."""
         self._app = app
-        job_queue = app.job_queue
-
-        if job_queue is None:
-            logger.error("job_queue가 없습니다. APScheduler가 설치되어 있는지 확인하세요.")
-            return
 
         # 기존 작업 제거
-        for job in self._jobs:
-            job.schedule_removal()
-        self._jobs.clear()
+        scheduler_manager.unregister_by_owner(self.OWNER)
 
         # 10:00 - 오전 할일 체크
-        job = job_queue.run_daily(
-            self._morning_check_callback,
-            time=SCHEDULE_TIMES["morning_check"],
+        scheduler_manager.register_daily(
             name="todo_morning_check",
+            callback=self._morning_check_callback,
+            time_of_day=SCHEDULE_TIMES["morning_check"],
+            owner=self.OWNER,
+            metadata={"slot": "morning"},
         )
-        self._jobs.append(job)
-        logger.info("스케줄 등록: 10:00 오전 할일 리마인더")
+        logger.info("스케줄 등록: 10:00 오전 할일 리마인더 (via SchedulerManager)")
 
         # 15:00 - 오후 할일 체크
-        job = job_queue.run_daily(
-            self._afternoon_check_callback,
-            time=SCHEDULE_TIMES["afternoon_check"],
+        scheduler_manager.register_daily(
             name="todo_afternoon_check",
+            callback=self._afternoon_check_callback,
+            time_of_day=SCHEDULE_TIMES["afternoon_check"],
+            owner=self.OWNER,
+            metadata={"slot": "afternoon"},
         )
-        self._jobs.append(job)
-        logger.info("스케줄 등록: 15:00 오후 할일 리마인더")
+        logger.info("스케줄 등록: 15:00 오후 할일 리마인더 (via SchedulerManager)")
 
         # 19:00 - 저녁 할일 체크
-        job = job_queue.run_daily(
-            self._evening_check_callback,
-            time=SCHEDULE_TIMES["evening_check"],
+        scheduler_manager.register_daily(
             name="todo_evening_check",
+            callback=self._evening_check_callback,
+            time_of_day=SCHEDULE_TIMES["evening_check"],
+            owner=self.OWNER,
+            metadata={"slot": "evening"},
         )
-        self._jobs.append(job)
-        logger.info("스케줄 등록: 19:00 저녁 할일 리마인더")
+        logger.info("스케줄 등록: 19:00 저녁 할일 리마인더 (via SchedulerManager)")
 
         # 21:00 - 하루 마무리
-        job = job_queue.run_daily(
-            self._daily_wrap_callback,
-            time=SCHEDULE_TIMES["daily_wrap"],
+        scheduler_manager.register_daily(
             name="todo_daily_wrap",
+            callback=self._daily_wrap_callback,
+            time_of_day=SCHEDULE_TIMES["daily_wrap"],
+            owner=self.OWNER,
+            metadata={"slot": "wrap"},
         )
-        self._jobs.append(job)
-        logger.info("스케줄 등록: 21:00 하루 마무리")
+        logger.info("스케줄 등록: 21:00 하루 마무리 (via SchedulerManager)")
 
-        logger.info(f"Todo 스케줄러 설정 완료 - {len(self._jobs)}개 작업")
+        job_count = len(scheduler_manager.list_jobs_by_owner(self.OWNER))
+        logger.info(f"Todo 스케줄러 설정 완료 - {job_count}개 작업 (via SchedulerManager)")
 
     async def _morning_check_callback(self, context) -> None:
         """10:00 - 오전 할일 체크."""

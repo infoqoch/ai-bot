@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Optional
 from zoneinfo import ZoneInfo
 
 from src.logging_config import logger
+from src.scheduler_manager import scheduler_manager
 
 if TYPE_CHECKING:
     from telegram.ext import Application
@@ -15,12 +16,14 @@ if TYPE_CHECKING:
 # 한국 시간대
 KST = ZoneInfo("Asia/Seoul")
 
-# Compact 스케줄 시간 (21:00 KST)
-COMPACT_TIME = time(21, 0)
+# Compact 스케줄 시간 (22:00 KST - TodoScheduler와 충돌 방지)
+COMPACT_TIME = time(22, 0, tzinfo=KST)
 
 
 class SessionScheduler:
     """세션 관리 스케줄러."""
+
+    OWNER = "SessionScheduler"
 
     def __init__(
         self,
@@ -38,30 +41,23 @@ class SessionScheduler:
         self.claude = claude_client
         self.admin_chat_id = admin_chat_id
         self._app: Optional["Application"] = None
-        self._jobs = []
 
     def setup_jobs(self, app: "Application") -> None:
-        """스케줄 작업 설정."""
+        """스케줄 작업 설정 (SchedulerManager 사용)."""
         self._app = app
-        job_queue = app.job_queue
-
-        if job_queue is None:
-            logger.error("job_queue가 없습니다. APScheduler가 설치되어 있는지 확인하세요.")
-            return
 
         # 기존 작업 제거
-        for job in self._jobs:
-            job.schedule_removal()
-        self._jobs.clear()
+        scheduler_manager.unregister_by_owner(self.OWNER)
 
-        # 21:00 - 매니저 세션 compact
-        job = job_queue.run_daily(
-            self._compact_manager_sessions,
-            time=COMPACT_TIME,
+        # 22:00 - 매니저 세션 compact
+        scheduler_manager.register_daily(
             name="compact_manager_sessions",
+            callback=self._compact_manager_sessions,
+            time_of_day=COMPACT_TIME,
+            owner=self.OWNER,
+            metadata={"description": "매니저 세션 자동 compact"},
         )
-        self._jobs.append(job)
-        logger.info("스케줄 등록: 21:00 매니저 세션 compact")
+        logger.info("스케줄 등록: 22:00 매니저 세션 compact (via SchedulerManager)")
 
     async def _compact_manager_sessions(self, context) -> None:
         """21:00 - 모든 매니저 세션 compact."""

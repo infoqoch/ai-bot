@@ -59,6 +59,7 @@ from src.claude.session import SessionStore
 from src.bot.handlers import BotHandlers
 from src.bot.middleware import AuthManager
 from src.plugins.loader import PluginLoader
+from src.scheduler_manager import scheduler_manager
 
 # Todo 스케줄러 (옵션)
 _todo_scheduler = None
@@ -206,7 +207,11 @@ def create_app() -> Application:
     app = Application.builder().token(settings.telegram_token).concurrent_updates(True).build()
     logger.trace("Application 빌드 완료 - concurrent_updates=True")
 
-    # Todo 스케줄러 설정 (job_queue 사용)
+    # SchedulerManager 초기화 (단일 job_queue 관리)
+    scheduler_manager.set_app(app)
+    logger.info("SchedulerManager 초기화 완료")
+
+    # Todo 스케줄러 설정 (SchedulerManager 사용)
     _setup_todo_scheduler(app, settings, plugin_loader)
 
     # 세션 스케줄러 설정 (매니저 세션 compact)
@@ -241,6 +246,7 @@ def create_app() -> Application:
     app.add_handler(CommandHandler("exit", handlers.exit_manager_command))
     app.add_handler(CommandHandler("chatid", handlers.chatid_command))
     app.add_handler(CommandHandler("lock", handlers.lock_command))
+    app.add_handler(CommandHandler("jobs", handlers.jobs_command))
     app.add_handler(CommandHandler("plugins", handlers.plugins_command))
     app.add_handler(CommandHandler("ai", handlers.ai_command))
 
