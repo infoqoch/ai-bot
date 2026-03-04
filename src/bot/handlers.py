@@ -53,6 +53,7 @@ class TaskInfo:
     user_id: str
     session_id: str
     trace_id: str  # 요청 추적용
+    message: str = ""  # 요청 메시지 (미리보기용)
     started_at: float = field(default_factory=time.time)
     task: Optional[asyncio.Task] = None
 
@@ -190,13 +191,14 @@ class BotHandlers:
         except Exception as e:
             logger.warning(f"Claude 프로세스 종료 실패: {e}")
 
-    def _register_task(self, task: asyncio.Task, user_id: str, session_id: str, trace_id: str) -> int:
+    def _register_task(self, task: asyncio.Task, user_id: str, session_id: str, trace_id: str, message: str = "") -> int:
         """태스크를 추적 목록에 등록."""
         task_id = id(task)
         self._active_tasks[task_id] = TaskInfo(
             user_id=user_id,
             session_id=session_id,
             trace_id=trace_id,
+            message=message[:100],  # 최대 100자
             task=task,
         )
         task.add_done_callback(lambda t: self._active_tasks.pop(id(t), None))
@@ -345,11 +347,64 @@ class BotHandlers:
             "/m 질문 - 원샷 질문\n"
             f"{plugin_section}\n"
             "ℹ️ 기타\n"
+            "/lock - 처리 중인 작업 확인\n"
             "/chatid - 내 채팅 ID 확인\n"
             "/help - 이 도움말",
             parse_mode="HTML"
         )
         logger.trace("/help 완료")
+        clear_context()
+
+    async def lock_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /lock command - show active tasks."""
+        chat_id = update.effective_chat.id
+        self._setup_request_context(chat_id)
+        user_id = str(chat_id)
+        logger.info("/lock 명령 수신")
+
+        # 현재 사용자의 활성 태스크 조회
+        user_tasks = [
+            info for info in self._active_tasks.values()
+            if info.user_id == user_id
+        ]
+
+        if not user_tasks:
+            await update.message.reply_text(
+                "✅ <b>대기 중인 작업 없음</b>\n\n"
+                "현재 처리 중인 요청이 없어요.",
+                parse_mode="HTML"
+            )
+            clear_context()
+            return
+
+        # 세마포어 상태
+        semaphore = self._user_semaphores[user_id]
+        available = semaphore._value
+        total = 3
+
+        lines = [f"🔒 <b>활성 작업</b> ({len(user_tasks)}/{total})\n"]
+
+        for i, info in enumerate(user_tasks, 1):
+            elapsed = time.time() - info.started_at
+            elapsed_str = f"{int(elapsed // 60)}분 {int(elapsed % 60)}초" if elapsed >= 60 else f"{int(elapsed)}초"
+
+            # 세션 이름 가져오기
+            session_name = self.sessions.get_session_name(user_id, info.session_id) or info.session_id[:8]
+
+            # 메시지 미리보기
+            msg_preview = info.message[:40] + "..." if len(info.message) > 40 else info.message
+            msg_preview = msg_preview.replace("<", "&lt;").replace(">", "&gt;")  # HTML 이스케이프
+
+            lines.append(
+                f"\n<b>{i}.</b> <code>{session_name}</code>\n"
+                f"   ⏱ {elapsed_str} 경과\n"
+                f"   💬 {msg_preview or '(메시지 없음)'}"
+            )
+
+        lines.append(f"\n\n슬롯: {available}/{total} 사용 가능")
+
+        await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+        logger.trace("/lock 완료")
         clear_context()
 
     async def chatid_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -628,8 +683,8 @@ class BotHandlers:
 
         logger.info(f"/new_project - path={expanded_path}, model={model}, name={display_name}")
 
-        # Claude 세션 생성
-        session_id = await self.claude.create_session()
+        # Claude 세션 생성 (프로젝트 경로에서 생성해야 올바른 위치에 저장됨)
+        session_id = await self.claude.create_session(project_path=expanded_path)
         if not session_id:
             await update.message.reply_text("❌ 세션 생성 실패", parse_mode="HTML")
             return
@@ -1360,7 +1415,7 @@ class BotHandlers:
                 model=model,
             )
         )
-        self._register_task(task, user_id, session_id, trace_id)
+        self._register_task(task, user_id, session_id, trace_id, message)
         logger.trace("/ai 핸들러 종료 - 백그라운드 처리 중")
         # 컨텍스트는 백그라운드 태스크에서 정리
 
@@ -1508,7 +1563,7 @@ class BotHandlers:
             )
         )
         # 태스크 추적 등록
-        self._register_task(task, user_id, session_id, trace_id)
+        self._register_task(task, user_id, session_id, trace_id, message)
         logger.trace("handle_message 핸들러 종료 - 백그라운드 처리 중")
         # 핸들러는 즉시 리턴 (Claude 응답을 기다리지 않음)
         # 컨텍스트는 백그라운드 태스크에서 정리
@@ -1802,9 +1857,10 @@ class BotHandlers:
                 continue
 
             try:
-                new_session_id = await self.claude.create_session()
+                expanded_path = str(Path(project_path).expanduser().resolve())
+                # 프로젝트 세션은 해당 디렉토리에서 생성해야 함
+                new_session_id = await self.claude.create_session(project_path=expanded_path)
                 if new_session_id:
-                    expanded_path = str(Path(project_path).expanduser().resolve())
                     project_name = Path(expanded_path).name
                     display_name = name or f"📁{project_name}"
 
