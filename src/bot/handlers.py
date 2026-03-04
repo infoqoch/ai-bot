@@ -362,11 +362,28 @@ class BotHandlers:
         clear_context()
 
     async def lock_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /lock command - show active tasks."""
+        """Handle /lock command - show active tasks with buttons."""
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
         chat_id = update.effective_chat.id
         self._setup_request_context(chat_id)
         user_id = str(chat_id)
         logger.info("/lock 명령 수신")
+
+        text, keyboard = self._build_lock_status(user_id)
+
+        await update.message.reply_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML"
+        )
+        logger.trace("/lock 완료")
+        clear_context()
+
+    def _build_lock_status(self, user_id: str) -> tuple[str, list]:
+        """Lock 상태 텍스트와 버튼 생성."""
+        from telegram import InlineKeyboardButton
+        import time
 
         # 현재 사용자의 활성 태스크 조회
         user_tasks = [
@@ -374,44 +391,47 @@ class BotHandlers:
             if info.user_id == user_id
         ]
 
-        if not user_tasks:
-            await update.message.reply_text(
-                "✅ <b>대기 중인 작업 없음</b>\n\n"
-                "현재 처리 중인 요청이 없어요.",
-                parse_mode="HTML"
-            )
-            clear_context()
-            return
-
         # 세마포어 상태
-        semaphore = self._user_semaphores[user_id]
-        available = semaphore._value
+        if user_id in self._user_semaphores:
+            semaphore = self._user_semaphores[user_id]
+            available = semaphore._value
+        else:
+            available = 3
         total = 3
 
-        lines = [f"🔒 <b>활성 작업</b> ({len(user_tasks)}/{total})\n"]
-
-        for i, info in enumerate(user_tasks, 1):
-            elapsed = time.time() - info.started_at
-            elapsed_str = f"{int(elapsed // 60)}분 {int(elapsed % 60)}초" if elapsed >= 60 else f"{int(elapsed)}초"
-
-            # 세션 이름 가져오기
-            session_name = self.sessions.get_session_name(user_id, info.session_id) or info.session_id[:8]
-
-            # 메시지 미리보기
-            msg_preview = info.message[:40] + "..." if len(info.message) > 40 else info.message
-            msg_preview = msg_preview.replace("<", "&lt;").replace(">", "&gt;")  # HTML 이스케이프
-
-            lines.append(
-                f"\n<b>{i}.</b> <code>{session_name}</code>\n"
-                f"   ⏱ {elapsed_str} 경과\n"
-                f"   💬 {msg_preview or '(메시지 없음)'}"
+        if not user_tasks:
+            text = (
+                f"✅ <b>대기 중인 작업 없음</b>\n\n"
+                f"슬롯: {available}/{total} 사용 가능"
             )
+        else:
+            lines = [f"🔒 <b>활성 작업</b> ({len(user_tasks)}/{total})\n"]
 
-        lines.append(f"\n\n슬롯: {available}/{total} 사용 가능")
+            for i, info in enumerate(user_tasks, 1):
+                elapsed = time.time() - info.started_at
+                elapsed_str = f"{int(elapsed // 60)}분 {int(elapsed % 60)}초" if elapsed >= 60 else f"{int(elapsed)}초"
 
-        await update.message.reply_text("\n".join(lines), parse_mode="HTML")
-        logger.trace("/lock 완료")
-        clear_context()
+                # 세션 이름 가져오기
+                session_name = self.sessions.get_session_name(user_id, info.session_id) or info.session_id[:8]
+
+                # 메시지 미리보기
+                msg_preview = info.message[:40] + "..." if len(info.message) > 40 else info.message
+                msg_preview = msg_preview.replace("<", "&lt;").replace(">", "&gt;")
+
+                lines.append(
+                    f"\n<b>{i}.</b> <code>{session_name}</code>\n"
+                    f"   ⏱ {elapsed_str} 경과\n"
+                    f"   💬 {msg_preview or '(메시지 없음)'}"
+                )
+
+            lines.append(f"\n\n슬롯: {available}/{total} 사용 가능")
+            text = "\n".join(lines)
+
+        keyboard = [[
+            InlineKeyboardButton("🔄 새로고침", callback_data="lock:refresh"),
+        ]]
+
+        return text, keyboard
 
     async def chatid_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /chatid command - show user's chat ID."""
@@ -990,7 +1010,7 @@ class BotHandlers:
         ])
         buttons.append([
             InlineKeyboardButton("🔄 새로고침", callback_data="sess:list"),
-            InlineKeyboardButton("📊 작업현황", callback_data="sess:lock"),
+            InlineKeyboardButton("📊 작업현황", callback_data="lock:refresh"),
         ])
 
         await update.message.reply_text(
@@ -2156,6 +2176,11 @@ class BotHandlers:
             await self._handle_session_callback(query, chat_id, callback_data)
             return
 
+        # Lock 콜백 처리
+        if callback_data.startswith("lock:"):
+            await self._handle_lock_callback(query, chat_id)
+            return
+
         # 다른 플러그인 콜백은 여기에 추가
         logger.warning(f"Unknown callback: {callback_data}")
 
@@ -2399,9 +2424,6 @@ class BotHandlers:
             elif action == "cancel":
                 await self._handle_session_list_callback(query, chat_id)
 
-            elif action == "lock":
-                await self._handle_lock_callback(query, chat_id)
-
             else:
                 await query.edit_message_text("❌ 알 수 없는 명령")
 
@@ -2635,7 +2657,7 @@ class BotHandlers:
         ])
         buttons.append([
             InlineKeyboardButton("🔄 새로고침", callback_data="sess:list"),
-            InlineKeyboardButton("📊 작업현황", callback_data="sess:lock"),
+            InlineKeyboardButton("📊 작업현황", callback_data="lock:refresh"),
         ])
 
         await query.edit_message_text(
@@ -2687,57 +2709,11 @@ class BotHandlers:
         )
 
     async def _handle_lock_callback(self, query, chat_id: int) -> None:
-        """작업 현황 콜백 처리 - /lock과 동일한 정보를 인라인으로 표시."""
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        import time
+        """작업 현황 콜백 처리 - /lock과 동일."""
+        from telegram import InlineKeyboardMarkup
 
         user_id = str(chat_id)
-
-        # 현재 사용자의 활성 태스크 조회
-        user_tasks = [
-            info for info in self._active_tasks.values()
-            if info.user_id == user_id
-        ]
-
-        # 세마포어 상태
-        semaphore = self._user_semaphores[user_id]
-        available = semaphore._value
-        total = 3
-
-        if not user_tasks:
-            text = (
-                "✅ <b>대기 중인 작업 없음</b>\n\n"
-                f"슬롯: {available}/{total} 사용 가능"
-            )
-        else:
-            lines = [f"🔒 <b>활성 작업</b> ({len(user_tasks)}/{total})\n"]
-
-            for i, info in enumerate(user_tasks, 1):
-                elapsed = time.time() - info.started_at
-                elapsed_str = f"{int(elapsed // 60)}분 {int(elapsed % 60)}초" if elapsed >= 60 else f"{int(elapsed)}초"
-
-                # 세션 이름 가져오기
-                session_name = self.sessions.get_session_name(user_id, info.session_id) or info.session_id[:8]
-
-                # 메시지 미리보기
-                msg_preview = info.message[:40] + "..." if len(info.message) > 40 else info.message
-                msg_preview = msg_preview.replace("<", "&lt;").replace(">", "&gt;")
-
-                lines.append(
-                    f"\n<b>{i}.</b> <code>{session_name}</code>\n"
-                    f"   ⏱ {elapsed_str} 경과\n"
-                    f"   💬 {msg_preview or '(메시지 없음)'}"
-                )
-
-            lines.append(f"\n\n슬롯: {available}/{total} 사용 가능")
-            text = "\n".join(lines)
-
-        keyboard = [
-            [
-                InlineKeyboardButton("🔄 새로고침", callback_data="sess:lock"),
-                InlineKeyboardButton("📋 세션 목록", callback_data="sess:list"),
-            ]
-        ]
+        text, keyboard = self._build_lock_status(user_id)
 
         await query.edit_message_text(
             text=text,
