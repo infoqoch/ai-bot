@@ -208,6 +208,11 @@ class TodoPlugin(Plugin):
             return self._handle_week_view(chat_id, date_str)
         elif action == "today_full":
             return self._handle_today_full(chat_id)
+        elif action == "tomorrow":
+            # td:tomorrow:m:0
+            slot_code = parts[2] if len(parts) > 2 else "m"
+            index = int(parts[3]) if len(parts) > 3 else 0
+            return self._handle_tomorrow(chat_id, slot_code, index)
         else:
             return {"text": "❌ 알 수 없는 명령", "edit": True}
 
@@ -365,6 +370,9 @@ class TodoPlugin(Plugin):
             ],
             move_buttons,
             [
+                InlineKeyboardButton("📅 내일로", callback_data=f"td:tomorrow:{slot_code}:{index}"),
+            ],
+            [
                 InlineKeyboardButton("⬅️ 뒤로", callback_data="td:list"),
             ]
         ]
@@ -419,6 +427,28 @@ class TodoPlugin(Plugin):
 
             result = self._handle_list(chat_id)
             result["text"] = f"➡️ {self.SLOT_NAMES[dst_slot]}으로 이동!\n\n" + result["text"]
+            return result
+        else:
+            return {"text": "❌ 이동 실패", "edit": True}
+
+    def _handle_tomorrow(self, chat_id: int, slot_code: str, index: int) -> dict:
+        """단일 항목 내일로 넘기기."""
+        slot = self.SLOT_MAP.get(slot_code, TimeSlot.MORNING)
+        daily = self.manager.get_today(chat_id)
+        tasks = daily.get_tasks(slot)
+
+        if index >= len(tasks):
+            return {"text": "❌ 항목을 찾을 수 없어요.", "edit": True}
+
+        task_text = tasks[index].text
+
+        # 내일로 이동 (carry_to_tomorrow 사용)
+        items = [(slot_code, index)]
+        count = self.manager.carry_to_tomorrow(chat_id, items)
+
+        if count > 0:
+            result = self._handle_list(chat_id)
+            result["text"] = f"📅 내일로 이동!\n<i>{task_text}</i>\n\n" + result["text"]
             return result
         else:
             return {"text": "❌ 이동 실패", "edit": True}
