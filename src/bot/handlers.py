@@ -90,6 +90,12 @@ class BotHandlers:
     # NOTE: _session_locks, _pending_messages 제거됨
     # 세션 락 및 대기열은 session_queue_manager가 단일 진실 소스로 관리
 
+    # 스케줄 입력 대기 상태 (ForceReply용)
+    _pending_schedule_input: dict[str, dict] = {}  # user_id -> {session_id, hour, minute, ...}
+
+    # 세션 예약 스케줄러
+    _session_schedule_manager = None
+
     def __init__(
         self,
         session_store: "SessionStore",
@@ -112,6 +118,14 @@ class BotHandlers:
         self.plugins = plugin_loader
         self._watchdog_started = False
         logger.trace(f"BotHandlers 설정 - require_auth={require_auth}, allowed_ids={allowed_chat_ids}")
+
+    # ==================== 세션 스케줄 매니저 ====================
+
+    @classmethod
+    def set_session_schedule_manager(cls, manager) -> None:
+        """세션 스케줄 매니저 설정."""
+        cls._session_schedule_manager = manager
+        logger.debug("BotHandlers에 SessionScheduleManager 연결됨")
 
     # ==================== 유틸리티 메서드 ====================
 
@@ -413,6 +427,228 @@ class BotHandlers:
         )
         logger.trace("/jobs 완료")
         clear_context()
+
+    async def scheduler_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /scheduler command - manage session schedules."""
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+        chat_id = update.effective_chat.id
+        self._setup_request_context(chat_id)
+        user_id = str(chat_id)
+        logger.info("/scheduler 명령 수신")
+
+        if not self._session_schedule_manager:
+            await update.message.reply_text("❌ 스케줄 기능이 초기화되지 않았습니다.")
+            clear_context()
+            return
+
+        text = self._session_schedule_manager.get_status_text(user_id)
+        keyboard = self._build_scheduler_keyboard(user_id)
+
+        await update.message.reply_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML"
+        )
+        logger.trace("/scheduler 완료")
+        clear_context()
+
+    def _build_scheduler_keyboard(self, user_id: str) -> list:
+        """스케줄러 UI 키보드 생성."""
+        from telegram import InlineKeyboardButton
+
+        buttons = []
+
+        # 등록된 스케줄 목록 (삭제 가능한 것만 삭제 버튼)
+        if self._session_schedule_manager:
+            schedules = self._session_schedule_manager.list_by_user(user_id)
+            for s in sorted(schedules, key=lambda x: (x.hour, x.minute)):
+                status = "✅" if s.enabled else "⏸"
+                buttons.append([
+                    InlineKeyboardButton(
+                        f"{status} {s.time_str} {s.session_name[:10]}",
+                        callback_data=f"sched:toggle:{s.id}"
+                    ),
+                    InlineKeyboardButton("🗑", callback_data=f"sched:delete:{s.id}"),
+                ])
+
+        # 추가/새로고침 버튼
+        buttons.append([
+            InlineKeyboardButton("➕ 추가", callback_data="sched:add"),
+            InlineKeyboardButton("🔄 새로고침", callback_data="sched:refresh"),
+        ])
+
+        return buttons
+
+    async def _handle_scheduler_callback(self, query, chat_id: int, callback_data: str) -> None:
+        """세션 스케줄 콜백 처리."""
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
+
+        user_id = str(chat_id)
+        action = callback_data[6:]  # "sched:" 제거
+
+        if not self._session_schedule_manager:
+            await query.answer("❌ 스케줄 기능 비활성화")
+            return
+
+        # 새로고침
+        if action == "refresh":
+            text = self._session_schedule_manager.get_status_text(user_id)
+            keyboard = self._build_scheduler_keyboard(user_id)
+            await query.edit_message_text(
+                text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="HTML"
+            )
+            await query.answer("새로고침 완료")
+            return
+
+        # 토글 (활성화/비활성화)
+        if action.startswith("toggle:"):
+            schedule_id = action[7:]
+            new_state = self._session_schedule_manager.toggle(schedule_id)
+            if new_state is not None:
+                status = "활성화" if new_state else "비활성화"
+                await query.answer(f"✅ {status}됨")
+                # UI 새로고침
+                text = self._session_schedule_manager.get_status_text(user_id)
+                keyboard = self._build_scheduler_keyboard(user_id)
+                await query.edit_message_text(
+                    text,
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="HTML"
+                )
+            else:
+                await query.answer("❌ 스케줄을 찾을 수 없음")
+            return
+
+        # 삭제
+        if action.startswith("delete:"):
+            schedule_id = action[7:]
+            if self._session_schedule_manager.remove(schedule_id):
+                await query.answer("✅ 삭제됨")
+                # UI 새로고침
+                text = self._session_schedule_manager.get_status_text(user_id)
+                keyboard = self._build_scheduler_keyboard(user_id)
+                await query.edit_message_text(
+                    text,
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="HTML"
+                )
+            else:
+                await query.answer("❌ 삭제 실패")
+            return
+
+        # 추가 - 세션 선택 화면
+        if action == "add":
+            sessions = self.sessions.list_sessions(user_id)
+            if not sessions:
+                await query.answer("❌ 세션이 없습니다. 먼저 세션을 생성하세요.")
+                return
+
+            buttons = []
+            for s in sessions[:10]:  # 최대 10개
+                name = s.get("name") or s.get("summary", "")[:15] or s["id"][:8]
+                buttons.append([
+                    InlineKeyboardButton(
+                        f"📂 {name}",
+                        callback_data=f"sched:session:{s['id'][:8]}"
+                    )
+                ])
+            buttons.append([
+                InlineKeyboardButton("↩️ 취소", callback_data="sched:refresh")
+            ])
+
+            await query.edit_message_text(
+                "📅 <b>스케줄 추가</b>\n\n예약 메시지를 보낼 세션을 선택하세요:",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML"
+            )
+            await query.answer()
+            return
+
+        # 세션 선택 완료 - 시간 선택 화면
+        if action.startswith("session:"):
+            session_short_id = action[8:]
+            # 세션 ID 찾기
+            sessions = self.sessions.list_sessions(user_id)
+            session = next((s for s in sessions if s["id"].startswith(session_short_id)), None)
+            if not session:
+                await query.answer("❌ 세션을 찾을 수 없음")
+                return
+
+            from src.session_schedule import AVAILABLE_HOURS
+            # 시간 선택 버튼 (4열)
+            buttons = []
+            row = []
+            for hour in AVAILABLE_HOURS:
+                row.append(InlineKeyboardButton(
+                    f"{hour:02d}:00",
+                    callback_data=f"sched:time:{session_short_id}:{hour}"
+                ))
+                if len(row) == 4:
+                    buttons.append(row)
+                    row = []
+            if row:
+                buttons.append(row)
+            buttons.append([
+                InlineKeyboardButton("↩️ 취소", callback_data="sched:refresh")
+            ])
+
+            session_name = session.get("name") or session.get("summary", "")[:15] or session_short_id
+            await query.edit_message_text(
+                f"📅 <b>스케줄 추가</b>\n\n"
+                f"📂 세션: <b>{session_name}</b>\n\n"
+                f"실행 시간을 선택하세요 (매일 반복):",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML"
+            )
+            await query.answer()
+            return
+
+        # 시간 선택 완료 - 메시지 입력 (ForceReply)
+        if action.startswith("time:"):
+            parts = action[5:].split(":")
+            if len(parts) != 2:
+                await query.answer("❌ 잘못된 요청")
+                return
+
+            session_short_id, hour = parts[0], int(parts[1])
+
+            # 세션 정보 저장 (ForceReply 응답 처리용)
+            sessions = self.sessions.list_sessions(user_id)
+            session = next((s for s in sessions if s["id"].startswith(session_short_id)), None)
+            if not session:
+                await query.answer("❌ 세션을 찾을 수 없음")
+                return
+
+            session_name = session.get("name") or session.get("summary", "")[:15] or session_short_id
+
+            # 대기 상태 저장
+            self._pending_schedule_input[user_id] = {
+                "session_id": session["id"],
+                "session_name": session_name,
+                "hour": hour,
+                "minute": 0,
+            }
+
+            await query.edit_message_text(
+                f"📅 <b>스케줄 추가</b>\n\n"
+                f"📂 세션: <b>{session_name}</b>\n"
+                f"⏰ 시간: <b>{hour:02d}:00</b>\n\n"
+                f"아래에 예약 메시지를 입력하세요:",
+                parse_mode="HTML"
+            )
+
+            # ForceReply로 메시지 입력 요청
+            await query.message.reply_text(
+                "💬 예약 메시지를 입력하세요:",
+                reply_markup=ForceReply(selective=True, input_field_placeholder="예: 오늘 할 일 정리해줘")
+            )
+            await query.answer()
+            return
+
+        await query.answer("❌ 알 수 없는 동작")
 
     def _build_lock_status(self, user_id: str) -> tuple[str, list]:
         """Lock 상태 텍스트와 버튼 생성 (대기열 포함)."""
@@ -1626,6 +1862,12 @@ class BotHandlers:
                 clear_context()
                 return
 
+            # 스케줄 메시지 입력 ForceReply
+            if "예약 메시지" in reply_text and user_id in self._pending_schedule_input:
+                await self._handle_schedule_force_reply(update, chat_id, message)
+                clear_context()
+                return
+
         # 플러그인 처리 시도 (인증 전에 처리 - 플러그인은 인증 불필요)
         if self.plugins:
             logger.debug(f"[PLUGIN] 처리 시도 - 로드된 플러그인: {len(self.plugins.plugins)}개")
@@ -2491,6 +2733,11 @@ class BotHandlers:
             await self._handle_jobs_callback(query, chat_id)
             return
 
+        # 세션 스케줄 콜백 처리
+        if callback_data.startswith("sched:"):
+            await self._handle_scheduler_callback(query, chat_id, callback_data)
+            return
+
         # 세션 큐 콜백 처리 (새 방식)
         if callback_data.startswith("sq:"):
             await self._handle_session_queue_callback(query, chat_id, callback_data)
@@ -2580,6 +2827,52 @@ class BotHandlers:
             reply_markup=result.get("reply_markup"),
             parse_mode="HTML"
         )
+
+    async def _handle_schedule_force_reply(self, update: Update, chat_id: int, message: str) -> None:
+        """스케줄 메시지 입력 ForceReply 응답 처리."""
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+        user_id = str(chat_id)
+        pending = self._pending_schedule_input.get(user_id)
+
+        if not pending:
+            await update.message.reply_text("❌ 스케줄 입력 상태가 만료되었습니다. 다시 시도하세요.")
+            return
+
+        if not self._session_schedule_manager:
+            await update.message.reply_text("❌ 스케줄 기능이 비활성화되어 있습니다.")
+            del self._pending_schedule_input[user_id]
+            return
+
+        # 스케줄 등록
+        schedule = self._session_schedule_manager.add(
+            user_id=user_id,
+            chat_id=chat_id,
+            session_id=pending["session_id"],
+            session_name=pending["session_name"],
+            hour=pending["hour"],
+            minute=pending["minute"],
+            message=message,
+        )
+
+        # 상태 정리
+        del self._pending_schedule_input[user_id]
+
+        # 성공 메시지
+        keyboard = [[
+            InlineKeyboardButton("📅 스케줄 목록", callback_data="sched:refresh"),
+        ]]
+
+        await update.message.reply_text(
+            f"✅ <b>스케줄 등록 완료!</b>\n\n"
+            f"📂 세션: <b>{schedule.session_name}</b>\n"
+            f"⏰ 시간: <b>{schedule.time_str}</b> (매일)\n"
+            f"💬 메시지: <i>{message[:50]}{'...' if len(message) > 50 else ''}</i>",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML"
+        )
+
+        logger.info(f"스케줄 등록: {schedule.session_name} @ {schedule.time_str}")
 
     async def _handle_todo_callback(self, query, chat_id: int, callback_data: str) -> None:
         """Todo 플러그인 콜백 처리."""
