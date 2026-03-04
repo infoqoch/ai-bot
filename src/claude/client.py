@@ -106,12 +106,16 @@ class ClaudeClient:
 
         return (stdout_str, stderr_str, process.returncode)
 
-    async def create_session(self) -> Optional[str]:
-        """Create a new Claude session and return session_id."""
-        logger.trace("create_session() 시작")
+    async def create_session(self, project_path: Optional[str] = None) -> Optional[str]:
+        """Create a new Claude session and return session_id.
+
+        Args:
+            project_path: Project directory path (for project sessions)
+        """
+        logger.trace(f"create_session() 시작 - project_path={project_path or '(없음)'}")
         logger.info("새 Claude 세션 생성 중")
 
-        response = await self.chat("answer 'hi'", None)
+        response = await self.chat("answer 'hi'", None, project_path=project_path)
 
         if response.error:
             logger.error(f"세션 생성 실패: {response.error.value}")

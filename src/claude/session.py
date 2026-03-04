@@ -661,7 +661,15 @@ class SessionStore:
             history = data.get("history", [])
             history_count = len(history)
             last_used = data.get("last_used", "")[:10]
-            last_msg = history[-1][:50] if history else "-"
+            # history는 HistoryEntry 객체 리스트
+            if history:
+                last_entry = history[-1]
+                if isinstance(last_entry, dict):
+                    last_msg = last_entry.get("message", "")[:50]
+                else:
+                    last_msg = str(last_entry)[:50]
+            else:
+                last_msg = "-"
 
             line = (
                 f"- {session_id[:8]} {name} {model_emoji}{model} "

@@ -197,6 +197,7 @@ def create_app() -> Application:
     app.add_handler(CommandHandler("back", handlers.back_command))
     app.add_handler(CommandHandler("exit", handlers.exit_manager_command))
     app.add_handler(CommandHandler("chatid", handlers.chatid_command))
+    app.add_handler(CommandHandler("lock", handlers.lock_command))
     app.add_handler(CommandHandler("plugins", handlers.plugins_command))
     app.add_handler(CommandHandler("ai", handlers.ai_command))
 
