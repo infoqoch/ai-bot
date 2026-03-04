@@ -26,17 +26,17 @@ class SessionScheduler:
         self,
         session_store: "SessionStore",
         claude_client: "ClaudeClient",
-        maintainer_chat_id: Optional[int] = None,
+        admin_chat_id: Optional[int] = None,
     ):
         """
         Args:
             session_store: 세션 저장소
             claude_client: Claude CLI 클라이언트
-            maintainer_chat_id: 보고 받을 채팅 ID (None이면 보고 안함)
+            admin_chat_id: 보고 받을 채팅 ID (None이면 보고 안함)
         """
         self.sessions = session_store
         self.claude = claude_client
-        self.maintainer_chat_id = maintainer_chat_id
+        self.admin_chat_id = admin_chat_id
         self._app: Optional["Application"] = None
         self._jobs = []
 
@@ -94,8 +94,8 @@ class SessionScheduler:
                 })
                 logger.error(f"Compact 실패: user={user_id}, error={e}")
 
-        # 메인테이너에게 보고
-        if self.maintainer_chat_id and results:
+        # 관리자에게 보고
+        if self.admin_chat_id and results:
             await self._send_report(context, results)
 
     async def _run_compact(self, session_id: str) -> dict:
@@ -113,8 +113,8 @@ class SessionScheduler:
             }
 
     async def _send_report(self, context, results: list[dict]) -> None:
-        """메인테이너에게 compact 결과 보고."""
-        if not self.maintainer_chat_id:
+        """관리자에게 compact 결과 보고."""
+        if not self.admin_chat_id:
             return
 
         success_count = sum(1 for r in results if r["success"])
@@ -134,11 +134,11 @@ class SessionScheduler:
 
         try:
             await context.bot.send_message(
-                chat_id=self.maintainer_chat_id,
+                chat_id=self.admin_chat_id,
                 text="\n".join(lines),
                 parse_mode="HTML",
             )
-            logger.info(f"Compact 보고 전송 완료: chat_id={self.maintainer_chat_id}")
+            logger.info(f"Compact 보고 전송 완료: chat_id={self.admin_chat_id}")
         except Exception as e:
             logger.error(f"Compact 보고 전송 실패: {e}")
 

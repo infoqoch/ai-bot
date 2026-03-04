@@ -33,23 +33,23 @@ _lock_fd = None
 _child_process = None
 _shutdown_requested = False
 _telegram_token = None
-_maintainer_chat_id = None
+_admin_chat_id = None
 
 
 def _load_telegram_config():
     """환경변수에서 텔레그램 설정 로드."""
-    global _telegram_token, _maintainer_chat_id
+    global _telegram_token, _admin_chat_id
     _telegram_token = os.getenv("TELEGRAM_TOKEN")
-    _maintainer_chat_id = os.getenv("MAINTAINER_CHAT_ID")
-    if _maintainer_chat_id:
+    _admin_chat_id = os.getenv("ADMIN_CHAT_ID")
+    if _admin_chat_id:
         try:
-            _maintainer_chat_id = int(_maintainer_chat_id)
+            _admin_chat_id = int(_admin_chat_id)
         except ValueError:
-            _maintainer_chat_id = None
+            _admin_chat_id = None
 
 
-def notify_maintainer(message: str) -> bool:
-    """메인테이너에게 텔레그램 메시지 전송.
+def notify_admin(message: str) -> bool:
+    """관리자에게 텔레그램 메시지 전송.
 
     Args:
         message: 전송할 메시지 (HTML 형식 지원)
@@ -57,14 +57,14 @@ def notify_maintainer(message: str) -> bool:
     Returns:
         성공 여부
     """
-    if not _telegram_token or not _maintainer_chat_id:
-        logger.trace("메인테이너 알림 스킵 - 설정 없음")
+    if not _telegram_token or not _admin_chat_id:
+        logger.trace("관리자 알림 스킵 - 설정 없음")
         return False
 
     try:
         url = f"https://api.telegram.org/bot{_telegram_token}/sendMessage"
         data = {
-            "chat_id": _maintainer_chat_id,
+            "chat_id": _admin_chat_id,
             "text": message,
             "parse_mode": "HTML",
         }
@@ -73,14 +73,14 @@ def notify_maintainer(message: str) -> bool:
             response = client.post(url, json=data)
 
         if response.status_code == 200:
-            logger.info(f"메인테이너 알림 전송 성공")
+            logger.info(f"관리자 알림 전송 성공")
             return True
         else:
-            logger.warning(f"메인테이너 알림 실패: {response.status_code}")
+            logger.warning(f"관리자 알림 실패: {response.status_code}")
             return False
 
     except Exception as e:
-        logger.warning(f"메인테이너 알림 오류: {e}")
+        logger.warning(f"관리자 알림 오류: {e}")
         return False
 
 
@@ -205,7 +205,7 @@ def main():
 
     # 시작 알림
     start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    notify_maintainer(f"🟢 <b>봇이 시작되었습니다</b>\n\n<code>{start_time}</code>")
+    notify_admin(f"🟢 <b>봇이 시작되었습니다</b>\n\n<code>{start_time}</code>")
 
     restart_delay = INITIAL_RESTART_DELAY
     restart_count = 0
@@ -263,7 +263,7 @@ def main():
 
     # 종료 알림
     end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    notify_maintainer(f"🔴 <b>봇이 종료되었습니다</b>\n\n<code>{end_time}</code>")
+    notify_admin(f"🔴 <b>봇이 종료되었습니다</b>\n\n<code>{end_time}</code>")
 
     logger.info("=" * 60)
     logger.info("Supervisor 종료")
