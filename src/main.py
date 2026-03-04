@@ -88,6 +88,17 @@ def _setup_session_scheduler(app, session_store, claude_client, settings) -> Non
         logger.warning(f"세션 스케줄러 초기화 실패: {e}")
 
 
+def _setup_hourly_ping_scheduler(app, settings, plugin_loader) -> None:
+    """HourlyPing 플러그인 스케줄러 설정 (스케줄러 동작 확인용)."""
+    try:
+        hourly_ping_plugin = plugin_loader.get_plugin_by_name("hourly_ping")
+        if hourly_ping_plugin and hasattr(hourly_ping_plugin, "setup_scheduler"):
+            hourly_ping_plugin.setup_scheduler(app, settings.maintainer_chat_id)
+            logger.info("HourlyPing 스케줄러 활성화 (08:00~19:00 매 정시)")
+    except Exception as e:
+        logger.debug(f"HourlyPing 스케줄러 비활성화: {e}")
+
+
 def _setup_todo_scheduler(app, settings, plugin_loader) -> None:
     """Todo 스케줄러 설정."""
     global _todo_scheduler
@@ -199,6 +210,9 @@ def create_app() -> Application:
 
     # 세션 스케줄러 설정 (매니저 세션 compact)
     _setup_session_scheduler(app, session_store, claude_client, settings)
+
+    # HourlyPing 플러그인 스케줄러 설정 (스케줄러 동작 확인용)
+    _setup_hourly_ping_scheduler(app, settings, plugin_loader)
 
     # Register handlers
     logger.trace("핸들러 등록 시작")
