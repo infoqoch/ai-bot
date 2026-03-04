@@ -27,6 +27,7 @@ class SessionData(TypedDict):
     name: str  # 사용자 지정 세션 이름 (선택)
     deleted: bool  # soft delete 상태
     is_manager: bool  # 매니저 세션 여부
+    project_path: str  # 프로젝트 세션용 디렉토리 경로 (선택)
 
 
 # 지원하는 모델 목록
@@ -147,10 +148,10 @@ class SessionStore:
         logger.trace(f"유효한 세션 반환 - {session_id[:8]}")
         return session_id
 
-    def create_session(self, user_id: str, session_id: str, first_message: str, model: str = None, name: str = "", processor: str = "claude") -> None:
+    def create_session(self, user_id: str, session_id: str, first_message: str, model: str = None, name: str = "", processor: str = "claude", project_path: str = "") -> None:
         """Create a new session with Claude's session_id."""
         model = model or DEFAULT_MODEL
-        logger.trace(f"create_session() - user={user_id}, session={session_id[:8]}, model={model}, name={name or '(없음)'}")
+        logger.trace(f"create_session() - user={user_id}, session={session_id[:8]}, model={model}, name={name or '(없음)'}, project={project_path or '(없음)'}")
         logger.trace(f"first_message length={len(first_message)}")
 
         user_data = self._ensure_user(user_id)
@@ -170,15 +171,16 @@ class SessionStore:
             "history": [first_entry],
             "model": model,
             "name": name,
+            "project_path": project_path,
         }
 
         self._save()
-        logger.info(f"세션 생성됨 - user={user_id}, session={session_id[:8]}, model={model}, name={name or '(없음)'}")
+        logger.info(f"세션 생성됨 - user={user_id}, session={session_id[:8]}, model={model}, name={name or '(없음)'}, project={project_path or '(없음)'}")
 
-    def create_session_without_switch(self, user_id: str, session_id: str, first_message: str, model: str = None, name: str = "", processor: str = "claude") -> None:
+    def create_session_without_switch(self, user_id: str, session_id: str, first_message: str, model: str = None, name: str = "", processor: str = "claude", project_path: str = "") -> None:
         """Create a new session WITHOUT switching current (for manager use)."""
         model = model or DEFAULT_MODEL
-        logger.trace(f"create_session_without_switch() - user={user_id}, session={session_id[:8]}, model={model}, name={name or '(없음)'}")
+        logger.trace(f"create_session_without_switch() - user={user_id}, session={session_id[:8]}, model={model}, name={name or '(없음)'}, project={project_path or '(없음)'}")
 
         user_data = self._ensure_user(user_id)
         now = datetime.now().isoformat()
@@ -197,6 +199,7 @@ class SessionStore:
             "history": [first_entry],
             "model": model,
             "name": name,
+            "project_path": project_path,
         }
 
         self._save()
@@ -298,6 +301,23 @@ class SessionStore:
         model = session.get("model", DEFAULT_MODEL) if session else DEFAULT_MODEL
         logger.trace(f"모델: {model}")
         return model
+
+    def get_session_project_path(self, user_id: str, session_id: str) -> str:
+        """Get project_path for specific session (empty string if not a project session)."""
+        logger.trace(f"get_session_project_path() - user={user_id}, session={session_id[:8] if session_id else 'None'}")
+
+        user_data = self._data.get(user_id)
+        if not user_data:
+            return ""
+
+        session = user_data.get("sessions", {}).get(session_id)
+        project_path = session.get("project_path", "") if session else ""
+        logger.trace(f"project_path: {project_path or '(없음)'}")
+        return project_path
+
+    def is_project_session(self, user_id: str, session_id: str) -> bool:
+        """Check if session is a project session."""
+        return bool(self.get_session_project_path(user_id, session_id))
 
     def list_sessions(self, user_id: str) -> list[dict]:
         """List all sessions for a user."""

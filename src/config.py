@@ -1,5 +1,6 @@
 """Configuration management using Pydantic Settings."""
 
+import fnmatch
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
@@ -42,6 +43,12 @@ class Settings(BaseSettings):
     base_dir: Path = Field(default_factory=lambda: Path(__file__).parent.parent)
     working_dir: Optional[Path] = Field(default=None, description="봇이 작업할 디렉토리")
 
+    # Project Sessions
+    allowed_project_paths: list[str] = Field(
+        default_factory=lambda: ["/Users/bae/AiSandbox/*", "/Users/bae/Projects/*"],
+        description="프로젝트 세션 허용 디렉토리 (glob 패턴)"
+    )
+
     @field_validator("working_dir", mode="before")
     @classmethod
     def expand_working_dir(cls, v):
@@ -83,6 +90,17 @@ class Settings(BaseSettings):
         if isinstance(v, list):
             return v
         return []
+
+    @field_validator("allowed_project_paths", mode="before")
+    @classmethod
+    def parse_project_paths(cls, v):
+        if isinstance(v, str):
+            if not v.strip():
+                return []
+            return [x.strip() for x in v.split(",") if x.strip()]
+        if isinstance(v, list):
+            return v
+        return []
     
     @property
     def data_dir(self) -> Path:
@@ -99,6 +117,45 @@ class Settings(BaseSettings):
     @property
     def telegram_prompt_file(self) -> Path:
         return self.prompts_dir / "telegram.md"
+
+    def is_allowed_project_path(self, path: str) -> bool:
+        """Check if path is allowed for project sessions."""
+        expanded_path = Path(path).expanduser().resolve()
+        if not expanded_path.exists() or not expanded_path.is_dir():
+            return False
+
+        path_str = str(expanded_path)
+        for pattern in self.allowed_project_paths:
+            expanded_pattern = str(Path(pattern).expanduser())
+            if fnmatch.fnmatch(path_str, expanded_pattern):
+                return True
+            # 패턴이 /path/* 형태면 하위 디렉토리 체크
+            if expanded_pattern.endswith("/*"):
+                parent = expanded_pattern[:-2]
+                if path_str.startswith(parent + "/"):
+                    return True
+        return False
+
+    def validate_project_path(self, path: str) -> tuple[bool, str]:
+        """Validate project path and return (is_valid, error_message)."""
+        expanded = Path(path).expanduser().resolve()
+
+        if not expanded.exists():
+            return False, f"경로가 존재하지 않습니다: {path}"
+
+        if not expanded.is_dir():
+            return False, f"디렉토리가 아닙니다: {path}"
+
+        if not self.is_allowed_project_path(path):
+            return False, f"허용되지 않은 경로입니다: {path}"
+
+        # CLAUDE.md 또는 .claude 디렉토리 존재 확인 (권장사항)
+        has_claude_config = (
+            (expanded / "CLAUDE.md").exists() or
+            (expanded / ".claude").exists()
+        )
+
+        return True, "" if has_claude_config else "⚠️ CLAUDE.md 없음 (선택사항)"
 
 
 @lru_cache
