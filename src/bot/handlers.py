@@ -2363,8 +2363,16 @@ class BotHandlers:
         model_map = {"opus": "opus", "sonnet": "sonnet", "haiku": "haiku"}
         model_name = model_map.get(model, "sonnet")
 
-        session = self.session_manager.create_session(chat_id, model=model_name)
-        session_id = session["session_id"]
+        user_id = str(chat_id)
+
+        # Claude 세션 생성
+        session_id = await self.claude.create_session()
+        if not session_id:
+            await query.edit_message_text("❌ 세션 생성 실패")
+            return
+
+        # 세션 저장
+        self.sessions.create_session(user_id, session_id, "(새 세션)", model=model_name)
         short_id = session_id[:8]
 
         model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(model_name, "⚡")
@@ -2387,22 +2395,24 @@ class BotHandlers:
         """세션 전환 콜백."""
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-        session = self.session_manager.get_session(chat_id, session_id)
+        user_id = str(chat_id)
+        session = self.sessions.get_session_by_prefix(user_id, session_id[:8])
         if not session:
             await query.edit_message_text("❌ 세션을 찾을 수 없습니다.")
             return
 
-        self.session_manager.set_current_session(chat_id, session_id)
-        short_id = session_id[:8]
-        name = session.get("name", f"세션 {short_id}")
+        full_session_id = session.get("full_session_id", session_id)
+        self.sessions.set_current(user_id, full_session_id)
+        short_id = full_session_id[:8]
+        name = session.get("name") or f"세션 {short_id}"
         model = session.get("model", "sonnet")
         model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(model, "⚡")
 
         keyboard = [
             [
-                InlineKeyboardButton("🧠 Opus", callback_data=f"sess:model:opus:{session_id}"),
-                InlineKeyboardButton("⚡ Sonnet", callback_data=f"sess:model:sonnet:{session_id}"),
-                InlineKeyboardButton("🚀 Haiku", callback_data=f"sess:model:haiku:{session_id}"),
+                InlineKeyboardButton("🧠 Opus", callback_data=f"sess:model:opus:{full_session_id}"),
+                InlineKeyboardButton("⚡ Sonnet", callback_data=f"sess:model:sonnet:{full_session_id}"),
+                InlineKeyboardButton("🚀 Haiku", callback_data=f"sess:model:haiku:{full_session_id}"),
             ],
             [
                 InlineKeyboardButton("📋 세션 목록", callback_data="sess:list"),
@@ -2422,17 +2432,19 @@ class BotHandlers:
         """세션 삭제 확인."""
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-        session = self.session_manager.get_session(chat_id, session_id)
+        user_id = str(chat_id)
+        session = self.sessions.get_session_by_prefix(user_id, session_id[:8])
         if not session:
             await query.edit_message_text("❌ 세션을 찾을 수 없습니다.")
             return
 
-        short_id = session_id[:8]
-        name = session.get("name", f"세션 {short_id}")
+        full_session_id = session.get("full_session_id", session_id)
+        short_id = full_session_id[:8]
+        name = session.get("name") or f"세션 {short_id}"
 
         keyboard = [
             [
-                InlineKeyboardButton("✅ 삭제", callback_data=f"sess:confirm_del:{session_id}"),
+                InlineKeyboardButton("✅ 삭제", callback_data=f"sess:confirm_del:{full_session_id}"),
                 InlineKeyboardButton("❌ 취소", callback_data="sess:cancel"),
             ]
         ]
@@ -2448,15 +2460,17 @@ class BotHandlers:
 
     async def _handle_delete_session_execute(self, query, chat_id: int, session_id: str) -> None:
         """세션 삭제 실행."""
-        session = self.session_manager.get_session(chat_id, session_id)
+        user_id = str(chat_id)
+        session = self.sessions.get_session_by_prefix(user_id, session_id[:8])
         if not session:
             await query.edit_message_text("❌ 세션을 찾을 수 없습니다.")
             return
 
-        short_id = session_id[:8]
-        name = session.get("name", f"세션 {short_id}")
+        full_session_id = session.get("full_session_id", session_id)
+        short_id = full_session_id[:8]
+        name = session.get("name") or f"세션 {short_id}"
 
-        self.session_manager.delete_session(chat_id, session_id)
+        self.sessions.delete_session(user_id, full_session_id)
 
         # 삭제 후 세션 목록 표시
         await self._handle_session_list_callback(query, chat_id, f"🗑️ <s>{name}</s> 삭제됨!\n\n")
@@ -2465,14 +2479,16 @@ class BotHandlers:
         """세션 히스토리 콜백."""
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-        session = self.session_manager.get_session(chat_id, session_id)
+        user_id = str(chat_id)
+        session = self.sessions.get_session_by_prefix(user_id, session_id[:8])
         if not session:
             await query.edit_message_text("❌ 세션을 찾을 수 없습니다.")
             return
 
-        short_id = session_id[:8]
-        name = session.get("name", f"세션 {short_id}")
-        history = session.get("history", [])
+        full_session_id = session.get("full_session_id", session_id)
+        short_id = full_session_id[:8]
+        name = session.get("name") or f"세션 {short_id}"
+        history = self.sessions.get_session_history_entries(user_id, full_session_id)
 
         lines = [f"📜 <b>{name}</b> 히스토리\n"]
 
@@ -2480,14 +2496,14 @@ class BotHandlers:
             lines.append("(대화 기록 없음)")
         else:
             for i, entry in enumerate(history[-10:], 1):  # 최근 10개
-                msg = entry.get("message", "")[:50]
-                if len(entry.get("message", "")) > 50:
+                msg = entry.get("message", "")[:50] if isinstance(entry, dict) else str(entry)[:50]
+                if len(entry.get("message", "") if isinstance(entry, dict) else str(entry)) > 50:
                     msg += "..."
                 lines.append(f"{i}. {msg}")
 
         keyboard = [
             [
-                InlineKeyboardButton("📂 세션으로", callback_data=f"sess:switch:{session_id}"),
+                InlineKeyboardButton("📂 세션으로", callback_data=f"sess:switch:{full_session_id}"),
                 InlineKeyboardButton("📋 목록", callback_data="sess:list"),
             ]
         ]
@@ -2502,9 +2518,9 @@ class BotHandlers:
         """세션 목록 콜백."""
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-        sessions = self.session_manager.get_sessions(chat_id)
-        current = self.session_manager.get_current_session(chat_id)
-        current_id = current.get("session_id", "") if current else ""
+        user_id = str(chat_id)
+        sessions = self.sessions.list_sessions(user_id)
+        current_session_id = self.sessions.get_current_session_id(user_id)
 
         lines = [f"{prefix}📋 <b>세션 목록</b>\n"]
         buttons = []
@@ -2513,13 +2529,13 @@ class BotHandlers:
             lines.append("세션이 없습니다.")
         else:
             for session in sessions[:10]:  # 최대 10개
-                sid = session["session_id"]
-                short_id = sid[:8]
-                name = session.get("name", f"세션 {short_id}")
+                sid = session["full_session_id"]
+                short_id = session["session_id"]
+                name = session.get("name") or f"세션 {short_id}"
                 model = session.get("model", "sonnet")
                 model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(model, "⚡")
 
-                is_current = "👉 " if sid == current_id else ""
+                is_current = "👉 " if sid == current_session_id else ""
                 lines.append(f"{is_current}{model_emoji} <b>{name}</b> (<code>{short_id}</code>)")
 
                 # 각 세션에 액션 버튼
@@ -2549,24 +2565,29 @@ class BotHandlers:
         """모델 변경 콜백."""
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-        session = self.session_manager.get_session(chat_id, session_id)
+        user_id = str(chat_id)
+        session = self.sessions.get_session_by_prefix(user_id, session_id[:8])
         if not session:
             await query.edit_message_text("❌ 세션을 찾을 수 없습니다.")
             return
 
-        # 모델 변경
-        session["model"] = model
-        self.session_manager.save_sessions(chat_id)
+        full_session_id = session.get("full_session_id", session_id)
 
-        short_id = session_id[:8]
-        name = session.get("name", f"세션 {short_id}")
+        # 모델 변경 (직접 데이터 수정)
+        user_data = self.sessions._data.get(user_id)
+        if user_data and user_data.get("sessions", {}).get(full_session_id):
+            user_data["sessions"][full_session_id]["model"] = model
+            self.sessions._save()
+
+        short_id = full_session_id[:8]
+        name = session.get("name") or f"세션 {short_id}"
         model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(model, "⚡")
 
         keyboard = [
             [
-                InlineKeyboardButton("🧠 Opus", callback_data=f"sess:model:opus:{session_id}"),
-                InlineKeyboardButton("⚡ Sonnet", callback_data=f"sess:model:sonnet:{session_id}"),
-                InlineKeyboardButton("🚀 Haiku", callback_data=f"sess:model:haiku:{session_id}"),
+                InlineKeyboardButton("🧠 Opus", callback_data=f"sess:model:opus:{full_session_id}"),
+                InlineKeyboardButton("⚡ Sonnet", callback_data=f"sess:model:sonnet:{full_session_id}"),
+                InlineKeyboardButton("🚀 Haiku", callback_data=f"sess:model:haiku:{full_session_id}"),
             ],
             [
                 InlineKeyboardButton("📋 세션 목록", callback_data="sess:list"),
