@@ -391,6 +391,29 @@ class BotHandlers:
         logger.trace("/lock 완료")
         clear_context()
 
+    async def jobs_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /jobs command - show scheduled jobs."""
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        from src.scheduler_manager import scheduler_manager
+
+        chat_id = update.effective_chat.id
+        self._setup_request_context(chat_id)
+        logger.info("/jobs 명령 수신")
+
+        text = scheduler_manager.get_status_text()
+
+        keyboard = [[
+            InlineKeyboardButton("🔄 새로고침", callback_data="jobs:refresh"),
+        ]]
+
+        await update.message.reply_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML"
+        )
+        logger.trace("/jobs 완료")
+        clear_context()
+
     def _build_lock_status(self, user_id: str) -> tuple[str, list]:
         """Lock 상태 텍스트와 버튼 생성 (대기열 포함)."""
         from telegram import InlineKeyboardButton
@@ -2463,6 +2486,11 @@ class BotHandlers:
             await self._handle_lock_callback(query, chat_id)
             return
 
+        # Jobs 콜백 처리 (스케줄 작업)
+        if callback_data.startswith("jobs:"):
+            await self._handle_jobs_callback(query, chat_id)
+            return
+
         # 세션 큐 콜백 처리 (새 방식)
         if callback_data.startswith("sq:"):
             await self._handle_session_queue_callback(query, chat_id, callback_data)
@@ -3041,6 +3069,23 @@ class BotHandlers:
 
         user_id = str(chat_id)
         text, keyboard = self._build_lock_status(user_id)
+
+        await query.edit_message_text(
+            text=text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML"
+        )
+
+    async def _handle_jobs_callback(self, query, chat_id: int) -> None:
+        """스케줄 작업 현황 콜백 처리 - /jobs와 동일."""
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        from src.scheduler_manager import scheduler_manager
+
+        text = scheduler_manager.get_status_text()
+
+        keyboard = [[
+            InlineKeyboardButton("🔄 새로고침", callback_data="jobs:refresh"),
+        ]]
 
         await query.edit_message_text(
             text=text,
