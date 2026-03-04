@@ -39,9 +39,7 @@ class MemoPlugin(Plugin):
         r"메모\s*[:\-]\s*(.+)",
     ]
     LIST_PATTERNS = [
-        r"메모\s*(목록|보여줘|리스트|확인)",
-        r"메모들?\s*보여",
-        r"저장된\s*메모",
+        r"^메모$",  # 정확히 "메모"만
     ]
     DELETE_PATTERNS = [
         r"메모\s*(\d+)\s*(삭제|지워)",
