@@ -43,11 +43,19 @@ class Settings(BaseSettings):
     base_dir: Path = Field(default_factory=lambda: Path(__file__).parent.parent)
     working_dir: Optional[Path] = Field(default=None, description="봇이 작업할 디렉토리")
 
-    # Project Sessions
-    allowed_project_paths: list[str] = Field(
-        default_factory=lambda: ["/Users/bae/AiSandbox/*", "/Users/bae/Projects/*"],
-        description="프로젝트 세션 허용 디렉토리 (glob 패턴)"
+    # Project Sessions (쉼표로 구분된 문자열로 저장, 프로퍼티로 리스트 반환)
+    allowed_project_paths_raw: str = Field(
+        default="/Users/bae/AiSandbox/*,/Users/bae/Projects/*",
+        alias="ALLOWED_PROJECT_PATHS",
+        description="프로젝트 세션 허용 디렉토리 (glob 패턴, 쉼표 구분)"
     )
+
+    @property
+    def allowed_project_paths(self) -> list[str]:
+        """Parse comma-separated paths into list."""
+        if not self.allowed_project_paths_raw or not self.allowed_project_paths_raw.strip():
+            return []
+        return [p.strip() for p in self.allowed_project_paths_raw.split(",") if p.strip()]
 
     @field_validator("working_dir", mode="before")
     @classmethod
@@ -91,17 +99,6 @@ class Settings(BaseSettings):
             return v
         return []
 
-    @field_validator("allowed_project_paths", mode="before")
-    @classmethod
-    def parse_project_paths(cls, v):
-        if isinstance(v, str):
-            if not v.strip():
-                return []
-            return [x.strip() for x in v.split(",") if x.strip()]
-        if isinstance(v, list):
-            return v
-        return []
-    
     @property
     def data_dir(self) -> Path:
         return self.base_dir / ".data"
