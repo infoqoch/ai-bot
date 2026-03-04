@@ -7,6 +7,8 @@ from typing import Optional
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 
+from src.logging_config import logger
+
 
 class TimeSlot(str, Enum):
     """시간대 구분."""
@@ -428,3 +430,120 @@ class TodoManager:
             except ValueError:
                 continue
         return chat_ids
+
+    def get_pending_tasks_flat(self, chat_id: int) -> list[dict]:
+        """미완료 할일을 flat list로 반환 (멀티 선택용).
+
+        Returns:
+            [{"slot": "m", "index": 0, "text": "할일1"}, ...]
+        """
+        daily = self.get_today(chat_id)
+        result = []
+        slot_codes = {
+            TimeSlot.MORNING.value: "m",
+            TimeSlot.AFTERNOON.value: "a",
+            TimeSlot.EVENING.value: "e",
+        }
+
+        for slot in [TimeSlot.MORNING, TimeSlot.AFTERNOON, TimeSlot.EVENING]:
+            tasks = daily.get_tasks(slot)
+            for i, task in enumerate(tasks):
+                if not task.done:
+                    result.append({
+                        "slot": slot_codes[slot.value],
+                        "index": i,
+                        "text": task.text,
+                    })
+        return result
+
+    def carry_to_tomorrow(self, chat_id: int, items: list[tuple[str, int]]) -> int:
+        """미완료 항목을 내일로 넘기기.
+
+        Args:
+            chat_id: 채팅 ID
+            items: [(slot_code, index), ...] 넘길 항목들
+
+        Returns:
+            넘긴 항목 수
+        """
+        from datetime import timedelta
+
+        daily = self.get_today(chat_id)
+        tomorrow_str = (date.today() + timedelta(days=1)).isoformat()
+
+        # 내일 데이터 로드 또는 생성
+        tomorrow_file = self.data_dir / f"{chat_id}_tomorrow.json"
+        if tomorrow_file.exists():
+            try:
+                tomorrow_data = json.loads(tomorrow_file.read_text(encoding="utf-8"))
+                tomorrow_daily = DailyTodo.from_dict(tomorrow_data)
+            except Exception:
+                tomorrow_daily = DailyTodo(date=tomorrow_str)
+        else:
+            tomorrow_daily = DailyTodo(date=tomorrow_str)
+
+        tomorrow_daily.date = tomorrow_str
+
+        slot_map = {
+            "m": TimeSlot.MORNING,
+            "a": TimeSlot.AFTERNOON,
+            "e": TimeSlot.EVENING,
+        }
+
+        carried = 0
+        # 역순으로 처리 (삭제 시 인덱스 밀림 방지)
+        for slot_code, index in sorted(items, key=lambda x: (x[0], -x[1])):
+            slot = slot_map.get(slot_code)
+            if not slot:
+                continue
+
+            tasks = daily.tasks.get(slot.value, [])
+            if 0 <= index < len(tasks):
+                task = tasks[index]
+                if not task.get("done"):
+                    # 내일에 추가
+                    tomorrow_daily.add_task(slot, task["text"])
+                    # 오늘에서 삭제
+                    tasks.pop(index)
+                    carried += 1
+
+        # 저장
+        self.save_today(chat_id, daily)
+        tomorrow_file.write_text(
+            json.dumps(tomorrow_daily.to_dict(), ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
+
+        return carried
+
+    def carry_all_pending(self, chat_id: int) -> int:
+        """모든 미완료 항목을 내일로 넘기기."""
+        pending = self.get_pending_tasks_flat(chat_id)
+        items = [(p["slot"], p["index"]) for p in pending]
+        return self.carry_to_tomorrow(chat_id, items)
+
+    def load_carried_tasks(self, chat_id: int) -> None:
+        """내일로 넘긴 항목을 오늘로 로드 (날짜 변경 시 호출)."""
+        tomorrow_file = self.data_dir / f"{chat_id}_tomorrow.json"
+        if not tomorrow_file.exists():
+            return
+
+        try:
+            tomorrow_data = json.loads(tomorrow_file.read_text(encoding="utf-8"))
+            today_str = date.today().isoformat()
+
+            # 날짜가 맞으면 오늘로 병합
+            if tomorrow_data.get("date") == today_str:
+                daily = self.get_today(chat_id)
+
+                for slot_value, tasks in tomorrow_data.get("tasks", {}).items():
+                    if slot_value not in daily.tasks:
+                        daily.tasks[slot_value] = []
+                    daily.tasks[slot_value].extend(tasks)
+
+                self.save_today(chat_id, daily)
+                tomorrow_file.unlink()  # 파일 삭제
+                logger.info(f"내일 할일 로드됨: chat_id={chat_id}")
+
+        except Exception as e:
+            logger.error(f"내일 할일 로드 실패: {e}")

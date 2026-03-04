@@ -1,9 +1,10 @@
 """Todo 스케줄러 - 시간대별 리마인더 관리."""
 
-import asyncio
 from datetime import datetime, time
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 from zoneinfo import ZoneInfo
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.logging_config import logger
 
@@ -16,33 +17,30 @@ from .manager import TodoManager, TimeSlot
 # 한국 시간대
 KST = ZoneInfo("Asia/Seoul")
 
-# 스케줄 시간 설정 (KST 시간대 명시)
+# 스케줄 시간 설정
 SCHEDULE_TIMES = {
-    "morning_ask": time(8, 0, tzinfo=KST),      # 08:00 KST - 오늘 할일 질문
-    "morning_check": time(10, 0, tzinfo=KST),   # 10:00 KST - 오전 할일 체크
-    "afternoon_check": time(15, 0, tzinfo=KST), # 15:00 KST - 오후 할일 체크
-    "evening_check": time(19, 0, tzinfo=KST),   # 19:00 KST - 저녁 할일 체크
+    "morning_check": time(10, 0, tzinfo=KST),   # 10:00 KST - 오전 할일 리마인더
+    "afternoon_check": time(15, 0, tzinfo=KST), # 15:00 KST - 오후 할일 리마인더
+    "evening_check": time(19, 0, tzinfo=KST),   # 19:00 KST - 저녁 할일 리마인더
+    "daily_wrap": time(21, 0, tzinfo=KST),      # 21:00 KST - 하루 마무리
 }
 
 
 class TodoScheduler:
-    """할일 스케줄러."""
+    """할일 스케줄러 (버튼 기반)."""
 
     def __init__(
         self,
         todo_manager: TodoManager,
         chat_ids: list[int],
-        claude_parser: Optional[Callable] = None,
     ):
         """
         Args:
             todo_manager: 할일 관리자
             chat_ids: 알림 받을 채팅 ID 목록
-            claude_parser: AI 파서 함수 (할일 텍스트 -> 시간대별 분류)
         """
         self.manager = todo_manager
         self.chat_ids = chat_ids
-        self.claude_parser = claude_parser
         self._app: Optional["Application"] = None
         self._jobs = []
 
@@ -70,15 +68,6 @@ class TodoScheduler:
             job.schedule_removal()
         self._jobs.clear()
 
-        # 08:00 - 오늘 할일 질문
-        job = job_queue.run_daily(
-            self._morning_ask_callback,
-            time=SCHEDULE_TIMES["morning_ask"],
-            name="todo_morning_ask",
-        )
-        self._jobs.append(job)
-        logger.info(f"스케줄 등록: 08:00 오늘 할일 질문")
-
         # 10:00 - 오전 할일 체크
         job = job_queue.run_daily(
             self._morning_check_callback,
@@ -86,7 +75,7 @@ class TodoScheduler:
             name="todo_morning_check",
         )
         self._jobs.append(job)
-        logger.info(f"스케줄 등록: 10:00 오전 할일 체크")
+        logger.info("스케줄 등록: 10:00 오전 할일 리마인더")
 
         # 15:00 - 오후 할일 체크
         job = job_queue.run_daily(
@@ -95,7 +84,7 @@ class TodoScheduler:
             name="todo_afternoon_check",
         )
         self._jobs.append(job)
-        logger.info(f"스케줄 등록: 15:00 오후 할일 체크")
+        logger.info("스케줄 등록: 15:00 오후 할일 리마인더")
 
         # 19:00 - 저녁 할일 체크
         job = job_queue.run_daily(
@@ -104,33 +93,18 @@ class TodoScheduler:
             name="todo_evening_check",
         )
         self._jobs.append(job)
-        logger.info(f"스케줄 등록: 19:00 저녁 할일 체크")
+        logger.info("스케줄 등록: 19:00 저녁 할일 리마인더")
+
+        # 21:00 - 하루 마무리
+        job = job_queue.run_daily(
+            self._daily_wrap_callback,
+            time=SCHEDULE_TIMES["daily_wrap"],
+            name="todo_daily_wrap",
+        )
+        self._jobs.append(job)
+        logger.info("스케줄 등록: 21:00 하루 마무리")
 
         logger.info(f"Todo 스케줄러 설정 완료 - {len(self._jobs)}개 작업")
-
-    async def _morning_ask_callback(self, context) -> None:
-        """08:00 - 오늘 할일 질문."""
-        logger.info("🌅 아침 할일 질문 시작")
-
-        message = (
-            "🌅 <b>좋은 아침이에요!</b>\n\n"
-            "오늘 할 일이 뭐예요?\n"
-            "편하게 말해주세요. 시간대별로 정리해드릴게요.\n\n"
-            "<i>예: 오전에 회의하고, 점심에 친구 만나고, 저녁엔 운동해야해</i>"
-        )
-
-        for chat_id in self._get_active_chat_ids():
-            try:
-                # 입력 대기 상태로 설정
-                self.manager.set_pending_input(chat_id, True)
-                await context.bot.send_message(
-                    chat_id=chat_id,
-                    text=message,
-                    parse_mode="HTML"
-                )
-                logger.info(f"아침 질문 전송 완료: chat_id={chat_id}")
-            except Exception as e:
-                logger.error(f"아침 질문 전송 실패: chat_id={chat_id}, error={e}")
 
     async def _morning_check_callback(self, context) -> None:
         """10:00 - 오전 할일 체크."""
@@ -144,9 +118,74 @@ class TodoScheduler:
         """19:00 - 저녁 할일 체크."""
         await self._send_slot_reminder(context, TimeSlot.EVENING, "🌙 저녁")
 
+    async def _daily_wrap_callback(self, context) -> None:
+        """21:00 - 하루 마무리."""
+        logger.info("하루 마무리 알림 시작")
+
+        for chat_id in self._get_active_chat_ids():
+            try:
+                daily = self.manager.get_today(chat_id)
+                all_tasks = daily.get_all_tasks()
+
+                # 통계 계산
+                total = sum(len(tasks) for tasks in all_tasks.values())
+                done = sum(1 for tasks in all_tasks.values() for t in tasks if t.done)
+                pending = total - done
+
+                if total == 0:
+                    continue  # 할일 없으면 스킵
+
+                # 메시지 구성
+                lines = ["🌙 <b>하루 마무리</b>\n"]
+
+                if pending == 0:
+                    lines.append("🎉 오늘 할일을 모두 완료했어요!")
+                else:
+                    lines.append(f"📊 오늘 진행률: {done}/{total} 완료\n")
+                    lines.append("<b>미완료 항목:</b>")
+
+                    slot_names = {
+                        TimeSlot.MORNING.value: "🌅 오전",
+                        TimeSlot.AFTERNOON.value: "☀️ 오후",
+                        TimeSlot.EVENING.value: "🌙 저녁",
+                    }
+
+                    for slot_value, tasks in all_tasks.items():
+                        pending_tasks = [t for t in tasks if not t.done]
+                        if pending_tasks:
+                            slot_name = slot_names.get(slot_value, slot_value)
+                            lines.append(f"\n{slot_name}")
+                            for t in pending_tasks:
+                                lines.append(f"  ⬜ {t.text}")
+
+                    lines.append("\n내일로 넘길 항목이 있나요?")
+
+                # 버튼 구성
+                buttons = []
+                if pending > 0:
+                    buttons.append([
+                        InlineKeyboardButton("📋 멀티 선택", callback_data="td:multi"),
+                        InlineKeyboardButton("🔄 전체 넘기기", callback_data="td:carry_all"),
+                    ])
+                buttons.append([
+                    InlineKeyboardButton("✅ 오늘 마무리", callback_data="td:wrap_done"),
+                    InlineKeyboardButton("📄 리스트", callback_data="td:list"),
+                ])
+
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text="\n".join(lines),
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(buttons)
+                )
+                logger.info(f"하루 마무리 알림 전송: chat_id={chat_id}")
+
+            except Exception as e:
+                logger.error(f"하루 마무리 알림 실패: chat_id={chat_id}, error={e}")
+
     async def _send_slot_reminder(self, context, slot: TimeSlot, slot_name: str) -> None:
-        """시간대별 리마인더 전송."""
-        logger.info(f"{slot_name} 할일 체크 시작")
+        """시간대별 리마인더 전송 (버튼 포함)."""
+        logger.info(f"{slot_name} 할일 리마인더 시작")
 
         for chat_id in self._get_active_chat_ids():
             try:
@@ -168,18 +207,26 @@ class TodoScheduler:
                     continue
 
                 # 미완료 할일 알림
-                lines = [f"<b>{slot_name} 할일 어때요?</b>\n"]
+                lines = [f"<b>{slot_name} 할일 리마인더</b>\n"]
                 for i, task in enumerate(tasks, 1):
                     status = "✅" if task.done else "⬜"
                     lines.append(f"{status} {i}. {task.text}")
 
-                lines.append(f"\n완료한 건 말해주세요!")
-                lines.append(f"<i>예: 회의 끝났어, 1번 완료</i>")
+                lines.append(f"\n📊 {len(tasks) - len(pending)}/{len(tasks)} 완료")
+
+                # 버튼 추가
+                keyboard = [
+                    [
+                        InlineKeyboardButton("📄 리스트 열기", callback_data="td:list"),
+                        InlineKeyboardButton("➕ 추가", callback_data="td:add"),
+                    ]
+                ]
 
                 await context.bot.send_message(
                     chat_id=chat_id,
                     text="\n".join(lines),
-                    parse_mode="HTML"
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
                 )
                 logger.info(f"{slot_name} 리마인더 전송: chat_id={chat_id}")
 
@@ -188,7 +235,6 @@ class TodoScheduler:
 
     def _get_active_chat_ids(self) -> list[int]:
         """활성 채팅 ID 목록 (등록된 + 오늘 데이터 있는)."""
-        # 설정된 chat_ids + 데이터가 있는 chat_ids
         registered = set(self.manager.get_registered_chat_ids())
         configured = set(self.chat_ids)
         return list(registered | configured)

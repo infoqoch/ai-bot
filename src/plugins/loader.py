@@ -15,6 +15,7 @@ class PluginResult:
     handled: bool  # 플러그인이 메시지를 처리했는지
     response: Optional[str] = None  # 응답 메시지
     error: Optional[str] = None  # 에러 메시지
+    reply_markup: Optional[any] = None  # InlineKeyboardMarkup 등
 
 
 class Plugin(ABC):
