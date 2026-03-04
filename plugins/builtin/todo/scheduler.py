@@ -20,6 +20,7 @@ KST = ZoneInfo("Asia/Seoul")
 
 # 스케줄 시간 설정
 SCHEDULE_TIMES = {
+    "morning_wrap": time(8, 0, tzinfo=KST),     # 08:00 KST - 어제 미완료 → 오늘로 이관
     "morning_check": time(10, 0, tzinfo=KST),   # 10:00 KST - 오전 할일 리마인더
     "afternoon_check": time(15, 0, tzinfo=KST), # 15:00 KST - 오후 할일 리마인더
     "evening_check": time(19, 0, tzinfo=KST),   # 19:00 KST - 저녁 할일 리마인더
@@ -63,6 +64,16 @@ class TodoScheduler:
         # 기존 작업 제거
         scheduler_manager.unregister_by_owner(self.OWNER)
 
+        # 08:00 - 아침 마무리 (어제 미완료 → 오늘 이관)
+        scheduler_manager.register_daily(
+            name="todo_morning_wrap",
+            callback=self._morning_wrap_callback,
+            time_of_day=SCHEDULE_TIMES["morning_wrap"],
+            owner=self.OWNER,
+            metadata={"slot": "morning_wrap"},
+        )
+        logger.info("스케줄 등록: 08:00 아침 마무리 (via SchedulerManager)")
+
         # 10:00 - 오전 할일 체크
         scheduler_manager.register_daily(
             name="todo_morning_check",
@@ -105,6 +116,70 @@ class TodoScheduler:
 
         job_count = len(scheduler_manager.list_jobs_by_owner(self.OWNER))
         logger.info(f"Todo 스케줄러 설정 완료 - {job_count}개 작업 (via SchedulerManager)")
+
+    async def _morning_wrap_callback(self, context) -> None:
+        """08:00 - 아침 마무리 (어제 미완료 → 오늘 이관)."""
+        from datetime import timedelta
+
+        logger.info("아침 마무리 알림 시작")
+
+        for chat_id in self._get_active_chat_ids():
+            try:
+                # 어제 날짜 계산
+                yesterday = datetime.now(KST).date() - timedelta(days=1)
+                yesterday_daily = self.manager.get_daily_by_date(chat_id, yesterday)
+
+                if not yesterday_daily:
+                    continue  # 어제 데이터 없으면 스킵
+
+                all_tasks = yesterday_daily.get_all_tasks()
+                pending = []
+                for slot_value, tasks in all_tasks.items():
+                    for t in tasks:
+                        if not t.done:
+                            pending.append((slot_value, t))
+
+                if not pending:
+                    continue  # 어제 미완료 없으면 스킵
+
+                # 메시지 구성
+                lines = ["☀️ <b>아침 마무리</b>\n"]
+                lines.append(f"어제 미완료 항목이 {len(pending)}개 있어요:\n")
+
+                slot_names = {
+                    TimeSlot.MORNING.value: "🌅 오전",
+                    TimeSlot.AFTERNOON.value: "☀️ 오후",
+                    TimeSlot.EVENING.value: "🌙 저녁",
+                }
+
+                for slot_value, task in pending:
+                    slot_name = slot_names.get(slot_value, slot_value)
+                    lines.append(f"  ⬜ [{slot_name}] {task.text}")
+
+                lines.append("\n오늘로 이관할 항목을 선택하세요:")
+
+                # 버튼 구성
+                buttons = [
+                    [
+                        InlineKeyboardButton("🔄 전체 이관", callback_data="td:carry_all"),
+                        InlineKeyboardButton("📋 선택 이관", callback_data="td:multi"),
+                    ],
+                    [
+                        InlineKeyboardButton("🗑 전체 삭제", callback_data="td:clear_yesterday"),
+                        InlineKeyboardButton("📄 오늘 리스트", callback_data="td:list"),
+                    ],
+                ]
+
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text="\n".join(lines),
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(buttons)
+                )
+                logger.info(f"아침 마무리 알림 전송: chat_id={chat_id}, pending={len(pending)}")
+
+            except Exception as e:
+                logger.error(f"아침 마무리 알림 실패: chat_id={chat_id}, error={e}")
 
     async def _morning_check_callback(self, context) -> None:
         """10:00 - 오전 할일 체크."""

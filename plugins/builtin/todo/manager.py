@@ -159,6 +159,14 @@ class TodoManager:
         data = self._load_data(chat_id)
 
         if data.get("date") != today_str:
+            # 어제 데이터 백업 (날짜가 있으면)
+            if data.get("date"):
+                yesterday_file = self.data_dir / f"{chat_id}_yesterday.json"
+                yesterday_file.write_text(
+                    json.dumps(data, ensure_ascii=False, indent=2),
+                    encoding="utf-8"
+                )
+
             # 날짜가 다르면 새로 생성
             daily = DailyTodo(date=today_str)
             self._save_data(chat_id, daily.to_dict())
@@ -171,6 +179,25 @@ class TodoManager:
             return DailyTodo.from_dict(data)
 
         return DailyTodo.from_dict(data)
+
+    def get_daily_by_date(self, chat_id: int, target_date: date) -> DailyTodo | None:
+        """특정 날짜의 할일 조회 (없으면 None)."""
+        data = self._load_data(chat_id)
+
+        if data.get("date") == target_date.isoformat():
+            return DailyTodo.from_dict(data)
+
+        # 어제 데이터는 _yesterday.json에 백업되어 있을 수 있음
+        yesterday_file = self.data_dir / f"{chat_id}_yesterday.json"
+        if yesterday_file.exists():
+            try:
+                yesterday_data = json.loads(yesterday_file.read_text(encoding="utf-8"))
+                if yesterday_data.get("date") == target_date.isoformat():
+                    return DailyTodo.from_dict(yesterday_data)
+            except Exception:
+                pass
+
+        return None
 
     def _load_carried_tasks(self, chat_id: int) -> None:
         """내일로 넘긴 항목을 오늘로 로드 (내부용)."""
