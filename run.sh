@@ -38,14 +38,15 @@ _is_running() {
 
 case "$1" in
   start)
-    if _is_running; then
-        pid=$(_get_running_pid)
-        echo "⚠️  봇이 이미 실행 중입니다 (PID: $pid)"
-        echo "   ./run.sh restart 로 재시작하세요."
-        exit 1
+    # 기존 프로세스 확인 및 정리 (좀비 방지)
+    existing_pids=$(pgrep -f "python.*src\.(supervisor|main)" 2>/dev/null)
+    if [ -n "$existing_pids" ]; then
+        echo "⚠️  기존 프로세스 발견 - 자동 정리 중..."
+        echo "$existing_pids" | xargs kill -9 2>/dev/null
+        sleep 1
     fi
-    # 혹시 남은 좀비 락 파일 정리
-    rm -f "$LOCK_FILE" "/tmp/telegram-bot-supervisor.lock"
+    # 락 파일 정리
+    rm -f "$LOCK_FILE" "/tmp/telegram-bot-supervisor.lock" "$PID_FILE"
     source venv/bin/activate
     # supervisor로 시작 (크래시 시 자동 재시작)
     # LOG_LEVEL 환경변수로 조정 (기본: INFO)
