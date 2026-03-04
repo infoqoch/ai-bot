@@ -1577,6 +1577,7 @@ class BotHandlers:
 
             # 장시간 작업 알림 태스크
             long_task_notified = False
+            short_message = truncate_message(message, 30)  # 메시지 미리보기
 
             async def notify_long_task():
                 nonlocal long_task_notified
@@ -1587,7 +1588,8 @@ class BotHandlers:
                     logger.info(f"장시간 작업 알림 - {elapsed_min}분 경과")
                     await bot.send_message(
                         chat_id=chat_id,
-                        text=f"⏳ 작업이 {elapsed_min}분 이상 걸리고 있어요. 완료되면 알려드릴게요!"
+                        text=f"⏳ <code>{short_message}</code>\n작업이 {elapsed_min}분 이상 걸리고 있어요. 완료되면 알려드릴게요!",
+                        parse_mode="HTML"
                     )
 
             # 알림 태스크 시작
@@ -1627,7 +1629,7 @@ class BotHandlers:
                 response = f"❌ 오류 발생: {error}"
             elif not response or not response.strip():
                 logger.warning("Claude 빈 응답")
-                response = "⚠️ 응답이 비어있습니다. 다시 시도해주세요."
+                response = f"⚠️ <code>{short_message}</code>\n응답이 비어있습니다. 다시 시도해주세요."
 
             # ACTION 패턴 처리 (매니저 세션)
             action_results = []
@@ -1671,7 +1673,8 @@ class BotHandlers:
                 elapsed_sec = int(elapsed % 60)
                 await bot.send_message(
                     chat_id=chat_id,
-                    text=f"✅ 작업 완료! ({elapsed_min}분 {elapsed_sec}초 소요)"
+                    text=f"✅ <code>{short_message}</code>\n작업 완료! ({elapsed_min}분 {elapsed_sec}초 소요)",
+                    parse_mode="HTML"
                 )
 
             # 응답 전송 (chat_id로 직접 전송)
