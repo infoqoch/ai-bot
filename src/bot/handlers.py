@@ -17,6 +17,7 @@ from .constants import (
     ACTION_RENAME_PATTERN,
     ACTION_CREATE_PATTERN,
     ACTION_CREATE_SWITCH_PATTERN,
+    ACTION_CREATE_PROJECT_PATTERN,
     ACTION_SWITCH_PATTERN,
     MAX_MESSAGE_LENGTH,
     WATCHDOG_INTERVAL_SECONDS,
@@ -551,6 +552,94 @@ class BotHandlers:
         """Handle /new_opus_smarty command - smart opus session with name."""
         context.args = ["opus", "Smarty"]
         await self.new_session(update, context)
+
+    @authorized_only
+    @authenticated_only
+    async def new_project_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /new_project command - create project-bound session.
+
+        Usage:
+            /new_project /path/to/project           - 기본 모델 (sonnet)
+            /new_project /path/to/project opus      - Opus 모델
+            /new_project /path/to/project haiku 이름 - Haiku 모델 + 세션 이름
+        """
+        from src.config import get_settings
+
+        chat_id = update.effective_chat.id
+        user_id = str(chat_id)
+        args = context.args or []
+
+        if not args:
+            await update.message.reply_text(
+                "📁 <b>프로젝트 세션 사용법</b>\n\n"
+                "<code>/new_project 경로 [모델] [이름]</code>\n\n"
+                "예시:\n"
+                "• <code>/new_project ~/Projects/my-app</code>\n"
+                "• <code>/new_project ~/AiSandbox/bot opus</code>\n"
+                "• <code>/new_project ~/work/api haiku API봇</code>",
+                parse_mode="HTML"
+            )
+            return
+
+        # 첫 번째 인자: 경로
+        project_path = args[0]
+
+        # 경로 검증
+        settings = get_settings()
+        is_valid, error_msg = settings.validate_project_path(project_path)
+        if not is_valid:
+            await update.message.reply_text(f"❌ {error_msg}", parse_mode="HTML")
+            return
+
+        # 모델과 이름 파싱
+        model = None
+        session_name = ""
+        if len(args) > 1:
+            potential_model = args[1].lower()
+            from src.claude.session import SUPPORTED_MODELS
+            if potential_model in SUPPORTED_MODELS:
+                model = potential_model
+                if len(args) > 2:
+                    session_name = " ".join(args[2:])
+            else:
+                session_name = " ".join(args[1:])
+
+        # 경로에서 프로젝트 이름 추출
+        from pathlib import Path
+        expanded_path = str(Path(project_path).expanduser().resolve())
+        project_name = Path(expanded_path).name
+        display_name = session_name or f"📁{project_name}"
+
+        logger.info(f"/new_project - path={expanded_path}, model={model}, name={display_name}")
+
+        # Claude 세션 생성
+        session_id = await self.claude.create_session()
+        if not session_id:
+            await update.message.reply_text("❌ 세션 생성 실패", parse_mode="HTML")
+            return
+
+        # 세션 저장 (project_path 포함)
+        self.sessions.create_session(
+            user_id, session_id, f"(프로젝트: {project_name})",
+            model=model, name=display_name, project_path=expanded_path
+        )
+
+        model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(model or "sonnet", "⚡")
+
+        # CLAUDE.md 존재 여부 확인
+        claude_md_exists = (Path(expanded_path) / "CLAUDE.md").exists()
+        claude_dir_exists = (Path(expanded_path) / ".claude").exists()
+        config_status = "✅ CLAUDE.md" if claude_md_exists else ("✅ .claude/" if claude_dir_exists else "⚠️ 설정 없음")
+
+        await update.message.reply_text(
+            f"📁 <b>프로젝트 세션 생성됨</b>\n\n"
+            f"• 경로: <code>{expanded_path}</code>\n"
+            f"• 모델: {model_emoji} {model or 'sonnet'}\n"
+            f"• 이름: {display_name}\n"
+            f"• 설정: {config_status}\n\n"
+            f"이 세션에서는 프로젝트의 CLAUDE.md 규칙이 적용됩니다.",
+            parse_mode="HTML"
+        )
 
     async def model_opus_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /model_opus command - shortcut for /model opus."""
@@ -1209,12 +1298,13 @@ class BotHandlers:
             else:
                 is_new_session = False
 
-        # 세션 모델 가져오기
+        # 세션 모델 및 프로젝트 경로 가져오기
         model = self.sessions.get_session_model(user_id, session_id)
+        project_path = self.sessions.get_session_project_path(user_id, session_id)
 
         # 세션 ID 컨텍스트 설정
         set_session_id(session_id)
-        logger.info(f"세션 결정 완료 - model={model}, new={is_new_session}")
+        logger.info(f"세션 결정 완료 - model={model}, new={is_new_session}, project={project_path or '(없음)'}")
 
         self._ensure_watchdog()
 
@@ -1351,14 +1441,15 @@ class BotHandlers:
             else:
                 is_new_session = False
 
-        # 세션 모델 가져오기
+        # 세션 모델 및 프로젝트 경로 가져오기
         model = self.sessions.get_session_model(user_id, session_id)
+        project_path = self.sessions.get_session_project_path(user_id, session_id)
 
         # 세션 ID 컨텍스트 설정
         set_session_id(session_id)
 
         # 로깅 (session_id 확정 후)
-        logger.info(f"메시지 접수: model={model}, new={is_new_session}")
+        logger.info(f"메시지 접수: model={model}, new={is_new_session}, project={project_path or '(없음)'}")
 
         # Watchdog 지연 시작
         self._ensure_watchdog()
@@ -1473,6 +1564,11 @@ class BotHandlers:
             manager_session_id = self.sessions.get_manager_session_id(user_id)
             is_manager = session_id == manager_session_id
 
+            # 프로젝트 세션 경로 가져오기
+            project_path = self.sessions.get_session_project_path(user_id, session_id)
+            if project_path:
+                logger.trace(f"프로젝트 세션 - project_path={project_path}")
+
             # 매니저 세션이면 세션 정보 + 파일 경로 힌트 주입
             actual_message = message
             if is_manager:
@@ -1500,7 +1596,7 @@ class BotHandlers:
             # Claude 호출
             logger.trace(f"claude.chat() 호출 - model={model}")
             try:
-                response, error, _ = await self.claude.chat(actual_message, session_id, model=model)
+                response, error, _ = await self.claude.chat(actual_message, session_id, model=model, project_path=project_path or None)
             finally:
                 # Claude 완료 시 알림 태스크 취소
                 notify_task.cancel()
@@ -1667,6 +1763,46 @@ class BotHandlers:
             except Exception as e:
                 action_results.append(f"❌ 세션 생성 오류: {e}")
                 logger.error(f"ACTION:CREATE_AND_SWITCH 예외 - {e}")
+
+        # CREATE_PROJECT 액션 처리 (프로젝트 세션 생성 후 전환)
+        for match in ACTION_CREATE_PROJECT_PATTERN.finditer(response):
+            model = match.group(1)
+            project_path = match.group(2).strip()
+            name = match.group(3).strip()
+            logger.info(f"ACTION:CREATE_PROJECT 감지 - model={model}, path={project_path}, name={name}")
+
+            # 경로 검증
+            from src.config import get_settings
+            from pathlib import Path
+            settings = get_settings()
+            is_valid, error_msg = settings.validate_project_path(project_path)
+
+            if not is_valid:
+                action_results.append(f"❌ 프로젝트 경로 오류: {error_msg}")
+                logger.warning(f"ACTION:CREATE_PROJECT 실패 - {error_msg}")
+                continue
+
+            try:
+                new_session_id = await self.claude.create_session()
+                if new_session_id:
+                    expanded_path = str(Path(project_path).expanduser().resolve())
+                    project_name = Path(expanded_path).name
+                    display_name = name or f"📁{project_name}"
+
+                    # 세션 생성 후 즉시 전환
+                    self.sessions.create_session(
+                        user_id, new_session_id, f"(프로젝트: {project_name})",
+                        model=model, name=display_name, project_path=expanded_path
+                    )
+                    self.sessions.set_previous_session_id(user_id, session_id)
+                    action_results.append(f"✅ 프로젝트 세션: {new_session_id[:8]} ({display_name})")
+                    logger.info(f"ACTION:CREATE_PROJECT 성공 - {new_session_id[:8]}, path={expanded_path}")
+                else:
+                    action_results.append(f"❌ 프로젝트 세션 생성 실패")
+                    logger.warning(f"ACTION:CREATE_PROJECT 실패 - Claude 세션 생성 오류")
+            except Exception as e:
+                action_results.append(f"❌ 프로젝트 세션 오류: {e}")
+                logger.error(f"ACTION:CREATE_PROJECT 예외 - {e}")
 
         # SWITCH 액션 처리 (세션 전환)
         for match in ACTION_SWITCH_PATTERN.finditer(response):

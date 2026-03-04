@@ -163,6 +163,7 @@ class TestProcessClaudeRequest:
         mock_claude_client.chat = AsyncMock(return_value=("응답 내용", None, None))
         mock_session_store.get_session_info.return_value = "abc12345"
         mock_session_store.get_history_count.return_value = 3
+        mock_session_store.get_session_project_path.return_value = ""  # 일반 세션
 
         await handlers._process_claude_request(
             bot=bot,
@@ -174,8 +175,8 @@ class TestProcessClaudeRequest:
             model="sonnet",
         )
 
-        # Claude 호출 확인 (model 포함)
-        mock_claude_client.chat.assert_called_once_with("테스트 질문", "session-123", model="sonnet")
+        # Claude 호출 확인 (model + project_path 포함)
+        mock_claude_client.chat.assert_called_once_with("테스트 질문", "session-123", model="sonnet", project_path=None)
 
         # 기존 세션이므로 메시지 추가 확인
         mock_session_store.add_message.assert_called_once_with(

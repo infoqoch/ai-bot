@@ -62,22 +62,26 @@ class ClaudeClient:
         self,
         cmd: list[str],
         timeout: Optional[int] = None,
+        cwd: Optional[str] = None,
     ) -> tuple[str, str, int]:
         """Execute command and return (stdout, stderr, returncode).
 
         Args:
             cmd: Command to execute
             timeout: Optional timeout in seconds. If None, wait indefinitely.
+            cwd: Working directory for the command. If None, use current directory.
         """
         cmd_preview = " ".join(cmd[:5]) + f" ... ({len(cmd)} parts)"
         logger.trace(f"_run_command() - cmd={cmd_preview}")
         logger.trace(f"timeout={timeout}초" if timeout else "timeout=None (무제한)")
+        logger.trace(f"cwd={cwd or '(현재 디렉토리)'}")
 
         logger.trace("subprocess 생성 중")
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=cwd,
         )
         logger.trace(f"subprocess 생성됨 - pid={process.pid}")
 
@@ -122,6 +126,7 @@ class ClaudeClient:
         message: str,
         session_id: Optional[str] = None,
         model: Optional[str] = None,
+        project_path: Optional[str] = None,
     ) -> ChatResponse:
         """
         Send a message to Claude.
@@ -130,20 +135,21 @@ class ClaudeClient:
             message: User message
             session_id: Claude's session ID (always use --resume if provided)
             model: Model to use (opus, sonnet, haiku)
+            project_path: Project directory path (for project sessions)
 
         Returns:
             ChatResponse with text, error, and session_id
         """
         short_msg = message[:50] + "..." if len(message) > 50 else message
         logger.trace(f"chat() 시작 - msg='{short_msg}'")
-        logger.trace(f"session_id={session_id[:8] if session_id else 'None'}, model={model}")
+        logger.trace(f"session_id={session_id[:8] if session_id else 'None'}, model={model}, project={project_path or '(없음)'}")
 
-        cmd = self._build_command(message, session_id, model)
+        cmd = self._build_command(message, session_id, model, project_path)
         logger.trace(f"명령어 생성됨 - {len(cmd)} parts")
 
         try:
             logger.trace("CLI 실행 시작")
-            output, error, returncode = await self._run_command(cmd, timeout=None)
+            output, error, returncode = await self._run_command(cmd, timeout=None, cwd=project_path)
 
             logger.trace(f"CLI 결과 - returncode={returncode}")
 
@@ -195,9 +201,10 @@ class ClaudeClient:
         message: str,
         session_id: Optional[str] = None,
         model: Optional[str] = None,
+        project_path: Optional[str] = None,
     ) -> list[str]:
         """Build Claude CLI command."""
-        logger.trace(f"_build_command() - session={session_id[:8] if session_id else 'None'}, model={model}")
+        logger.trace(f"_build_command() - session={session_id[:8] if session_id else 'None'}, model={model}, project={project_path or '(없음)'}")
 
         cmd = list(self.command_parts)
 
@@ -218,6 +225,18 @@ class ClaudeClient:
         if self.system_prompt:
             cmd.extend(["--system-prompt", self.system_prompt])
             logger.trace("시스템 프롬프트 옵션 추가됨")
+
+        # 프로젝트 세션: 텔레그램 응답 포맷 추가 (프로젝트 CLAUDE.md + 텔레그램 포맷)
+        if project_path:
+            telegram_format_prompt = (
+                "응답 포맷 규칙: "
+                "1) Telegram HTML 사용 (<b>, <i>, <code>, <pre>) "
+                "2) 마크다운 금지 (**, *, #, ```) "
+                "3) 모바일 최적화 (간결하게) "
+                "4) 한국어로 응답"
+            )
+            cmd.extend(["--append-system-prompt", telegram_format_prompt])
+            logger.trace("프로젝트 세션 - 텔레그램 포맷 프롬프트 추가됨")
 
         cmd.append(message)
         logger.trace(f"최종 명령어 길이: {len(cmd)} parts")
