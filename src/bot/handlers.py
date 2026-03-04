@@ -366,19 +366,23 @@ class BotHandlers:
             f"{auth_section}"
             "💬 세션\n"
             "/new [모델] [이름] - 새 세션\n"
+            "/np 경로 [모델] [이름] - 프로젝트 세션\n"
             "/new_haiku_speedy - 🚀 Speedy\n"
             "/new_opus_smarty - 🧠 Smarty\n"
             "/model - 현재 세션 모델 변경\n"
             "/rename_MyName - 세션 이름 변경\n"
             "/session - 현재 세션 정보\n"
-            "/session_list - 세션 목록\n"
+            "/sl - 세션 목록\n"
             "/delete_&lt;id&gt; - 세션 삭제\n\n"
             "📋 매니저\n"
             "/m - 매니저 모드 (세션 관리)\n"
             "/m 질문 - 원샷 질문\n"
             f"{plugin_section}\n"
+            "⏰ 스케줄\n"
+            "/scheduler - 세션 스케줄 관리\n"
+            "/jobs - 등록된 스케줄 작업\n\n"
             "ℹ️ 기타\n"
-            "/lock - 처리 중인 작업 확인\n"
+            "/lock - 처리 중인 작업/대기열\n"
             "/chatid - 내 채팅 ID 확인\n"
             "/help - 이 도움말",
             parse_mode="HTML"
@@ -548,11 +552,12 @@ class BotHandlers:
 
             buttons = []
             for s in sessions[:10]:  # 최대 10개
-                name = s.get("name") or s.get("summary", "")[:15] or s["id"][:8]
+                short_id = s.get("session_id", s.get("full_session_id", "")[:8])
+                name = s.get("name") or s.get("summary", "")[:15] or short_id
                 buttons.append([
                     InlineKeyboardButton(
                         f"📂 {name}",
-                        callback_data=f"sched:session:{s['id'][:8]}"
+                        callback_data=f"sched:session:{short_id}"
                     )
                 ])
             buttons.append([
@@ -572,7 +577,7 @@ class BotHandlers:
             session_short_id = action[8:]
             # 세션 ID 찾기
             sessions = self.sessions.list_sessions(user_id)
-            session = next((s for s in sessions if s["id"].startswith(session_short_id)), None)
+            session = next((s for s in sessions if s.get("session_id", "").startswith(session_short_id) or s.get("full_session_id", "").startswith(session_short_id)), None)
             if not session:
                 await query.answer("❌ 세션을 찾을 수 없음")
                 return
@@ -617,16 +622,17 @@ class BotHandlers:
 
             # 세션 정보 저장 (ForceReply 응답 처리용)
             sessions = self.sessions.list_sessions(user_id)
-            session = next((s for s in sessions if s["id"].startswith(session_short_id)), None)
+            session = next((s for s in sessions if s.get("session_id", "").startswith(session_short_id) or s.get("full_session_id", "").startswith(session_short_id)), None)
             if not session:
                 await query.answer("❌ 세션을 찾을 수 없음")
                 return
 
+            full_session_id = session.get("full_session_id", session.get("session_id", ""))
             session_name = session.get("name") or session.get("summary", "")[:15] or session_short_id
 
             # 대기 상태 저장
             self._pending_schedule_input[user_id] = {
-                "session_id": session["id"],
+                "session_id": full_session_id,
                 "session_name": session_name,
                 "hour": hour,
                 "minute": 0,
@@ -2394,6 +2400,71 @@ class BotHandlers:
             else:
                 action_results.append(f"❌ {target_id} 찾을 수 없음")
                 logger.warning(f"ACTION:SWITCH 세션 없음 - {target_id}")
+
+        # SCHEDULE 액션 처리 (스케줄 등록)
+        schedule_pattern = re.compile(r'\[ACTION:SCHEDULE:([^:]+):(\d{1,2}):([^\]]+)\]')
+        for match in schedule_pattern.finditer(response):
+            target_session_id = match.group(1)
+            hour = int(match.group(2))
+            message = match.group(3)
+            logger.info(f"ACTION:SCHEDULE 감지 - session={target_session_id}, hour={hour}")
+
+            if not self._session_schedule_manager:
+                action_results.append("❌ 스케줄 기능 비활성화")
+                continue
+
+            # 세션 찾기
+            target_info = self.sessions.get_session_by_prefix(user_id, target_session_id)
+            if not target_info:
+                action_results.append(f"❌ 세션 {target_session_id} 찾을 수 없음")
+                continue
+
+            session_name = target_info.get("name") or target_info.get("summary", "")[:15] or target_session_id
+            schedule = self._session_schedule_manager.add(
+                user_id=user_id,
+                chat_id=int(user_id),
+                session_id=target_info["full_session_id"],
+                session_name=session_name,
+                hour=hour,
+                minute=0,
+                message=message,
+            )
+            action_results.append(f"✅ 스케줄 등록: {schedule.time_str} → {session_name}")
+            logger.info(f"ACTION:SCHEDULE 성공 - {schedule.id}")
+
+        # SCHEDULE_LIST 액션 처리
+        if "[ACTION:SCHEDULE_LIST]" in response:
+            logger.info("ACTION:SCHEDULE_LIST 감지")
+            if self._session_schedule_manager:
+                schedules = self._session_schedule_manager.list_by_user(user_id)
+                if schedules:
+                    lines = ["📅 <b>등록된 스케줄</b>"]
+                    for s in sorted(schedules, key=lambda x: (x.hour, x.minute)):
+                        status = "✅" if s.enabled else "⏸"
+                        lines.append(f"{status} {s.time_str} → {s.session_name} (ID: {s.id})")
+                        lines.append(f"   💬 {s.message[:30]}...")
+                    action_results.append("\n".join(lines))
+                else:
+                    action_results.append("📅 등록된 스케줄 없음")
+            else:
+                action_results.append("❌ 스케줄 기능 비활성화")
+
+        # SCHEDULE_DELETE 액션 처리
+        schedule_delete_pattern = re.compile(r'\[ACTION:SCHEDULE_DELETE:([^\]]+)\]')
+        for match in schedule_delete_pattern.finditer(response):
+            schedule_id = match.group(1)
+            logger.info(f"ACTION:SCHEDULE_DELETE 감지 - id={schedule_id}")
+
+            if not self._session_schedule_manager:
+                action_results.append("❌ 스케줄 기능 비활성화")
+                continue
+
+            if self._session_schedule_manager.remove(schedule_id):
+                action_results.append(f"✅ 스케줄 삭제됨: {schedule_id}")
+                logger.info(f"ACTION:SCHEDULE_DELETE 성공 - {schedule_id}")
+            else:
+                action_results.append(f"❌ 스케줄 {schedule_id} 찾을 수 없음")
+                logger.warning(f"ACTION:SCHEDULE_DELETE 실패 - {schedule_id}")
 
         return action_results
 
