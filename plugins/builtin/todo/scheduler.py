@@ -16,12 +16,12 @@ from .manager import TodoManager, TimeSlot
 # 한국 시간대
 KST = ZoneInfo("Asia/Seoul")
 
-# 스케줄 시간 설정
+# 스케줄 시간 설정 (KST 시간대 명시)
 SCHEDULE_TIMES = {
-    "morning_ask": time(8, 0),      # 08:00 - 오늘 할일 질문
-    "morning_check": time(10, 0),   # 10:00 - 오전 할일 체크
-    "afternoon_check": time(15, 0), # 15:00 - 오후 할일 체크
-    "evening_check": time(19, 0),   # 19:00 - 저녁 할일 체크
+    "morning_ask": time(8, 0, tzinfo=KST),      # 08:00 KST - 오늘 할일 질문
+    "morning_check": time(10, 0, tzinfo=KST),   # 10:00 KST - 오전 할일 체크
+    "afternoon_check": time(15, 0, tzinfo=KST), # 15:00 KST - 오후 할일 체크
+    "evening_check": time(19, 0, tzinfo=KST),   # 19:00 KST - 저녁 할일 체크
 }
 
 
