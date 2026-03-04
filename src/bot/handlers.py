@@ -1568,6 +1568,12 @@ class BotHandlers:
                     clear_context()
                     return
 
+            # 메모 추가 ForceReply
+            if "메모 내용" in reply_text or "memo_add" in reply_text:
+                await self._handle_memo_force_reply(update, chat_id, message)
+                clear_context()
+                return
+
         # 플러그인 처리 시도 (인증 전에 처리 - 플러그인은 인증 불필요)
         if self.plugins:
             logger.trace(f"플러그인 처리 시도 - 로드된 플러그인: {len(self.plugins.plugins)}개")
@@ -2241,6 +2247,26 @@ class BotHandlers:
             parse_mode="HTML"
         )
 
+    async def _handle_memo_force_reply(self, update: Update, chat_id: int, message: str) -> None:
+        """메모 추가 ForceReply 응답 처리."""
+        logger.info(f"메모 ForceReply 처리: msg={message[:50]}")
+
+        memo_plugin = None
+        if self.plugins:
+            memo_plugin = self.plugins.get_plugin_by_name("memo")
+
+        if not memo_plugin or not hasattr(memo_plugin, 'handle_force_reply'):
+            await update.message.reply_text("❌ 메모 플러그인을 찾을 수 없습니다.")
+            return
+
+        result = memo_plugin.handle_force_reply(message, chat_id)
+
+        await update.message.reply_text(
+            text=result.get("text", ""),
+            reply_markup=result.get("reply_markup"),
+            parse_mode="HTML"
+        )
+
     async def _handle_todo_callback(self, query, chat_id: int, callback_data: str) -> None:
         """Todo 플러그인 콜백 처리."""
         try:
@@ -2314,6 +2340,21 @@ class BotHandlers:
                 return
 
             result = memo_plugin.handle_callback(callback_data, chat_id)
+
+            # ForceReply 처리 (새 메시지로)
+            if result.get("force_reply"):
+                # 기존 메시지 업데이트
+                await query.edit_message_text(
+                    text=result.get("text", "메모 입력"),
+                    parse_mode="HTML"
+                )
+                # ForceReply 메시지 전송
+                await query.message.reply_text(
+                    text="⬇️ 아래에 메모 내용을 입력하세요",
+                    reply_markup=result["force_reply"],
+                    parse_mode="HTML"
+                )
+                return
 
             if result.get("edit", True):
                 await query.edit_message_text(
