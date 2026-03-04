@@ -15,8 +15,12 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
+from dotenv import load_dotenv
 
 from src.logging_config import logger, setup_logging
+
+# .env 파일 로드 (supervisor는 별도 프로세스라 직접 로드 필요)
+load_dotenv()
 
 # 상수
 LOCK_FILE = Path("/tmp/telegram-bot-supervisor.lock")
@@ -69,7 +73,7 @@ def notify_maintainer(message: str) -> bool:
             response = client.post(url, json=data)
 
         if response.status_code == 200:
-            logger.debug(f"메인테이너 알림 전송 성공")
+            logger.info(f"메인테이너 알림 전송 성공")
             return True
         else:
             logger.warning(f"메인테이너 알림 실패: {response.status_code}")
