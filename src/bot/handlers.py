@@ -970,8 +970,8 @@ class BotHandlers:
                 model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(model, "⚡")
 
                 is_current = "👉 " if sid == current_session_id else ""
-                # 락 상태 확인
-                is_locked = self._session_locks[sid].locked()
+                # 락 상태 확인 (_active_tasks 기준 - 단일 진실 소스)
+                is_locked = any(info.session_id == sid for info in self._active_tasks.values())
                 lock_indicator = " 🔒" if is_locked else ""
                 lines.append(f"{is_current}{model_emoji} <b>{name}</b> (<code>{short_id}</code>){lock_indicator}")
 
@@ -2615,8 +2615,8 @@ class BotHandlers:
                 model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(model, "⚡")
 
                 is_current = "👉 " if sid == current_session_id else ""
-                # 락 상태 확인
-                is_locked = self._session_locks[sid].locked()
+                # 락 상태 확인 (_active_tasks 기준 - 단일 진실 소스)
+                is_locked = any(info.session_id == sid for info in self._active_tasks.values())
                 lock_indicator = " 🔒" if is_locked else ""
                 lines.append(f"{is_current}{model_emoji} <b>{name}</b> (<code>{short_id}</code>){lock_indicator}")
 
