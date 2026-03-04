@@ -2132,6 +2132,21 @@ class BotHandlers:
             self._setup_request_context(chat_id)
 
         error_type = type(context.error).__name__
+        error_msg = str(context.error)
+
+        # 무시할 에러 목록 (사용자에게 알릴 필요 없음)
+        ignorable_errors = [
+            "Query is too old",  # 만료된 콜백 버튼
+            "Message is not modified",  # 동일 메시지 수정 시도
+            "message to edit not found",  # 삭제된 메시지 수정 시도
+        ]
+
+        for ignore_pattern in ignorable_errors:
+            if ignore_pattern in error_msg:
+                logger.debug(f"무시 가능한 에러: {error_type}: {error_msg}")
+                clear_context()
+                return
+
         logger.error(f"에러 발생: {error_type}: {context.error}")
         logger.trace(f"에러 상세: {context.error}", exc_info=context.error)
 
