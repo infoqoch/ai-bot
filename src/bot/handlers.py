@@ -1,6 +1,7 @@
 """Telegram bot command handlers."""
 
 import asyncio
+import html
 import subprocess
 import time
 from collections import defaultdict
@@ -1752,6 +1753,32 @@ class BotHandlers:
         locked = await session_queue_manager.try_lock(session_id, user_id, message)
         if not locked:
             logger.warning(f"세션 락 획득 실패 - session={session_id[:8]}")
+            # 대기열에 자동 추가 및 알림
+            position = await session_queue_manager.add_to_waiting(
+                session_id=session_id,
+                user_id=user_id,
+                chat_id=chat_id,
+                message=message,
+                model=model or "sonnet",
+                is_new_session=is_new_session,
+            )
+            # 현재 처리 중인 메시지 정보
+            state = session_queue_manager.get_status(session_id)
+            current_msg_preview = ""
+            if state and state.current_message:
+                current_msg_preview = f"\n📍 처리 중: <i>{html.escape(state.current_message)}</i>"
+
+            await bot.send_message(
+                chat_id=chat_id,
+                text=(
+                    f"⏳ <b>대기열에 추가되었습니다</b>\n\n"
+                    f"💬 <code>{html.escape(message[:30])}{'...' if len(message) > 30 else ''}</code>\n"
+                    f"📍 대기 순번: <b>{position}번째</b>{current_msg_preview}\n\n"
+                    f"<i>현재 작업이 완료되면 자동으로 처리됩니다.</i>"
+                ),
+                parse_mode="HTML",
+            )
+            logger.info(f"대기열 추가 완료 - session={session_id[:8]}, position={position}")
             clear_context()
             return
 

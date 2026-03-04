@@ -77,11 +77,11 @@ def _setup_session_scheduler(app, session_store, claude_client, settings) -> Non
         _session_scheduler = SessionScheduler(
             session_store=session_store,
             claude_client=claude_client,
-            maintainer_chat_id=settings.maintainer_chat_id,
+            admin_chat_id=settings.admin_chat_id,
         )
         _session_scheduler.setup_jobs(app)
 
-        logger.info(f"세션 스케줄러 활성화 - 21:00 매니저 compact, 보고: {settings.maintainer_chat_id or '(없음)'}")
+        logger.info(f"세션 스케줄러 활성화 - 21:00 매니저 compact, 보고: {settings.admin_chat_id or '(없음)'}")
 
     except ImportError as e:
         logger.debug(f"세션 스케줄러 비활성화 (모듈 없음): {e}")
@@ -94,7 +94,7 @@ def _setup_hourly_ping_scheduler(app, settings, plugin_loader) -> None:
     try:
         hourly_ping_plugin = plugin_loader.get_plugin_by_name("hourly_ping")
         if hourly_ping_plugin and hasattr(hourly_ping_plugin, "setup_scheduler"):
-            hourly_ping_plugin.setup_scheduler(app, settings.maintainer_chat_id)
+            hourly_ping_plugin.setup_scheduler(app, settings.admin_chat_id)
             logger.info("HourlyPing 스케줄러 활성화 (08:00~19:00 매 정시)")
     except Exception as e:
         logger.debug(f"HourlyPing 스케줄러 비활성화: {e}")
@@ -114,10 +114,10 @@ def _setup_todo_scheduler(app, settings, plugin_loader) -> None:
         # TodoManager 생성
         todo_manager = TodoManager(data_dir)
 
-        # 알림 받을 chat_ids (allowed_chat_ids 또는 maintainer_chat_id)
+        # 알림 받을 chat_ids (allowed_chat_ids 또는 admin_chat_id)
         chat_ids = settings.allowed_chat_ids.copy() if settings.allowed_chat_ids else []
-        if settings.maintainer_chat_id and settings.maintainer_chat_id not in chat_ids:
-            chat_ids.append(settings.maintainer_chat_id)
+        if settings.admin_chat_id and settings.admin_chat_id not in chat_ids:
+            chat_ids.append(settings.admin_chat_id)
 
         # 스케줄러 생성 및 설정
         _todo_scheduler = TodoScheduler(

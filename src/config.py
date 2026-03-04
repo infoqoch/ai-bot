@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # Telegram
     telegram_token: str = Field(..., description="Telegram Bot API token")
     allowed_chat_ids: list[int] = Field(default_factory=list)
-    maintainer_chat_id: int = Field(default=0, description="Chat ID for dev notifications")
+    admin_chat_id: int = Field(default=0, description="Chat ID for admin notifications")
 
     # AI
     ai_command: str = Field(default="claude", alias="AI_COMMAND")

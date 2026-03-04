@@ -13,17 +13,17 @@ async def send_dev_report(
     test_passed: bool = True,
     extra_message: str = "",
 ) -> bool:
-    """Send development completion report to maintainer."""
+    """Send development completion report to admin."""
     settings = get_settings()
-    
-    if not settings.maintainer_chat_id:
-        print("⚠️ MAINTAINER_CHAT_ID not set, skipping notification")
+
+    if not settings.admin_chat_id:
+        print("⚠️ ADMIN_CHAT_ID not set, skipping notification")
         return False
-    
+
     changes_text = "\n".join(f"• {c}" for c in changes) if changes else "• (없음)"
     files_text = "\n".join(f"• {f}" for f in files) if files else "• (없음)"
     test_status = "✅ 통과" if test_passed else "❌ 실패"
-    
+
     message = f"""🔧 <b>개발 완료 리포트</b>
 
 📝 <b>변경사항:</b>
@@ -37,10 +37,10 @@ async def send_dev_report(
 
     if extra_message:
         message += f"\n\n💬 {extra_message}"
-    
+
     url = f"https://api.telegram.org/bot{settings.telegram_token}/sendMessage"
     payload = {
-        "chat_id": settings.maintainer_chat_id,
+        "chat_id": settings.admin_chat_id,
         "text": message,
         "parse_mode": "HTML",
     }
