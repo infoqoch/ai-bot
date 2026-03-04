@@ -208,7 +208,7 @@ class TestPluginLoader:
 
 
 class TestMemoPluginPatterns:
-    """MemoPlugin 패턴 테스트."""
+    """MemoPlugin 패턴 테스트 - 단일 진입점 + 버튼 기반 UX."""
 
     @pytest.fixture
     def memo_plugin(self):
@@ -221,47 +221,26 @@ class TestMemoPluginPatterns:
             yield plugin
 
     @pytest.mark.asyncio
-    async def test_can_handle_save_patterns(self, memo_plugin):
-        """저장 패턴 인식."""
-        save_messages = [
+    async def test_can_handle_single_entry_points(self, memo_plugin):
+        """단일 진입점 인식 - '메모', 'memo'만."""
+        # 정확히 키워드만 인식
+        assert await memo_plugin.can_handle("메모", 12345) is True
+        assert await memo_plugin.can_handle("memo", 12345) is True
+        assert await memo_plugin.can_handle("MEMO", 12345) is True
+
+    @pytest.mark.asyncio
+    async def test_can_handle_not_match(self, memo_plugin):
+        """단일 진입점 외 메시지는 처리 안함."""
+        # 이전 명령어 스타일은 더 이상 처리 안함
+        not_match = [
             "내일 회의 메모해줘",
-            "메모해줘: 장보기 목록",
-            "오늘 할일 저장해줘",
-            "메모: 중요한 내용",
-        ]
-
-        for msg in save_messages:
-            result = await memo_plugin.can_handle(msg, 12345)
-            assert result is True, f"Should handle: {msg}"
-
-    @pytest.mark.asyncio
-    async def test_can_handle_list_patterns(self, memo_plugin):
-        """목록 패턴 인식."""
-        list_messages = [
-            "메모 목록",
-            "메모 보여줘",
-            "메모 리스트",
-            "메모들 보여",
-            "저장된 메모",
-        ]
-
-        for msg in list_messages:
-            result = await memo_plugin.can_handle(msg, 12345)
-            assert result is True, f"Should handle: {msg}"
-
-    @pytest.mark.asyncio
-    async def test_can_handle_delete_patterns(self, memo_plugin):
-        """삭제 패턴 인식."""
-        delete_messages = [
+            "메모해줘: 장보기",
             "메모 1 삭제",
-            "메모 2 지워",
-            "1번 메모 삭제",
-            "3번 메모 지워",
+            "메모 목록",
         ]
-
-        for msg in delete_messages:
+        for msg in not_match:
             result = await memo_plugin.can_handle(msg, 12345)
-            assert result is True, f"Should handle: {msg}"
+            assert result is False, f"Should NOT handle: {msg}"
 
     @pytest.mark.asyncio
     async def test_can_handle_exclude_patterns(self, memo_plugin):
@@ -279,51 +258,73 @@ class TestMemoPluginPatterns:
             assert result is False, f"Should NOT handle (exclude): {msg}"
 
     @pytest.mark.asyncio
-    async def test_handle_save(self, memo_plugin):
-        """메모 저장."""
-        result = await memo_plugin.handle("테스트 내용 메모해줘", 12345)
+    async def test_handle_main_menu(self, memo_plugin):
+        """메인 메뉴 표시."""
+        result = await memo_plugin.handle("메모", 12345)
 
         assert result.handled is True
-        assert "메모 저장됨" in result.response
-        assert "테스트 내용" in result.response
+        assert "메모" in result.response
+        assert "저장된 메모" in result.response
+        assert result.reply_markup is not None  # 버튼 있음
 
     @pytest.mark.asyncio
-    async def test_handle_list_empty(self, memo_plugin):
-        """빈 메모 목록."""
-        result = await memo_plugin.handle("메모 목록", 12345)
+    async def test_callback_list_empty(self, memo_plugin):
+        """콜백: 빈 메모 목록."""
+        result = memo_plugin.handle_callback("memo:list", 12345)
 
-        assert result.handled is True
-        assert "저장된 메모가 없습니다" in result.response
-
-    @pytest.mark.asyncio
-    async def test_handle_list_with_memos(self, memo_plugin):
-        """메모 있을 때 목록."""
-        # 먼저 메모 저장
-        await memo_plugin.handle("첫번째 메모 메모해줘", 12345)
-        await memo_plugin.handle("두번째 메모 메모해줘", 12345)
-
-        result = await memo_plugin.handle("메모 목록", 12345)
-
-        assert result.handled is True
-        assert "메모 목록" in result.response
-        assert "#1" in result.response
-        assert "#2" in result.response
+        assert "저장된 메모가 없습니다" in result["text"]
 
     @pytest.mark.asyncio
-    async def test_handle_delete(self, memo_plugin):
-        """메모 삭제."""
-        # 먼저 메모 저장
-        await memo_plugin.handle("삭제할 메모 메모해줘", 12345)
+    async def test_callback_add_prompt(self, memo_plugin):
+        """콜백: 메모 추가 ForceReply."""
+        result = memo_plugin.handle_callback("memo:add", 12345)
 
-        result = await memo_plugin.handle("메모 1 삭제", 12345)
-
-        assert result.handled is True
-        assert "삭제됨" in result.response
+        assert "메모 추가" in result["text"]
+        assert result.get("force_reply") is not None
 
     @pytest.mark.asyncio
-    async def test_handle_delete_not_found(self, memo_plugin):
-        """존재하지 않는 메모 삭제."""
-        result = await memo_plugin.handle("메모 999 삭제", 12345)
+    async def test_force_reply_add_memo(self, memo_plugin):
+        """ForceReply로 메모 추가."""
+        result = memo_plugin.handle_force_reply("테스트 메모 내용", 12345)
 
-        assert result.handled is True
-        assert "찾을 수 없습니다" in result.response
+        assert "저장됨" in result["text"]
+        assert "테스트 메모 내용" in result["text"]
+
+    @pytest.mark.asyncio
+    async def test_callback_list_with_memos(self, memo_plugin):
+        """콜백: 메모 있을 때 목록."""
+        # ForceReply로 메모 추가
+        memo_plugin.handle_force_reply("첫번째 메모", 12345)
+        memo_plugin.handle_force_reply("두번째 메모", 12345)
+
+        result = memo_plugin.handle_callback("memo:list", 12345)
+
+        assert "메모 목록" in result["text"]
+        assert "#1" in result["text"]
+        assert "#2" in result["text"]
+
+    @pytest.mark.asyncio
+    async def test_callback_delete_confirm(self, memo_plugin):
+        """콜백: 삭제 확인."""
+        memo_plugin.handle_force_reply("삭제할 메모", 12345)
+
+        result = memo_plugin.handle_callback("memo:del:1", 12345)
+
+        assert "삭제 확인" in result["text"]
+        assert result.get("reply_markup") is not None
+
+    @pytest.mark.asyncio
+    async def test_callback_confirm_delete(self, memo_plugin):
+        """콜백: 삭제 실행."""
+        memo_plugin.handle_force_reply("삭제할 메모", 12345)
+
+        result = memo_plugin.handle_callback("memo:confirm_del:1", 12345)
+
+        assert "삭제됨" in result["text"]
+
+    @pytest.mark.asyncio
+    async def test_callback_delete_not_found(self, memo_plugin):
+        """콜백: 존재하지 않는 메모 삭제."""
+        result = memo_plugin.handle_callback("memo:del:999", 12345)
+
+        assert "찾을 수 없습니다" in result["text"]
