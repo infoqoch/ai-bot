@@ -970,7 +970,10 @@ class BotHandlers:
                 model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(model, "⚡")
 
                 is_current = "👉 " if sid == current_session_id else ""
-                lines.append(f"{is_current}{model_emoji} <b>{name}</b> (<code>{short_id}</code>)")
+                # 락 상태 확인
+                is_locked = self._session_locks[sid].locked()
+                lock_indicator = " 🔒" if is_locked else ""
+                lines.append(f"{is_current}{model_emoji} <b>{name}</b> (<code>{short_id}</code>){lock_indicator}")
 
                 # 각 세션에 액션 버튼
                 buttons.append([
@@ -987,6 +990,7 @@ class BotHandlers:
         ])
         buttons.append([
             InlineKeyboardButton("🔄 새로고침", callback_data="sess:list"),
+            InlineKeyboardButton("📊 작업현황", callback_data="sess:lock"),
         ])
 
         await update.message.reply_text(
@@ -2395,6 +2399,9 @@ class BotHandlers:
             elif action == "cancel":
                 await self._handle_session_list_callback(query, chat_id)
 
+            elif action == "lock":
+                await self._handle_lock_callback(query, chat_id)
+
             else:
                 await query.edit_message_text("❌ 알 수 없는 명령")
 
@@ -2608,7 +2615,10 @@ class BotHandlers:
                 model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}.get(model, "⚡")
 
                 is_current = "👉 " if sid == current_session_id else ""
-                lines.append(f"{is_current}{model_emoji} <b>{name}</b> (<code>{short_id}</code>)")
+                # 락 상태 확인
+                is_locked = self._session_locks[sid].locked()
+                lock_indicator = " 🔒" if is_locked else ""
+                lines.append(f"{is_current}{model_emoji} <b>{name}</b> (<code>{short_id}</code>){lock_indicator}")
 
                 # 각 세션에 액션 버튼
                 buttons.append([
@@ -2625,6 +2635,7 @@ class BotHandlers:
         ])
         buttons.append([
             InlineKeyboardButton("🔄 새로고침", callback_data="sess:list"),
+            InlineKeyboardButton("📊 작업현황", callback_data="sess:lock"),
         ])
 
         await query.edit_message_text(
@@ -2671,6 +2682,65 @@ class BotHandlers:
                  f"📂 <b>{name}</b>\n"
                  f"{model_emoji} 모델: <b>{model}</b>\n"
                  f"🆔 ID: <code>{short_id}</code>",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML"
+        )
+
+    async def _handle_lock_callback(self, query, chat_id: int) -> None:
+        """작업 현황 콜백 처리 - /lock과 동일한 정보를 인라인으로 표시."""
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        import time
+
+        user_id = str(chat_id)
+
+        # 현재 사용자의 활성 태스크 조회
+        user_tasks = [
+            info for info in self._active_tasks.values()
+            if info.user_id == user_id
+        ]
+
+        # 세마포어 상태
+        semaphore = self._user_semaphores[user_id]
+        available = semaphore._value
+        total = 3
+
+        if not user_tasks:
+            text = (
+                "✅ <b>대기 중인 작업 없음</b>\n\n"
+                f"슬롯: {available}/{total} 사용 가능"
+            )
+        else:
+            lines = [f"🔒 <b>활성 작업</b> ({len(user_tasks)}/{total})\n"]
+
+            for i, info in enumerate(user_tasks, 1):
+                elapsed = time.time() - info.started_at
+                elapsed_str = f"{int(elapsed // 60)}분 {int(elapsed % 60)}초" if elapsed >= 60 else f"{int(elapsed)}초"
+
+                # 세션 이름 가져오기
+                session_name = self.sessions.get_session_name(user_id, info.session_id) or info.session_id[:8]
+
+                # 메시지 미리보기
+                msg_preview = info.message[:40] + "..." if len(info.message) > 40 else info.message
+                msg_preview = msg_preview.replace("<", "&lt;").replace(">", "&gt;")
+
+                lines.append(
+                    f"\n<b>{i}.</b> <code>{session_name}</code>\n"
+                    f"   ⏱ {elapsed_str} 경과\n"
+                    f"   💬 {msg_preview or '(메시지 없음)'}"
+                )
+
+            lines.append(f"\n\n슬롯: {available}/{total} 사용 가능")
+            text = "\n".join(lines)
+
+        keyboard = [
+            [
+                InlineKeyboardButton("🔄 새로고침", callback_data="sess:lock"),
+                InlineKeyboardButton("📋 세션 목록", callback_data="sess:list"),
+            ]
+        ]
+
+        await query.edit_message_text(
+            text=text,
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="HTML"
         )
