@@ -392,7 +392,7 @@ class BotHandlers:
         clear_context()
 
     def _build_lock_status(self, user_id: str) -> tuple[str, list]:
-        """Lock 상태 텍스트와 버튼 생성."""
+        """Lock 상태 텍스트와 버튼 생성 (대기열 포함)."""
         from telegram import InlineKeyboardButton
         import time
 
@@ -410,13 +410,13 @@ class BotHandlers:
             available = 3
         total = 3
 
+        lines = []
+
+        # 활성 작업 섹션
         if not user_tasks:
-            text = (
-                f"✅ <b>대기 중인 작업 없음</b>\n\n"
-                f"슬롯: {available}/{total} 사용 가능"
-            )
+            lines.append(f"✅ <b>처리 중인 작업 없음</b>")
         else:
-            lines = [f"🔒 <b>활성 작업</b> ({len(user_tasks)}/{total})\n"]
+            lines.append(f"🔒 <b>처리 중</b> ({len(user_tasks)}/{total})")
 
             for i, info in enumerate(user_tasks, 1):
                 elapsed = time.time() - info.started_at
@@ -435,8 +435,33 @@ class BotHandlers:
                     f"   💬 {msg_preview or '(메시지 없음)'}"
                 )
 
-            lines.append(f"\n\n슬롯: {available}/{total} 사용 가능")
-            text = "\n".join(lines)
+        # 대기열 섹션 추가
+        all_sessions = self.sessions.list_sessions(user_id)
+        total_waiting = 0
+        waiting_details = []
+
+        for s in all_sessions:
+            sid = s["full_session_id"]
+            state = session_queue_manager.get_status(sid)
+            if state and state.waiting_queue:
+                queue_size = len(state.waiting_queue)
+                total_waiting += queue_size
+                session_name = s.get("name") or s["session_id"]
+                for i, queued in enumerate(state.waiting_queue[:3], 1):  # 세션당 최대 3개
+                    msg_preview = queued.message[:30] + "..." if len(queued.message) > 30 else queued.message
+                    msg_preview = msg_preview.replace("<", "&lt;").replace(">", "&gt;")
+                    waiting_details.append(f"• <code>{session_name}</code>: {msg_preview}")
+                if queue_size > 3:
+                    waiting_details.append(f"  ... +{queue_size - 3}개 더")
+
+        if total_waiting > 0:
+            lines.append(f"\n\n⏳ <b>대기열</b> ({total_waiting}개)")
+            lines.extend([f"\n{d}" for d in waiting_details[:8]])  # 최대 8개
+            if len(waiting_details) > 8:
+                lines.append(f"\n  ... 외 {len(waiting_details) - 8}개")
+
+        lines.append(f"\n\n슬롯: {available}/{total} 사용 가능")
+        text = "".join(lines) if lines else "상태 정보 없음"
 
         keyboard = [[
             InlineKeyboardButton("🔄 새로고침", callback_data="lock:refresh"),
@@ -1753,32 +1778,20 @@ class BotHandlers:
         locked = await session_queue_manager.try_lock(session_id, user_id, message)
         if not locked:
             logger.warning(f"세션 락 획득 실패 - session={session_id[:8]}")
-            # 대기열에 자동 추가 및 알림
-            position = await session_queue_manager.add_to_waiting(
-                session_id=session_id,
+            # 세션 선택 UI 표시 (다른 세션으로 처리하거나 대기 선택)
+            project_path = self.sessions.get_session_project_path(user_id, session_id) or ""
+            await self._show_session_selection_ui(
+                update=None,  # 백그라운드이므로 update 없음
                 user_id=user_id,
-                chat_id=chat_id,
                 message=message,
+                current_session_id=session_id,
                 model=model or "sonnet",
                 is_new_session=is_new_session,
-            )
-            # 현재 처리 중인 메시지 정보
-            state = session_queue_manager.get_status(session_id)
-            current_msg_preview = ""
-            if state and state.current_message:
-                current_msg_preview = f"\n📍 처리 중: <i>{html.escape(state.current_message)}</i>"
-
-            await bot.send_message(
+                project_path=project_path,
+                bot=bot,
                 chat_id=chat_id,
-                text=(
-                    f"⏳ <b>대기열에 추가되었습니다</b>\n\n"
-                    f"💬 <code>{html.escape(message[:30])}{'...' if len(message) > 30 else ''}</code>\n"
-                    f"📍 대기 순번: <b>{position}번째</b>{current_msg_preview}\n\n"
-                    f"<i>현재 작업이 완료되면 자동으로 처리됩니다.</i>"
-                ),
-                parse_mode="HTML",
             )
-            logger.info(f"대기열 추가 완료 - session={session_id[:8]}, position={position}")
+            logger.info(f"세션 선택 UI 표시 완료 - session={session_id[:8]}")
             clear_context()
             return
 
@@ -2128,6 +2141,9 @@ class BotHandlers:
         model: str,
         is_new_session: bool,
         project_path: str,
+        *,
+        bot=None,
+        chat_id: int = None,
     ) -> None:
         """세션 락 충돌 시 세션 선택 UI 표시 (개선된 버전).
 
@@ -2136,11 +2152,18 @@ class BotHandlers:
         2. 다른 세션 선택 - 바로 사용 가능한 세션 목록
         3. 새 세션 생성
         4. 취소
+
+        Args:
+            update: Telegram Update (None이면 bot/chat_id 사용)
+            bot: Telegram Bot 객체 (update 없을 때 사용)
+            chat_id: 채팅 ID (update 없을 때 사용)
         """
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
         message_preview = truncate_message(message, 40)
-        chat_id = update.effective_chat.id
+        # update가 있으면 update에서, 없으면 파라미터에서 chat_id 가져오기
+        if update:
+            chat_id = update.effective_chat.id
 
         # 현재 세션 상태 정보
         current_state = session_queue_manager.get_status(current_session_id)
@@ -2236,11 +2259,20 @@ class BotHandlers:
             "current_session_id": current_session_id,
         }
 
-        await update.message.reply_text(
-            "\n".join(lines),
-            reply_markup=InlineKeyboardMarkup(buttons),
-            parse_mode="HTML"
-        )
+        # update가 있으면 reply_text, 없으면 bot.send_message 사용
+        if update:
+            await update.message.reply_text(
+                "\n".join(lines),
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML"
+            )
+        else:
+            await bot.send_message(
+                chat_id=chat_id,
+                text="\n".join(lines),
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML"
+            )
 
     async def _process_queued_message(self, bot, queued_msg: QueuedMessage) -> None:
         """대기열에서 꺼낸 메시지 처리."""
