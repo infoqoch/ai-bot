@@ -194,7 +194,7 @@ class TestTodoManager:
 
 
 class TestTodoPlugin:
-    """TodoPlugin 테스트."""
+    """TodoPlugin 테스트 (버튼 기반)."""
 
     @pytest.fixture
     def plugin(self, tmp_path):
@@ -204,11 +204,22 @@ class TestTodoPlugin:
         return p
 
     @pytest.mark.asyncio
-    async def test_can_handle_todo_query(self, plugin):
-        """할일 조회 패턴 감지."""
-        assert await plugin.can_handle("오늘 할일 보여줘", 123)
-        assert await plugin.can_handle("할일 목록", 123)
-        assert await plugin.can_handle("오전 할일", 123)
+    async def test_can_handle_keyword_trigger(self, plugin):
+        """키워드 트리거 테스트 - 명시적 키워드만 처리."""
+        # 명시적 키워드로 시작하면 처리
+        assert await plugin.can_handle("todo", 123) is True
+        assert await plugin.can_handle("할일", 123) is True
+        assert await plugin.can_handle("투두", 123) is True
+        assert await plugin.can_handle("할일 보여줘", 123) is True
+        assert await plugin.can_handle("todo list", 123) is True
+
+    @pytest.mark.asyncio
+    async def test_can_handle_no_keyword(self, plugin):
+        """키워드 없으면 AI로 넘김."""
+        # 키워드 없이는 처리하지 않음
+        assert await plugin.can_handle("오늘 뭐해", 123) is False
+        assert await plugin.can_handle("회의 끝났어", 123) is False
+        assert await plugin.can_handle("아무거나", 123) is False
 
     @pytest.mark.asyncio
     async def test_can_handle_exclude_patterns(self, plugin):
@@ -217,165 +228,140 @@ class TestTodoPlugin:
         assert await plugin.can_handle("todo 영어로 뭐야", 123) is False
 
     @pytest.mark.asyncio
-    async def test_can_handle_pending_input(self, plugin):
-        """입력 대기 상태에서 모든 메시지 처리."""
-        plugin.manager.set_pending_input(123, True)
-
-        # 아무 메시지나 처리 가능
-        assert await plugin.can_handle("아무거나", 123) is True
-        assert await plugin.can_handle("오전에 회의하고 점심에 밥먹기", 123) is True
-
-    @pytest.mark.asyncio
-    async def test_handle_pending_input(self, plugin):
-        """자유 형식 입력 처리 테스트."""
-        plugin.manager.set_pending_input(123, True)
-
-        result = await plugin.handle(
-            "오전에 회의하고, 점심에 친구 만나고, 저녁에 운동",
-            123
-        )
+    async def test_handle_shows_main_menu(self, plugin):
+        """handle 호출 시 메인 메뉴 표시."""
+        result = await plugin.handle("할일", 123)
 
         assert result.handled is True
-        assert "할일 등록 완료" in result.response
-        assert "회의" in result.response
+        assert "할일 관리" in result.response
+        assert result.reply_markup is not None
 
     @pytest.mark.asyncio
-    async def test_handle_done_by_text(self, plugin):
-        """완료 처리 테스트 (텍스트)."""
-        # 먼저 할일 추가
-        plugin.manager.set_pending_input(123, True)
-        await plugin.handle("오전에 회의", 123)
-
-        # 완료 처리
-        result = await plugin.handle("회의 끝났어", 123)
-
-        assert result.handled is True
-        assert "완료" in result.response
-
-    @pytest.mark.asyncio
-    async def test_handle_done_by_index(self, plugin):
-        """완료 처리 테스트 (인덱스)."""
-        # 먼저 할일 추가
-        plugin.manager.set_pending_input(123, True)
-        await plugin.handle("오전에 회의", 123)
-
-        # 완료 처리
-        result = await plugin.handle("1번 완료", 123)
-
-        assert result.handled is True
-        assert "완료" in result.response
-
-    @pytest.mark.asyncio
-    async def test_handle_done_by_global_index(self, plugin):
-        """전역 인덱스 완료 처리 테스트."""
-        # 여러 시간대에 할일 추가
-        plugin.manager.set_pending_input(123, True)
-        await plugin.handle("오전에 회의, 오후에 점심, 저녁에 운동", 123)
-
-        # 전역 인덱스 3번 완료 (오후 점심)
-        result = await plugin.handle("3번 완료", 123)
-
-        assert result.handled is True
-        assert "완료" in result.response
-        assert "3번" in result.response
-
-    @pytest.mark.asyncio
-    async def test_handle_done_error_feedback(self, plugin):
-        """완료 실패 시 에러 피드백 테스트."""
-        # 할일이 없는 상태에서 완료 시도
-        result = await plugin.handle("1번 완료", 123)
-
-        assert result.handled is True
-        assert "❌" in result.response or "찾을 수 없" in result.response
-
-    @pytest.mark.asyncio
-    async def test_handle_delete(self, plugin):
-        """삭제 테스트."""
+    async def test_callback_list(self, plugin):
+        """리스트 콜백 테스트."""
         # 할일 추가
-        plugin.manager.set_pending_input(123, True)
-        await plugin.handle("오전에 회의", 123)
+        daily = plugin.manager.get_today(123)
+        daily.add_task(TimeSlot.MORNING, "회의")
+        plugin.manager.save_today(123, daily)
 
-        # 삭제
-        result = await plugin.handle("1번 삭제", 123)
+        # 리스트 콜백
+        result = plugin.handle_callback("td:list", 123)
 
-        assert result.handled is True
-        assert "삭제" in result.response or "🗑️" in result.response
-
-    @pytest.mark.asyncio
-    async def test_handle_delete_by_text(self, plugin):
-        """텍스트로 삭제 테스트."""
-        plugin.manager.set_pending_input(123, True)
-        await plugin.handle("오전에 회의", 123)
-
-        result = await plugin.handle("회의 삭제", 123)
-
-        assert result.handled is True
-        assert "삭제" in result.response or "🗑️" in result.response
+        assert "회의" in result["text"]
+        assert result["reply_markup"] is not None
 
     @pytest.mark.asyncio
-    async def test_handle_add_natural_language(self, plugin):
-        """자연어 추가 패턴 테스트."""
-        # "추가해줘", "넣어줘" 패턴
-        result1 = await plugin.handle("오전에 회의 추가해줘", 123)
-        assert result1.handled is True
-        assert "추가" in result1.response
+    async def test_callback_add_menu(self, plugin):
+        """추가 메뉴 콜백 테스트."""
+        result = plugin.handle_callback("td:add", 123)
 
-        result2 = await plugin.handle("저녁에 운동 넣어줘", 123)
-        assert result2.handled is True
-        assert "추가" in result2.response
+        assert "시간대 선택" in result["text"]
+        assert result["reply_markup"] is not None
 
     @pytest.mark.asyncio
-    async def test_handle_query(self, plugin):
-        """조회 테스트."""
-        # 먼저 할일 추가
-        plugin.manager.set_pending_input(123, True)
-        await plugin.handle("오전에 회의", 123)
+    async def test_callback_add_slot(self, plugin):
+        """시간대 선택 후 ForceReply 테스트."""
+        result = plugin.handle_callback("td:add_slot:m", 123)
 
-        # 조회
-        result = await plugin.handle("오늘 할일", 123)
-
-        assert result.handled is True
-        assert "회의" in result.response
+        assert "오전" in result["text"]
+        assert result.get("force_reply") is not None
+        assert result.get("slot_code") == "m"
 
     @pytest.mark.asyncio
-    async def test_handle_add_task(self, plugin):
-        """할일 추가 테스트."""
-        result = await plugin.handle("할일 추가: 보고서 작성", 123)
+    async def test_callback_done(self, plugin):
+        """완료 콜백 테스트."""
+        # 할일 추가
+        daily = plugin.manager.get_today(123)
+        daily.add_task(TimeSlot.MORNING, "회의")
+        plugin.manager.save_today(123, daily)
 
-        assert result.handled is True
-        assert "추가됨" in result.response
-        assert "보고서 작성" in result.response
+        # 완료 콜백
+        result = plugin.handle_callback("td:done:m:0", 123)
 
+        assert "완료" in result["text"]
 
-class TestTaskParsing:
-    """할일 파싱 테스트."""
+        # 실제로 완료되었는지 확인
+        daily = plugin.manager.get_today(123)
+        assert daily.get_tasks(TimeSlot.MORNING)[0].done is True
 
-    @pytest.fixture
-    def plugin(self, tmp_path):
-        p = TodoPlugin()
-        p._base_dir = tmp_path
-        return p
+    @pytest.mark.asyncio
+    async def test_callback_delete(self, plugin):
+        """삭제 콜백 테스트."""
+        # 할일 추가
+        daily = plugin.manager.get_today(123)
+        daily.add_task(TimeSlot.MORNING, "회의")
+        plugin.manager.save_today(123, daily)
 
-    def test_parse_with_time_slots(self, plugin):
-        """시간대별 파싱 테스트."""
-        text = "오전에 회의, 오후에 점심, 저녁에 운동"
-        tasks = plugin._parse_tasks_simple(text)
+        # 삭제 콜백
+        result = plugin.handle_callback("td:del:m:0", 123)
 
-        assert "회의" in tasks[TimeSlot.MORNING]
-        assert "점심" in tasks[TimeSlot.AFTERNOON]
-        assert "운동" in tasks[TimeSlot.EVENING]
+        assert "삭제" in result["text"]
 
-    def test_parse_with_informal_style(self, plugin):
-        """구어체 파싱 테스트."""
-        text = "저녁엔 운동해야해"
-        tasks = plugin._parse_tasks_simple(text)
+        # 실제로 삭제되었는지 확인
+        daily = plugin.manager.get_today(123)
+        assert len(daily.get_tasks(TimeSlot.MORNING)) == 0
 
-        assert "운동" in tasks[TimeSlot.EVENING]
+    @pytest.mark.asyncio
+    async def test_callback_move(self, plugin):
+        """이동 콜백 테스트."""
+        # 할일 추가
+        daily = plugin.manager.get_today(123)
+        daily.add_task(TimeSlot.MORNING, "회의")
+        plugin.manager.save_today(123, daily)
 
-    def test_parse_multiple_items(self, plugin):
-        """여러 항목 파싱."""
-        text = "회의하고, 점심, 운동"  # 쉼표로 명확히 분리
-        tasks = plugin._parse_tasks_simple(text)
+        # 오전 → 오후 이동
+        result = plugin.handle_callback("td:move:m:0:a", 123)
 
-        total = sum(len(t) for t in tasks.values())
-        assert total >= 3
+        assert "이동" in result["text"]
+
+        # 실제로 이동되었는지 확인
+        daily = plugin.manager.get_today(123)
+        assert len(daily.get_tasks(TimeSlot.MORNING)) == 0
+        assert len(daily.get_tasks(TimeSlot.AFTERNOON)) == 1
+        assert daily.get_tasks(TimeSlot.AFTERNOON)[0].text == "회의"
+
+    @pytest.mark.asyncio
+    async def test_callback_item_menu(self, plugin):
+        """항목 메뉴 콜백 테스트."""
+        # 할일 추가
+        daily = plugin.manager.get_today(123)
+        daily.add_task(TimeSlot.MORNING, "회의")
+        plugin.manager.save_today(123, daily)
+
+        # 항목 메뉴
+        result = plugin.handle_callback("td:item:m:0", 123)
+
+        assert "회의" in result["text"]
+        assert "완료" in str(result["reply_markup"])
+        assert "삭제" in str(result["reply_markup"])
+
+    @pytest.mark.asyncio
+    async def test_force_reply_add_tasks(self, plugin):
+        """ForceReply 응답으로 할일 추가."""
+        result = plugin.handle_force_reply("회의\n이메일\n점심", 123, "m")
+
+        assert "추가됨" in result["text"]
+        assert "3개" in result["text"]
+
+        # 실제로 추가되었는지 확인
+        daily = plugin.manager.get_today(123)
+        tasks = daily.get_tasks(TimeSlot.MORNING)
+        assert len(tasks) == 3
+        assert tasks[0].text == "회의"
+        assert tasks[1].text == "이메일"
+        assert tasks[2].text == "점심"
+
+    @pytest.mark.asyncio
+    async def test_force_reply_empty_input(self, plugin):
+        """빈 입력 처리."""
+        result = plugin.handle_force_reply("", 123, "m")
+
+        assert "입력되지 않았" in result["text"]
+
+    @pytest.mark.asyncio
+    async def test_callback_back(self, plugin):
+        """뒤로가기 콜백 테스트."""
+        result = plugin.handle_callback("td:back", 123)
+
+        assert "할일 관리" in result["text"]
+        assert result["reply_markup"] is not None

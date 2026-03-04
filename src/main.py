@@ -10,6 +10,7 @@ from pathlib import Path
 from telegram import Update
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     MessageHandler,
     filters,
@@ -257,6 +258,9 @@ def create_app() -> Application:
     app.add_handler(MessageHandler(filters.Regex(r'^/history_'), handlers.history_command))
     app.add_handler(MessageHandler(filters.Regex(r'^/d_'), handlers.delete_session_command))
     app.add_handler(MessageHandler(filters.Regex(r'^/delete_'), handlers.delete_session_command))
+
+    # Callback Query 핸들러 (인라인 버튼)
+    app.add_handler(CallbackQueryHandler(handlers.callback_query_handler))
 
     # 알 수 없는 명령어 처리 (/ai 제외 - 이미 등록됨)
     app.add_handler(MessageHandler(filters.COMMAND, handlers.unknown_command))

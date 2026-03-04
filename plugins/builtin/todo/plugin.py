@@ -1,8 +1,10 @@
-"""Todo 플러그인 - 자연어 기반 할일 관리."""
+"""Todo 플러그인 - 버튼 기반 할일 관리."""
 
 import re
 from pathlib import Path
 from typing import Optional
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 
 from src.plugins.loader import Plugin, PluginResult
 from src.logging_config import logger
@@ -11,81 +13,54 @@ from plugins.builtin.todo.manager import TodoManager, TimeSlot, DailyTodo
 
 
 class TodoPlugin(Plugin):
-    """할일 관리 플러그인."""
+    """버튼 기반 할일 관리 플러그인."""
 
     name = "todo"
-    description = "스케줄 기반 할일 관리 (오전/오후/저녁)"
+    description = "버튼 기반 할일 관리 (오전/오후/저녁)"
     usage = (
         "📋 <b>할일 플러그인 사용법</b>\n\n"
+        "<b>시작하기</b>\n"
+        "• <code>/todo</code> 또는 <code>할일</code> 입력\n\n"
+        "<b>기능</b>\n"
+        "• 📄 리스트 - 오늘 할일 보기\n"
+        "• ➕ 추가 - 시간대 선택 후 할일 입력\n"
+        "• 항목 클릭 - 완료/삭제/이동\n\n"
         "<b>🕐 자동 알림</b>\n"
-        "• 08:00 - 오늘 할일 질문\n"
-        "• 10:00 - 오전 할일 체크\n"
-        "• 15:00 - 오후 할일 체크\n"
-        "• 19:00 - 저녁 할일 체크\n\n"
-        "<b>📝 할일 등록</b>\n"
-        "• 아침에 봇이 물어보면 자유롭게 답변\n"
-        "• <code>할일 추가: 회의하기</code>\n"
-        "• <code>오전에 회의 추가해줘</code>\n"
-        "• <code>저녁에 운동 넣어줘</code>\n\n"
-        "<b>✅ 완료 처리</b>\n"
-        "• <code>회의 끝났어</code>\n"
-        "• <code>1번 완료</code>\n"
-        "• <code>오전 1번 done</code>\n\n"
-        "<b>🗑️ 삭제</b>\n"
-        "• <code>회의 삭제</code>\n"
-        "• <code>2번 지워</code>\n"
-        "• <code>오후 3번 제거</code>\n\n"
-        "<b>📊 조회</b>\n"
-        "• <code>할일 보여줘</code>\n"
-        "• <code>오늘 할일</code>\n"
-        "• <code>오전 할일</code>"
+        "• 10:00 - 오전 할일 리마인더\n"
+        "• 15:00 - 오후 할일 리마인더\n"
+        "• 19:00 - 저녁 할일 리마인더"
     )
 
-    # 제외 패턴 - AI에게 넘겨야 하는 경우
+    # 트리거 패턴 - 명시적 키워드만
+    TRIGGER_KEYWORDS = ["todo", "할일", "투두"]
+
+    # 제외 패턴 - AI에게 넘김
     EXCLUDE_PATTERNS = [
-        r"(란|이란|가|이)\s*(뭐|무엇|뭔)",  # "할일이란 뭐야"
+        r"(란|이란|가|이)\s*(뭐|무엇|뭔)",
         r"영어로|번역|translate",
         r"어떻게|왜|언제|어디",
         r"알려줘|설명|뜻",
     ]
 
-    # 트리거 패턴
-    TRIGGER_PATTERNS = [
-        # 조회
-        r"(오늘|내일)?\s*할\s*일\s*(보여|목록|리스트|확인|뭐)",
-        r"(오전|오후|저녁)\s*할\s*일",
-        r"todo\s*(list|보여|확인)?",
-        # 추가
-        r"할\s*일\s*(추가|등록|넣어|추가해)",
-        r"(오전|오후|저녁)에?\s*.+\s*(추가|등록|해야|넣어|추가해)",
-        # 완료
-        r"(\d+)번?\s*(완료|끝|done|했어|함)",
-        r"(오전|오후|저녁)\s*(\d+)번?\s*(완료|끝|done)",
-        r".+\s*(끝났어|완료|했어|done)",
-        # 삭제
-        r"(\d+)번?\s*(삭제|지워|제거)",
-        r"(오전|오후|저녁)\s*(\d+)번?\s*(삭제|지워|제거)",
-        r".+\s*(삭제|지워|제거)",
-        # 입력 대기 상태에서의 자유 입력 (별도 처리)
-    ]
+    # callback_data 접두사
+    CALLBACK_PREFIX = "td:"
 
-    # 시간대 키워드 매핑
-    SLOT_KEYWORDS = {
-        TimeSlot.MORNING: ["오전", "아침", "morning", "am"],
-        TimeSlot.AFTERNOON: ["오후", "점심", "afternoon", "pm", "낮"],
-        TimeSlot.EVENING: ["저녁", "밤", "evening", "night"],
+    # 시간대 매핑
+    SLOT_MAP = {
+        "m": TimeSlot.MORNING,
+        "a": TimeSlot.AFTERNOON,
+        "e": TimeSlot.EVENING,
     }
-
-    # 시간대 키워드 제거용 패턴 (문두에서만 제거, "점심"은 할일로도 쓰이므로 "점심에"만 제거)
-    SLOT_REMOVE_PATTERNS = [
-        r"^오전에?\s*",
-        r"^아침에?\s*",
-        r"^오후에\s+",  # "오후에 " (뒤에 공백 필수)
-        r"^점심에\s+",  # "점심에 " (뒤에 공백 필수, "점심" 자체는 할일일 수 있음)
-        r"^낮에?\s*",
-        r"^저녁에?[는은]?\s*",
-        r"^밤에?\s*",
-    ]
+    SLOT_NAMES = {
+        TimeSlot.MORNING: "🌅 오전",
+        TimeSlot.AFTERNOON: "☀️ 오후",
+        TimeSlot.EVENING: "🌙 저녁",
+    }
+    SLOT_CODES = {
+        TimeSlot.MORNING: "m",
+        TimeSlot.AFTERNOON: "a",
+        TimeSlot.EVENING: "e",
+    }
 
     def __init__(self):
         super().__init__()
@@ -99,362 +74,561 @@ class TodoPlugin(Plugin):
             self._manager = TodoManager(data_dir)
         return self._manager
 
+    def set_manager(self, manager: TodoManager) -> None:
+        """외부에서 매니저 주입 (스케줄러와 공유용)."""
+        self._manager = manager
+
     async def can_handle(self, message: str, chat_id: int) -> bool:
-        """할일 관련 메시지인지 확인."""
-        msg = message.strip()
+        """할일 관련 메시지인지 확인 - 명시적 키워드만."""
+        msg = message.strip().lower()
 
         # 제외 패턴 체크
         for pattern in self.EXCLUDE_PATTERNS:
             if re.search(pattern, msg, re.IGNORECASE):
                 return False
 
-        # 입력 대기 상태면 처리
-        if self.manager.is_pending_input(chat_id):
-            return True
-
-        # 트리거 패턴 체크
-        for pattern in self.TRIGGER_PATTERNS:
-            if re.search(pattern, msg, re.IGNORECASE):
+        # 명시적 키워드로 시작하는지 체크
+        for keyword in self.TRIGGER_KEYWORDS:
+            if msg.startswith(keyword):
                 return True
 
         return False
 
     async def handle(self, message: str, chat_id: int) -> PluginResult:
-        """메시지 처리."""
-        msg = message.strip()
-        logger.info(f"Todo 플러그인 처리: '{msg[:50]}...' (chat_id={chat_id})")
+        """메시지 처리 - 메인 메뉴 표시."""
+        logger.info(f"Todo 플러그인 처리: '{message[:50]}' (chat_id={chat_id})")
 
-        # 1. 입력 대기 상태 처리 (아침 질문에 대한 답변)
-        if self.manager.is_pending_input(chat_id):
-            return await self._handle_pending_input(msg, chat_id)
+        # 메인 메뉴 표시
+        return self.get_main_menu_result(chat_id)
 
-        # 2. 추가 패턴 (조회보다 먼저 - "할일 추가"가 조회에 매칭되지 않도록)
-        add_result = await self._handle_add(msg, chat_id)
-        if add_result:
-            return add_result
+    def get_main_menu_result(self, chat_id: int) -> PluginResult:
+        """메인 메뉴 결과 반환."""
+        keyboard = [
+            [
+                InlineKeyboardButton("📄 리스트", callback_data="td:list"),
+                InlineKeyboardButton("➕ 추가", callback_data="td:add"),
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
 
-        # 3. 삭제 패턴
-        delete_result = await self._handle_delete(msg, chat_id)
-        if delete_result:
-            return delete_result
+        return PluginResult(
+            handled=True,
+            response="📋 <b>할일 관리</b>",
+            reply_markup=reply_markup,
+        )
 
-        # 4. 완료 패턴
-        done_result = await self._handle_done(msg, chat_id)
-        if done_result:
-            return done_result
+    # ==================== Callback 처리 메서드 ====================
 
-        # 5. 조회 패턴
-        if re.search(r"(오늘|내일)?\s*할\s*일\s*(보여|목록|리스트|확인|뭐)?", msg):
-            # 특정 시간대 조회
-            slot = self._detect_slot(msg)
-            if slot:
-                summary = self.manager.get_slot_summary(chat_id, slot)
-                slot_name = self._get_slot_name(slot)
-                return PluginResult(
-                    handled=True,
-                    response=f"<b>{slot_name} 할일</b>\n\n{summary}"
-                )
-            # 전체 조회
-            summary = self.manager.get_daily_summary(chat_id)
-            return PluginResult(handled=True, response=summary)
+    def handle_callback(self, callback_data: str, chat_id: int) -> dict:
+        """callback_data 처리.
 
-        # 6. 기본 - 전체 조회
-        summary = self.manager.get_daily_summary(chat_id)
-        return PluginResult(handled=True, response=summary)
+        Returns:
+            dict with keys:
+            - text: 응답 텍스트
+            - reply_markup: InlineKeyboardMarkup (optional)
+            - force_reply: ForceReply (optional)
+            - edit: bool - 기존 메시지 수정 여부
+        """
+        logger.info(f"Todo callback: {callback_data} (chat_id={chat_id})")
 
-    async def _handle_delete(self, message: str, chat_id: int) -> Optional[PluginResult]:
-        """삭제 처리."""
-        msg = message.lower()
+        # td:xxx 형식 파싱
+        parts = callback_data.split(":")
+        if len(parts) < 2:
+            return {"text": "❌ 잘못된 요청", "edit": True}
 
-        # 패턴: "N번 삭제", "오전 N번 삭제"
-        match = re.search(r'(오전|오후|저녁)?\s*(\d+)번?\s*(삭제|지워|제거)', msg)
-        if match:
-            slot_text = match.group(1)
-            user_index = int(match.group(2))
+        action = parts[1]
 
-            slot = self._text_to_slot(slot_text) if slot_text else None
+        # 라우팅
+        if action == "list":
+            return self._handle_list(chat_id)
+        elif action == "add":
+            return self._handle_add_menu(chat_id)
+        elif action == "add_slot":
+            # td:add_slot:m
+            slot_code = parts[2] if len(parts) > 2 else "m"
+            return self._handle_add_slot(chat_id, slot_code)
+        elif action == "item":
+            # td:item:m:0
+            slot_code = parts[2] if len(parts) > 2 else "m"
+            index = int(parts[3]) if len(parts) > 3 else 0
+            return self._handle_item_menu(chat_id, slot_code, index)
+        elif action == "done":
+            # td:done:m:0
+            slot_code = parts[2] if len(parts) > 2 else "m"
+            index = int(parts[3]) if len(parts) > 3 else 0
+            return self._handle_done(chat_id, slot_code, index)
+        elif action == "del":
+            # td:del:m:0
+            slot_code = parts[2] if len(parts) > 2 else "m"
+            index = int(parts[3]) if len(parts) > 3 else 0
+            return self._handle_delete(chat_id, slot_code, index)
+        elif action == "move":
+            # td:move:m:0:a
+            slot_code = parts[2] if len(parts) > 2 else "m"
+            index = int(parts[3]) if len(parts) > 3 else 0
+            target_slot = parts[4] if len(parts) > 4 else "a"
+            return self._handle_move(chat_id, slot_code, index, target_slot)
+        elif action == "back":
+            return self._handle_back(chat_id)
+        # 멀티 선택 관련
+        elif action == "multi":
+            return self._handle_multi_select(chat_id)
+        elif action == "multi_toggle":
+            # td:multi_toggle:m:0
+            slot_code = parts[2] if len(parts) > 2 else "m"
+            index = int(parts[3]) if len(parts) > 3 else 0
+            return self._handle_multi_toggle(chat_id, slot_code, index)
+        elif action == "multi_done":
+            return self._handle_multi_done(chat_id)
+        elif action == "multi_del":
+            return self._handle_multi_delete(chat_id)
+        elif action == "multi_carry":
+            return self._handle_multi_carry(chat_id)
+        elif action == "multi_clear":
+            return self._handle_multi_clear(chat_id)
+        # 하루 마무리 관련
+        elif action == "carry_all":
+            return self._handle_carry_all(chat_id)
+        elif action == "wrap_done":
+            return self._handle_wrap_done(chat_id)
+        else:
+            return {"text": "❌ 알 수 없는 명령", "edit": True}
 
-            if slot:
-                # 시간대 지정 시
-                if self.manager.delete_by_index(chat_id, slot, user_index - 1):
-                    return PluginResult(
-                        handled=True,
-                        response=f"🗑️ {self._get_slot_name(slot)} {user_index}번 삭제!"
-                    )
-                else:
-                    return PluginResult(
-                        handled=True,
-                        response=f"❌ {self._get_slot_name(slot)}에 {user_index}번 할일이 없어요."
-                    )
-            else:
-                # 전역 인덱스로 삭제
-                result = self.manager.delete_by_global_index(chat_id, user_index)
-                if result:
-                    slot_name, task_text = result
-                    return PluginResult(
-                        handled=True,
-                        response=f"🗑️ {user_index}번 삭제!\n• {task_text}"
-                    )
-                else:
-                    return PluginResult(
-                        handled=True,
-                        response=f"❌ {user_index}번 할일을 찾을 수 없어요."
-                    )
+    # ==================== 멀티 선택 상태 관리 ====================
 
-        # 패턴: "회의 삭제", "운동 지워"
-        match = re.search(r'(.+?)\s*(삭제|지워|제거)', msg)
-        if match:
-            task_text = match.group(1).strip()
-            result = self.manager.delete_by_text(chat_id, task_text)
-            if result:
-                return PluginResult(
-                    handled=True,
-                    response=f"🗑️ '{task_text}' 삭제!"
-                )
-            else:
-                return PluginResult(
-                    handled=True,
-                    response=f"❌ '{task_text}' 할일을 찾을 수 없어요."
-                )
+    _multi_selections: dict[int, set[tuple[str, int]]] = {}  # chat_id -> {(slot, index), ...}
 
-        return None
+    def _get_selections(self, chat_id: int) -> set[tuple[str, int]]:
+        """현재 선택 상태."""
+        return self._multi_selections.get(chat_id, set())
 
-    async def _handle_pending_input(self, message: str, chat_id: int) -> PluginResult:
-        """입력 대기 상태 처리 (자유 형식 할일 입력)."""
-        logger.info(f"할일 입력 처리: {message[:100]}")
+    def _toggle_selection(self, chat_id: int, slot_code: str, index: int) -> bool:
+        """선택 토글. 새 상태 반환."""
+        if chat_id not in self._multi_selections:
+            self._multi_selections[chat_id] = set()
 
-        # AI 파싱 대신 간단한 규칙 기반 파싱
-        tasks_by_slot = self._parse_tasks_simple(message)
+        key = (slot_code, index)
+        if key in self._multi_selections[chat_id]:
+            self._multi_selections[chat_id].discard(key)
+            return False
+        else:
+            self._multi_selections[chat_id].add(key)
+            return True
 
-        if not any(tasks_by_slot.values()):
-            # 파싱 실패 - 전체를 오전으로 분류
-            tasks_by_slot[TimeSlot.MORNING] = [message.strip()]
+    def _clear_selections(self, chat_id: int) -> None:
+        """선택 초기화."""
+        self._multi_selections.pop(chat_id, None)
 
-        # 저장
-        daily = self.manager.add_tasks_from_text(chat_id, tasks_by_slot)
+    def _handle_list(self, chat_id: int) -> dict:
+        """할일 리스트 표시."""
+        daily = self.manager.get_today(chat_id)
+        all_tasks = daily.get_all_tasks()
 
-        # 응답 생성
-        lines = ["✅ 할일 등록 완료!\n"]
+        lines = [f"📋 <b>{daily.date} 할일</b>\n"]
+        buttons = []
+        global_index = 0
 
-        slot_names = {
-            TimeSlot.MORNING: "🌅 오전",
-            TimeSlot.AFTERNOON: "☀️ 오후",
-            TimeSlot.EVENING: "🌙 저녁",
-        }
+        for slot in [TimeSlot.MORNING, TimeSlot.AFTERNOON, TimeSlot.EVENING]:
+            tasks = all_tasks.get(slot.value, [])
+            slot_name = self.SLOT_NAMES[slot]
+            slot_code = self.SLOT_CODES[slot]
 
-        for slot, tasks in tasks_by_slot.items():
             if tasks:
-                lines.append(f"\n<b>{slot_names[slot]}</b>")
-                for task in tasks:
-                    lines.append(f"• {task}")
+                lines.append(f"\n<b>{slot_name}</b>")
+                for i, task in enumerate(tasks):
+                    global_index += 1
+                    status = "✅" if task.done else "⬜"
+                    lines.append(f"{status} {global_index}. {task.text}")
 
-        lines.append("\n\n시간대별로 리마인더 보내드릴게요!")
+                    # 미완료 항목만 버튼 추가
+                    if not task.done:
+                        buttons.append([
+                            InlineKeyboardButton(
+                                f"{global_index}. {task.text[:20]}{'...' if len(task.text) > 20 else ''}",
+                                callback_data=f"td:item:{slot_code}:{i}"
+                            )
+                        ])
 
-        return PluginResult(handled=True, response="\n".join(lines))
+        pending = daily.get_pending_count()
+        done = daily.get_done_count()
+        total = pending + done
 
-    def _parse_tasks_simple(self, text: str) -> dict[TimeSlot, list[str]]:
-        """간단한 규칙 기반 할일 파싱."""
-        tasks = {
-            TimeSlot.MORNING: [],
-            TimeSlot.AFTERNOON: [],
-            TimeSlot.EVENING: [],
+        if total == 0:
+            lines.append("\n등록된 할일이 없어요.")
+        else:
+            lines.append(f"\n📊 {done}/{total} 완료")
+
+        # 하단 버튼
+        if pending > 0:
+            buttons.append([
+                InlineKeyboardButton("📋 멀티선택", callback_data="td:multi"),
+            ])
+        buttons.append([
+            InlineKeyboardButton("➕ 추가", callback_data="td:add"),
+            InlineKeyboardButton("🔄 새로고침", callback_data="td:list"),
+        ])
+
+        return {
+            "text": "\n".join(lines),
+            "reply_markup": InlineKeyboardMarkup(buttons),
+            "edit": True,
         }
 
-        # 전처리: "저녁엔", "오후엔" 등을 "저녁에", "오후에"로 정규화
-        text = re.sub(r'(오전|아침|오후|점심|저녁|밤)엔\s*', r'\1에 ', text)
+    def _handle_add_menu(self, chat_id: int) -> dict:
+        """시간대 선택 메뉴."""
+        keyboard = [
+            [
+                InlineKeyboardButton("🌅 오전", callback_data="td:add_slot:m"),
+                InlineKeyboardButton("☀️ 오후", callback_data="td:add_slot:a"),
+                InlineKeyboardButton("🌙 저녁", callback_data="td:add_slot:e"),
+            ],
+            [
+                InlineKeyboardButton("⬅️ 뒤로", callback_data="td:list"),
+            ]
+        ]
 
-        # 쉼표, 줄바꿈, "그리고" 등으로 분리
-        parts = re.split(r'[,\n]|그리고|하고', text)
+        return {
+            "text": "⏰ <b>시간대 선택</b>\n\n할일을 추가할 시간대를 선택하세요.",
+            "reply_markup": InlineKeyboardMarkup(keyboard),
+            "edit": True,
+        }
 
-        for part in parts:
-            part = part.strip()
-            if not part:
-                continue
+    def _handle_add_slot(self, chat_id: int, slot_code: str) -> dict:
+        """특정 시간대에 할일 추가 - ForceReply 반환."""
+        slot = self.SLOT_MAP.get(slot_code, TimeSlot.MORNING)
+        slot_name = self.SLOT_NAMES[slot]
 
-            # 시간대 감지
-            slot = self._detect_slot(part)
+        return {
+            "text": f"{slot_name} <b>할일 입력</b>\n\n여러 개 입력 시 줄바꿈으로 구분하세요.",
+            "force_reply": ForceReply(
+                selective=True,
+                input_field_placeholder="할일 입력... (엔터로 구분)"
+            ),
+            "slot_code": slot_code,  # 저장용
+            "edit": False,  # 새 메시지로 전송
+        }
 
-            # 시간대 키워드 제거
-            clean_part = part
-            for pattern in self.SLOT_REMOVE_PATTERNS:
-                clean_part = re.sub(pattern, '', clean_part, flags=re.IGNORECASE)
+    def _handle_item_menu(self, chat_id: int, slot_code: str, index: int) -> dict:
+        """항목 상세 메뉴."""
+        slot = self.SLOT_MAP.get(slot_code, TimeSlot.MORNING)
+        daily = self.manager.get_today(chat_id)
+        tasks = daily.get_tasks(slot)
 
-            clean_part = clean_part.strip()
-            if not clean_part:
-                continue
+        if index >= len(tasks):
+            return {"text": "❌ 항목을 찾을 수 없어요.", "edit": True}
 
-            # "~해야해", "~하기" 등 접미사 정리
-            clean_part = re.sub(r'(해야\s*(해|돼|함)?|하기|할\s*거야?)$', '', clean_part).strip()
+        task = tasks[index]
+        slot_name = self.SLOT_NAMES[slot]
 
-            if clean_part:
-                if slot:
-                    tasks[slot].append(clean_part)
-                else:
-                    # 시간대 불명 - 기본값 또는 순서대로 분배
-                    # 간단하게: 첫 번째는 오전, 두 번째는 오후, 세 번째는 저녁
-                    total = sum(len(t) for t in tasks.values())
-                    if total % 3 == 0:
-                        tasks[TimeSlot.MORNING].append(clean_part)
-                    elif total % 3 == 1:
-                        tasks[TimeSlot.AFTERNOON].append(clean_part)
-                    else:
-                        tasks[TimeSlot.EVENING].append(clean_part)
+        # 이동 대상 시간대
+        other_slots = [s for s in ["m", "a", "e"] if s != slot_code]
+        move_buttons = [
+            InlineKeyboardButton(
+                f"➡️ {self.SLOT_NAMES[self.SLOT_MAP[s]]}",
+                callback_data=f"td:move:{slot_code}:{index}:{s}"
+            )
+            for s in other_slots
+        ]
 
-        return tasks
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ 완료", callback_data=f"td:done:{slot_code}:{index}"),
+                InlineKeyboardButton("🗑️ 삭제", callback_data=f"td:del:{slot_code}:{index}"),
+            ],
+            move_buttons,
+            [
+                InlineKeyboardButton("⬅️ 뒤로", callback_data="td:list"),
+            ]
+        ]
 
-    async def _handle_done(self, message: str, chat_id: int) -> Optional[PluginResult]:
+        return {
+            "text": f"{slot_name} 할일\n\n<b>{task.text}</b>",
+            "reply_markup": InlineKeyboardMarkup(keyboard),
+            "edit": True,
+        }
+
+    def _handle_done(self, chat_id: int, slot_code: str, index: int) -> dict:
         """완료 처리."""
-        msg = message.lower()
+        slot = self.SLOT_MAP.get(slot_code, TimeSlot.MORNING)
 
-        # 패턴: "N번 완료", "오전 N번 완료"
-        match = re.search(r'(오전|오후|저녁)?\s*(\d+)번?\s*(완료|끝|done|했어|함)', msg)
-        if match:
-            slot_text = match.group(1)
-            user_index = int(match.group(2))  # 1-based (사용자가 보는 번호)
+        if self.manager.mark_done_by_index(chat_id, slot, index):
+            # 리스트로 돌아가기
+            result = self._handle_list(chat_id)
+            result["text"] = "✅ 완료 처리됨!\n\n" + result["text"]
+            return result
+        else:
+            return {"text": "❌ 처리 실패", "edit": True}
 
-            slot = self._text_to_slot(slot_text) if slot_text else None
+    def _handle_delete(self, chat_id: int, slot_code: str, index: int) -> dict:
+        """삭제 처리."""
+        slot = self.SLOT_MAP.get(slot_code, TimeSlot.MORNING)
 
-            if slot:
-                # 시간대 지정 시 - 해당 시간대의 로컬 인덱스
-                if self.manager.mark_done_by_index(chat_id, slot, user_index - 1):
-                    return PluginResult(
-                        handled=True,
-                        response=f"✅ {self._get_slot_name(slot)} {user_index}번 완료!"
-                    )
-                else:
-                    return PluginResult(
-                        handled=True,
-                        response=f"❌ {self._get_slot_name(slot)}에 {user_index}번 할일이 없어요."
-                    )
-            else:
-                # 시간대 없으면 전역 인덱스로 처리
-                result = self.manager.mark_done_by_global_index(chat_id, user_index)
-                if result:
-                    slot_name, task_text = result
-                    return PluginResult(
-                        handled=True,
-                        response=f"✅ {user_index}번 완료!\n• {task_text}"
-                    )
-                else:
-                    return PluginResult(
-                        handled=True,
-                        response=f"❌ {user_index}번 할일을 찾을 수 없어요."
-                    )
+        if self.manager.delete_by_index(chat_id, slot, index):
+            result = self._handle_list(chat_id)
+            result["text"] = "🗑️ 삭제됨!\n\n" + result["text"]
+            return result
+        else:
+            return {"text": "❌ 삭제 실패", "edit": True}
 
-        # 패턴: "회의 끝났어", "운동 완료"
-        match = re.search(r'(.+?)\s*(끝났어|완료|했어|done)', msg)
-        if match:
-            task_text = match.group(1).strip()
-            result = self.manager.mark_done_by_text(chat_id, task_text)
-            if result:
-                return PluginResult(
-                    handled=True,
-                    response=f"✅ '{task_text}' 완료!"
-                )
-            else:
-                return PluginResult(
-                    handled=True,
-                    response=f"❌ '{task_text}' 할일을 찾을 수 없어요."
-                )
+    def _handle_move(self, chat_id: int, slot_code: str, index: int, target_code: str) -> dict:
+        """다른 시간대로 이동."""
+        src_slot = self.SLOT_MAP.get(slot_code, TimeSlot.MORNING)
+        dst_slot = self.SLOT_MAP.get(target_code, TimeSlot.AFTERNOON)
 
-        return None
+        daily = self.manager.get_today(chat_id)
+        tasks = daily.get_tasks(src_slot)
 
-    async def _handle_add(self, message: str, chat_id: int) -> Optional[PluginResult]:
-        """할일 추가."""
-        msg = message.strip()
+        if index >= len(tasks):
+            return {"text": "❌ 항목을 찾을 수 없어요.", "edit": True}
 
-        # 패턴 1: "오후에 축구 해야" / "오전에 회의 추가" (시간대 + 할일 + 동사)
-        # "~으로 추가", "~를 추가", "추가해줘", "넣어줘" 등도 처리
-        match = re.search(r'(오전|오후|저녁)에?\s+(.+?)(?:[으로를을]?\s*)?(해야|추가|등록|하기|추가해|넣어)', msg)
-        if match:
-            slot = self._text_to_slot(match.group(1))
-            task_text = match.group(2).strip()
+        task_text = tasks[index].text
 
-            # "할일", "할 일", "할일로", "할일을" 등 제거
-            task_text = re.sub(r'할\s*일[로을은는이가]?\s*', '', task_text).strip()
-            # 끝에 붙은 조사 제거 ("운동으" -> "운동")
-            task_text = re.sub(r'[으로를을은는이가]$', '', task_text).strip()
+        # 삭제 후 추가
+        if self.manager.delete_by_index(chat_id, src_slot, index):
+            daily = self.manager.get_today(chat_id)
+            daily.add_task(dst_slot, task_text)
+            self.manager.save_today(chat_id, daily)
 
-            if slot and task_text and len(task_text) > 1:
-                daily = self.manager.get_today(chat_id)
-                daily.add_task(slot, task_text)
-                self.manager.save_today(chat_id, daily)
+            result = self._handle_list(chat_id)
+            result["text"] = f"➡️ {self.SLOT_NAMES[dst_slot]}으로 이동!\n\n" + result["text"]
+            return result
+        else:
+            return {"text": "❌ 이동 실패", "edit": True}
 
-                return PluginResult(
-                    handled=True,
-                    response=f"✅ {self._get_slot_name(slot)}에 추가됨!\n• {task_text}"
-                )
+    def _handle_back(self, chat_id: int) -> dict:
+        """메인 메뉴로."""
+        self._clear_selections(chat_id)  # 선택 초기화
+        keyboard = [
+            [
+                InlineKeyboardButton("📄 리스트", callback_data="td:list"),
+                InlineKeyboardButton("➕ 추가", callback_data="td:add"),
+            ]
+        ]
 
-        # 패턴 2: "할일 추가: XXX", "할일 추가 XXX"
-        match = re.search(r'할\s*일\s*(추가|등록)[:\s]+(.+?)(?:\s+해야|\s+하기|$)', msg)
-        if match:
-            task_text = match.group(2).strip()
-            # 질문형이면 무시 ("할일 추가 가능?" 등)
-            if task_text.endswith('?') or task_text in ['가능', '돼', '되', '할까']:
-                return None
-
-            slot = self._detect_slot(task_text) or TimeSlot.MORNING
-
-            # 시간대 키워드 제거
-            for pattern in self.SLOT_REMOVE_PATTERNS:
-                task_text = re.sub(pattern, '', task_text, flags=re.IGNORECASE)
-
-            task_text = task_text.strip()
-            if task_text and len(task_text) > 1:
-                daily = self.manager.get_today(chat_id)
-                daily.add_task(slot, task_text)
-                self.manager.save_today(chat_id, daily)
-
-                return PluginResult(
-                    handled=True,
-                    response=f"✅ {self._get_slot_name(slot)}에 추가됨!\n• {task_text}"
-                )
-
-        # 패턴 3: "오전에 회의 추가" (레거시)
-        match = re.search(r'(오전|오후|저녁)에?\s*(.+?)\s*(추가|등록)', msg)
-        if match:
-            slot = self._text_to_slot(match.group(1))
-            task_text = match.group(2).strip()
-
-            if slot and task_text:
-                daily = self.manager.get_today(chat_id)
-                daily.add_task(slot, task_text)
-                self.manager.save_today(chat_id, daily)
-
-                return PluginResult(
-                    handled=True,
-                    response=f"✅ {self._get_slot_name(slot)}에 추가됨!\n• {task_text}"
-                )
-
-        return None
-
-    def _detect_slot(self, text: str) -> Optional[TimeSlot]:
-        """텍스트에서 시간대 감지."""
-        text_lower = text.lower()
-        for slot, keywords in self.SLOT_KEYWORDS.items():
-            for kw in keywords:
-                if kw in text_lower:
-                    return slot
-        return None
-
-    def _text_to_slot(self, text: Optional[str]) -> Optional[TimeSlot]:
-        """텍스트를 TimeSlot으로 변환."""
-        if not text:
-            return None
-        text = text.lower()
-        if text in ["오전", "아침"]:
-            return TimeSlot.MORNING
-        elif text in ["오후", "점심", "낮"]:
-            return TimeSlot.AFTERNOON
-        elif text in ["저녁", "밤"]:
-            return TimeSlot.EVENING
-        return None
-
-    def _get_slot_name(self, slot: TimeSlot) -> str:
-        """시간대 이름."""
-        names = {
-            TimeSlot.MORNING: "🌅 오전",
-            TimeSlot.AFTERNOON: "☀️ 오후",
-            TimeSlot.EVENING: "🌙 저녁",
+        return {
+            "text": "📋 <b>할일 관리</b>",
+            "reply_markup": InlineKeyboardMarkup(keyboard),
+            "edit": True,
         }
-        return names.get(slot, str(slot))
+
+    # ==================== 멀티 선택 핸들러 ====================
+
+    def _handle_multi_select(self, chat_id: int) -> dict:
+        """멀티 선택 모드 진입."""
+        self._clear_selections(chat_id)
+        return self._render_multi_view(chat_id)
+
+    def _render_multi_view(self, chat_id: int) -> dict:
+        """멀티 선택 화면 렌더링."""
+        pending = self.manager.get_pending_tasks_flat(chat_id)
+        selections = self._get_selections(chat_id)
+
+        if not pending:
+            return {
+                "text": "✅ 미완료 할일이 없어요!",
+                "reply_markup": InlineKeyboardMarkup([[
+                    InlineKeyboardButton("⬅️ 뒤로", callback_data="td:list")
+                ]]),
+                "edit": True,
+            }
+
+        lines = ["📋 <b>멀티 선택</b>\n", "항목을 터치해서 선택/해제하세요.\n"]
+
+        slot_names = {"m": "🌅 오전", "a": "☀️ 오후", "e": "🌙 저녁"}
+        current_slot = None
+        buttons = []
+
+        for item in pending:
+            slot = item["slot"]
+            if slot != current_slot:
+                current_slot = slot
+                lines.append(f"\n<b>{slot_names[slot]}</b>")
+
+            key = (slot, item["index"])
+            selected = key in selections
+            mark = "☑️" if selected else "⬜"
+            lines.append(f"{mark} {item['text']}")
+
+            # 버튼
+            btn_text = f"{'☑️' if selected else '⬜'} {item['text'][:18]}{'...' if len(item['text']) > 18 else ''}"
+            buttons.append([
+                InlineKeyboardButton(
+                    btn_text,
+                    callback_data=f"td:multi_toggle:{slot}:{item['index']}"
+                )
+            ])
+
+        # 선택 개수
+        count = len(selections)
+        lines.append(f"\n📌 {count}개 선택됨")
+
+        # 액션 버튼
+        action_row = []
+        if count > 0:
+            action_row = [
+                InlineKeyboardButton(f"✅ 완료({count})", callback_data="td:multi_done"),
+                InlineKeyboardButton(f"🗑️ 삭제({count})", callback_data="td:multi_del"),
+                InlineKeyboardButton(f"📅 내일({count})", callback_data="td:multi_carry"),
+            ]
+            buttons.append(action_row)
+
+        buttons.append([
+            InlineKeyboardButton("🔄 선택해제", callback_data="td:multi_clear"),
+            InlineKeyboardButton("⬅️ 뒤로", callback_data="td:list"),
+        ])
+
+        return {
+            "text": "\n".join(lines),
+            "reply_markup": InlineKeyboardMarkup(buttons),
+            "edit": True,
+        }
+
+    def _handle_multi_toggle(self, chat_id: int, slot_code: str, index: int) -> dict:
+        """항목 선택 토글."""
+        self._toggle_selection(chat_id, slot_code, index)
+        return self._render_multi_view(chat_id)
+
+    def _handle_multi_done(self, chat_id: int) -> dict:
+        """선택 항목 완료 처리."""
+        selections = self._get_selections(chat_id)
+        if not selections:
+            return self._render_multi_view(chat_id)
+
+        count = 0
+        for slot_code, index in sorted(selections, key=lambda x: (x[0], -x[1])):
+            slot = self.SLOT_MAP.get(slot_code)
+            if slot and self.manager.mark_done_by_index(chat_id, slot, index):
+                count += 1
+
+        self._clear_selections(chat_id)
+
+        result = self._handle_list(chat_id)
+        result["text"] = f"✅ {count}개 완료 처리!\n\n" + result["text"]
+        return result
+
+    def _handle_multi_delete(self, chat_id: int) -> dict:
+        """선택 항목 삭제."""
+        selections = self._get_selections(chat_id)
+        if not selections:
+            return self._render_multi_view(chat_id)
+
+        count = 0
+        for slot_code, index in sorted(selections, key=lambda x: (x[0], -x[1])):
+            slot = self.SLOT_MAP.get(slot_code)
+            if slot and self.manager.delete_by_index(chat_id, slot, index):
+                count += 1
+
+        self._clear_selections(chat_id)
+
+        result = self._handle_list(chat_id)
+        result["text"] = f"🗑️ {count}개 삭제됨!\n\n" + result["text"]
+        return result
+
+    def _handle_multi_carry(self, chat_id: int) -> dict:
+        """선택 항목 내일로 넘기기."""
+        selections = self._get_selections(chat_id)
+        if not selections:
+            return self._render_multi_view(chat_id)
+
+        items = list(selections)
+        count = self.manager.carry_to_tomorrow(chat_id, items)
+
+        self._clear_selections(chat_id)
+
+        result = self._handle_list(chat_id)
+        result["text"] = f"📅 {count}개 내일로 이동!\n\n" + result["text"]
+        return result
+
+    def _handle_multi_clear(self, chat_id: int) -> dict:
+        """선택 초기화."""
+        self._clear_selections(chat_id)
+        return self._render_multi_view(chat_id)
+
+    # ==================== 하루 마무리 핸들러 ====================
+
+    def _handle_carry_all(self, chat_id: int) -> dict:
+        """모든 미완료 항목 내일로 넘기기."""
+        count = self.manager.carry_all_pending(chat_id)
+
+        if count == 0:
+            return {
+                "text": "✅ 넘길 항목이 없어요!",
+                "reply_markup": InlineKeyboardMarkup([[
+                    InlineKeyboardButton("📄 리스트", callback_data="td:list")
+                ]]),
+                "edit": True,
+            }
+
+        return {
+            "text": f"📅 <b>{count}개 항목을 내일로 넘겼어요!</b>\n\n오늘 수고하셨어요 🌙",
+            "reply_markup": InlineKeyboardMarkup([[
+                InlineKeyboardButton("📄 리스트", callback_data="td:list")
+            ]]),
+            "edit": True,
+        }
+
+    def _handle_wrap_done(self, chat_id: int) -> dict:
+        """하루 마무리 완료."""
+        daily = self.manager.get_today(chat_id)
+        done = daily.get_done_count()
+        pending = daily.get_pending_count()
+        total = done + pending
+
+        lines = ["🌙 <b>오늘 하루 마무리!</b>\n"]
+
+        if total > 0:
+            lines.append(f"📊 완료율: {done}/{total} ({int(done/total*100)}%)")
+
+        if pending > 0:
+            lines.append(f"\n⚠️ {pending}개 미완료 항목은 내일 다시 도전해요!")
+        else:
+            lines.append("\n🎉 완벽한 하루였어요!")
+
+        lines.append("\n좋은 밤 되세요 ✨")
+
+        return {
+            "text": "\n".join(lines),
+            "reply_markup": InlineKeyboardMarkup([[
+                InlineKeyboardButton("📄 리스트", callback_data="td:list")
+            ]]),
+            "edit": True,
+        }
+
+    # ==================== ForceReply 응답 처리 ====================
+
+    def handle_force_reply(self, message: str, chat_id: int, slot_code: str) -> dict:
+        """ForceReply 응답 처리 - 할일 추가."""
+        slot = self.SLOT_MAP.get(slot_code, TimeSlot.MORNING)
+        slot_name = self.SLOT_NAMES[slot]
+
+        # 줄바꿈으로 분리
+        tasks = [t.strip() for t in message.split("\n") if t.strip()]
+
+        if not tasks:
+            return {
+                "text": "❌ 할일이 입력되지 않았어요.",
+                "reply_markup": None,
+            }
+
+        daily = self.manager.get_today(chat_id)
+        for task_text in tasks:
+            daily.add_task(slot, task_text)
+        self.manager.save_today(chat_id, daily)
+
+        # 결과 메시지
+        lines = [f"✅ {slot_name}에 {len(tasks)}개 추가됨!\n"]
+        for task in tasks:
+            lines.append(f"• {task}")
+
+        # 리스트 버튼
+        keyboard = [
+            [
+                InlineKeyboardButton("📄 리스트 보기", callback_data="td:list"),
+                InlineKeyboardButton("➕ 더 추가", callback_data="td:add"),
+            ]
+        ]
+
+        return {
+            "text": "\n".join(lines),
+            "reply_markup": InlineKeyboardMarkup(keyboard),
+        }

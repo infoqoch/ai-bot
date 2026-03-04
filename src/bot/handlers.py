@@ -1488,6 +1488,19 @@ class BotHandlers:
             message = message[:MAX_MESSAGE_LENGTH]
             logger.warning(f"메시지 길이 제한 적용: {original_len} -> {MAX_MESSAGE_LENGTH}")
 
+        # ForceReply 응답 처리 (Todo 할일 입력)
+        if update.message.reply_to_message:
+            reply_text = update.message.reply_to_message.text or ""
+            # "slot:X" 패턴 확인 (Todo ForceReply)
+            if "slot:" in reply_text:
+                import re
+                slot_match = re.search(r"slot:([mae])", reply_text)
+                if slot_match:
+                    slot_code = slot_match.group(1)
+                    await self._handle_todo_force_reply(update, chat_id, message, slot_code)
+                    clear_context()
+                    return
+
         # 플러그인 처리 시도 (인증 전에 처리 - 플러그인은 인증 불필요)
         if self.plugins:
             logger.trace(f"플러그인 처리 시도 - 로드된 플러그인: {len(self.plugins.plugins)}개")
@@ -1502,7 +1515,11 @@ class BotHandlers:
                         self.sessions.add_message(user_id, session_id, message, processor=f"plugin:{plugin_name}")
                     if result.response:
                         try:
-                            await update.message.reply_text(result.response, parse_mode="HTML")
+                            await update.message.reply_text(
+                                result.response,
+                                parse_mode="HTML",
+                                reply_markup=result.reply_markup if hasattr(result, 'reply_markup') else None
+                            )
                         except Exception:
                             await update.message.reply_text(result.response)
                     clear_context()
@@ -2054,3 +2071,96 @@ class BotHandlers:
             )
 
         clear_context()
+
+    async def callback_query_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """인라인 버튼 콜백 처리."""
+        query = update.callback_query
+        if not query:
+            return
+
+        chat_id = query.message.chat_id if query.message else None
+        if not chat_id:
+            return
+
+        self._setup_request_context(chat_id)
+        callback_data = query.data
+        logger.info(f"Callback query: {callback_data} (chat_id={chat_id})")
+
+        # 콜백 응답 (로딩 표시 제거)
+        await query.answer()
+
+        # Todo 플러그인 콜백 처리
+        if callback_data.startswith("td:"):
+            await self._handle_todo_callback(query, chat_id, callback_data)
+            return
+
+        # 다른 플러그인 콜백은 여기에 추가
+        logger.warning(f"Unknown callback: {callback_data}")
+
+    async def _handle_todo_force_reply(self, update: Update, chat_id: int, message: str, slot_code: str) -> None:
+        """Todo ForceReply 응답 처리."""
+        logger.info(f"Todo ForceReply 처리: slot={slot_code}, msg={message[:50]}")
+
+        todo_plugin = None
+        if self.plugins:
+            todo_plugin = self.plugins.get_plugin_by_name("todo")
+
+        if not todo_plugin or not hasattr(todo_plugin, 'handle_force_reply'):
+            await update.message.reply_text("❌ Todo 플러그인을 찾을 수 없습니다.")
+            return
+
+        result = todo_plugin.handle_force_reply(message, chat_id, slot_code)
+
+        await update.message.reply_text(
+            text=result.get("text", ""),
+            reply_markup=result.get("reply_markup"),
+            parse_mode="HTML"
+        )
+
+    async def _handle_todo_callback(self, query, chat_id: int, callback_data: str) -> None:
+        """Todo 플러그인 콜백 처리."""
+        # 플러그인 인스턴스 가져오기
+        todo_plugin = None
+        if self.plugins:
+            todo_plugin = self.plugins.get_plugin_by_name("todo")
+            logger.info(f"Todo 플러그인 조회: {todo_plugin}")
+        else:
+            logger.warning("self.plugins가 None입니다")
+
+        if not todo_plugin or not hasattr(todo_plugin, 'handle_callback'):
+            logger.error(f"Todo 플러그인을 찾을 수 없음: {todo_plugin}")
+            await query.edit_message_text("❌ Todo 플러그인을 찾을 수 없습니다.")
+            return
+
+        # 콜백 처리
+        result = todo_plugin.handle_callback(callback_data, chat_id)
+
+        # ForceReply 처리 (새 메시지로)
+        if result.get("force_reply"):
+            # 기존 메시지 업데이트
+            await query.edit_message_text(
+                text=result.get("text", "할일 입력"),
+                parse_mode="HTML"
+            )
+            # ForceReply 메시지 전송
+            slot_code = result.get("slot_code", "m")
+            await query.message.reply_text(
+                text=f"⬇️ 아래에 할일을 입력하세요 (slot:{slot_code})",
+                reply_markup=result["force_reply"],
+                parse_mode="HTML"
+            )
+            return
+
+        # 메시지 수정 또는 전송
+        if result.get("edit", True) and query.message:
+            await query.edit_message_text(
+                text=result.get("text", ""),
+                reply_markup=result.get("reply_markup"),
+                parse_mode="HTML"
+            )
+        else:
+            await query.message.reply_text(
+                text=result.get("text", ""),
+                reply_markup=result.get("reply_markup"),
+                parse_mode="HTML"
+            )
