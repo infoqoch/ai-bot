@@ -236,6 +236,10 @@ class ClaudeClient:
         cmd.extend(["--print", "--output-format", "json"])
         logger.trace("JSON 출력 옵션 추가됨")
 
+        # 도구 권한 자동 승인 (WebSearch 등 스케줄러에서 필요)
+        cmd.append("--dangerously-skip-permissions")
+        logger.trace("--dangerously-skip-permissions 옵션 추가됨")
+
         if self.system_prompt:
             cmd.extend(["--system-prompt", self.system_prompt])
             logger.trace("시스템 프롬프트 옵션 추가됨")
