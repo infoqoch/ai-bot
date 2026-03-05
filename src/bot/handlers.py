@@ -14,33 +14,17 @@ from telegram.ext import ContextTypes
 
 from src.logging_config import logger, set_trace_id, set_user_id, set_session_id, clear_context
 from .constants import (
-    ACTION_DELETE_PATTERN,
-    ACTION_RENAME_PATTERN,
-    ACTION_CREATE_PATTERN,
-    ACTION_CREATE_SWITCH_PATTERN,
-    ACTION_CREATE_PROJECT_PATTERN,
-    ACTION_SWITCH_PATTERN,
     MAX_MESSAGE_LENGTH,
     WATCHDOG_INTERVAL_SECONDS,
     TASK_TIMEOUT_SECONDS,
     LONG_TASK_THRESHOLD_SECONDS,
     get_model_emoji,
-    remove_action_tags,
 )
 from .formatters import format_session_quick_list, truncate_message
 from .middleware import authorized_only, authenticated_only
-from .prompts import MANAGER_SYSTEM_PROMPT
 from .session_queue import session_queue_manager, QueuedMessage
 
-# Re-export for backwards compatibility (tests import from here)
-__all__ = [
-    "ACTION_DELETE_PATTERN",
-    "ACTION_RENAME_PATTERN",
-    "ACTION_CREATE_PATTERN",
-    "ACTION_CREATE_SWITCH_PATTERN",
-    "ACTION_SWITCH_PATTERN",
-    "BotHandlers",
-]
+__all__ = ["BotHandlers"]
 
 if TYPE_CHECKING:
     from src.claude.client import ClaudeClient
@@ -1365,12 +1349,62 @@ class BotHandlers:
     @authorized_only
     @authenticated_only
     async def rename_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /rename command - rename current session."""
+        """Handle /rename command - rename current session or specific session."""
         chat_id = update.effective_chat.id
         user_id = str(chat_id)
         self._setup_request_context(chat_id)
         logger.info("/rename 명령 수신")
 
+        text = update.message.text
+
+        # /r_세션ID_새이름 형태 지원 (특정 세션 이름 변경)
+        if text.startswith("/r_") and "_" in text[3:]:
+            parts = text[3:].split("_", 1)  # 첫 번째 _ 기준으로만 분리
+            if len(parts) == 2:
+                target_prefix = parts[0]
+                new_name = parts[1]
+
+                # 세션 찾기
+                target_info = self.sessions.get_session_by_prefix(user_id, target_prefix)
+                if not target_info:
+                    logger.debug(f"세션 없음: {target_prefix}")
+                    await update.message.reply_text(f"❌ 세션 <code>{target_prefix}</code>을(를) 찾을 수 없습니다.", parse_mode="HTML")
+                    clear_context()
+                    return
+
+                session_id = target_info["full_session_id"]
+
+                # 이름 길이 체크
+                if len(new_name) > 50:
+                    await update.message.reply_text("❌ 이름이 너무 깁니다. (최대 50자)")
+                    clear_context()
+                    return
+
+                # 이름 변경
+                if self.sessions.rename_session(user_id, session_id, new_name):
+                    logger.info(f"세션 이름 변경: {session_id[:8]} -> {new_name}")
+                    await update.message.reply_text(
+                        f"✅ 세션 이름 변경 완료!\n\n"
+                        f"• 세션: <code>{session_id[:8]}</code>\n"
+                        f"• 이름: {new_name}",
+                        parse_mode="HTML"
+                    )
+                else:
+                    await update.message.reply_text("❌ 이름 변경 실패")
+
+                clear_context()
+                return
+            else:
+                # 형식 오류
+                await update.message.reply_text(
+                    "❌ 사용법: <code>/r_세션ID_새이름</code>\n"
+                    "예: <code>/r_a1b2c3d4_주식봇</code>",
+                    parse_mode="HTML"
+                )
+                clear_context()
+                return
+
+        # 현재 세션 이름 변경 (/rename 또는 /rename_새이름)
         session_id = self.sessions.get_current_session_id(user_id)
         if not session_id:
             logger.trace("활성 세션 없음")
@@ -1379,7 +1413,6 @@ class BotHandlers:
             return
 
         # /rename_새이름 형태 지원
-        text = update.message.text
         if text.startswith("/rename_"):
             new_name = text[8:]  # /rename_ 이후 전체
         elif context.args:
@@ -1391,7 +1424,8 @@ class BotHandlers:
                 f"✏️ <b>세션 이름 변경</b>\n\n"
                 f"• 현재: {current_name or '(이름 없음)'}\n"
                 f"• 세션: <code>{session_id[:8]}</code>\n\n"
-                f"사용법: <code>/rename_새이름</code>",
+                f"사용법: <code>/rename_새이름</code>\n"
+                f"또는: <code>/r_세션ID_새이름</code>",
                 parse_mode="HTML"
             )
             clear_context()

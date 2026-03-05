@@ -26,7 +26,6 @@ class SessionData(TypedDict):
     model: str  # opus, sonnet, haiku
     name: str  # 사용자 지정 세션 이름 (선택)
     deleted: bool  # soft delete 상태
-    is_manager: bool  # 매니저 세션 여부
     project_path: str  # 프로젝트 세션용 디렉토리 경로 (선택)
 
 
@@ -344,7 +343,6 @@ class SessionStore:
                 "is_current": session_id == current_id,
                 "model": data.get("model", DEFAULT_MODEL),
                 "name": data.get("name", ""),
-                "is_manager": data.get("is_manager", False),
             })
 
         sessions.sort(key=lambda x: x["last_used"], reverse=True)
@@ -547,73 +545,6 @@ class SessionStore:
         logger.trace(f"세션 이름: {name or '(없음)'}")
         return name
 
-    # ===== Manager Session Methods =====
-
-    def get_manager_session_id(self, user_id: str) -> Optional[str]:
-        """Get manager session ID for user (None if not exists)."""
-        logger.trace(f"get_manager_session_id() - user={user_id}")
-
-        user_data = self._data.get(user_id)
-        if not user_data:
-            return None
-
-        for session_id, data in user_data.get("sessions", {}).items():
-            if data.get("deleted", False):
-                continue
-            if data.get("is_manager", False):
-                logger.trace(f"매니저 세션 찾음: {session_id[:8]}")
-                return session_id
-
-        logger.trace("매니저 세션 없음")
-        return None
-
-    def create_manager_session(self, user_id: str, session_id: str, model: str = "opus") -> None:
-        """Create a manager session."""
-        logger.trace(f"create_manager_session() - user={user_id}, session={session_id[:8]}, model={model}")
-
-        user_data = self._ensure_user(user_id)
-        now = datetime.now().isoformat()
-
-        first_entry: HistoryEntry = {
-            "message": "(매니저 세션 시작)",
-            "timestamp": now,
-            "processed": True,
-            "processor": "command",
-        }
-
-        user_data["sessions"][session_id] = {
-            "created_at": now,
-            "last_used": now,
-            "history": [first_entry],
-            "model": model,
-            "name": "📋 Manager",
-            "is_manager": True,
-        }
-
-        self._save()
-        logger.info(f"매니저 세션 생성됨 - user={user_id}, session={session_id[:8]}")
-
-    def trim_manager_history(self, user_id: str, max_history: int = 5) -> None:
-        """Trim manager session history to keep only recent N messages."""
-        manager_session_id = self.get_manager_session_id(user_id)
-        if not manager_session_id:
-            return
-
-        user_data = self._data.get(user_id)
-        if not user_data:
-            return
-
-        session = user_data.get("sessions", {}).get(manager_session_id)
-        if not session:
-            return
-
-        history = session.get("history", [])
-        if len(history) > max_history:
-            trimmed_count = len(history) - max_history
-            session["history"] = history[-max_history:]
-            self._save()
-            logger.info(f"매니저 히스토리 정리 - {trimmed_count}개 삭제, {max_history}개 유지")
-
     def get_previous_session_id(self, user_id: str) -> Optional[str]:
         """Get previous session ID (stored when switching to manager)."""
         logger.trace(f"get_previous_session_id() - user={user_id}")
@@ -651,9 +582,6 @@ class SessionStore:
         deleted_lines = []
 
         for session_id, data in user_data.get("sessions", {}).items():
-            if data.get("is_manager"):
-                continue  # 매니저 세션 제외
-
             is_deleted = data.get("deleted", False)
             name = data.get("name", "") or "(이름없음)"
             model = data.get("model", DEFAULT_MODEL)

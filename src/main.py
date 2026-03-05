@@ -259,9 +259,6 @@ def create_app() -> Application:
     app.add_handler(CommandHandler("session", handlers.session_command))
     app.add_handler(CommandHandler("session_list", handlers.session_list_command))
     app.add_handler(CommandHandler("sl", handlers.session_list_command))  # 단축 명령어
-    app.add_handler(CommandHandler("m", handlers.manager_command))
-    app.add_handler(CommandHandler("back", handlers.back_command))
-    app.add_handler(CommandHandler("exit", handlers.exit_manager_command))
     app.add_handler(CommandHandler("chatid", handlers.chatid_command))
     app.add_handler(CommandHandler("lock", handlers.lock_command))
     app.add_handler(CommandHandler("jobs", handlers.jobs_command))
@@ -278,6 +275,7 @@ def create_app() -> Application:
 
     app.add_handler(CommandHandler("rename", handlers.rename_command))
     app.add_handler(MessageHandler(filters.Regex(r'^/rename_'), handlers.rename_command))
+    app.add_handler(MessageHandler(filters.Regex(r'^/r_'), handlers.rename_command))
     app.add_handler(MessageHandler(filters.Regex(r'^/s_'), handlers.switch_session_command))
     app.add_handler(MessageHandler(filters.Regex(r'^/h_'), handlers.history_command))
     app.add_handler(MessageHandler(filters.Regex(r'^/history_'), handlers.history_command))
