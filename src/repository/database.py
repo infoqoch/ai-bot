@@ -9,7 +9,7 @@ _connection: Optional[sqlite3.Connection] = None
 _lock = threading.Lock()
 
 
-def get_connection(db_path: Optional[Path] = None) -> sqlite3.Connection:
+def get_connection(db_path: Optional[Path | str] = None) -> sqlite3.Connection:
     """Get or create SQLite connection singleton.
 
     Args:
@@ -29,6 +29,10 @@ def get_connection(db_path: Optional[Path] = None) -> sqlite3.Connection:
 
         if db_path is None:
             raise ValueError("db_path required for initial connection")
+
+        # str을 Path로 변환
+        if isinstance(db_path, str):
+            db_path = Path(db_path)
 
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
