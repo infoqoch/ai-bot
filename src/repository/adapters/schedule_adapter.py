@@ -245,3 +245,7 @@ class ScheduleManagerAdapter:
             lines.append(f"{status} {type_icon} <b>{s.name}</b> - {time_str}")
 
         return "\n".join(lines)
+
+    def get_status_text(self, user_id: str) -> str:
+        """Get schedule status text (alias for get_schedule_summary)."""
+        return self.get_schedule_summary(user_id)

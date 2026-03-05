@@ -143,15 +143,70 @@ class SessionStoreAdapter:
         """Get model for session."""
         return self._repo.get_session_model(session_id)
 
+    def set_session_model(self, user_id: str, session_id: str, model: str) -> bool:
+        """Set/update session model.
+
+        Args:
+            user_id: User ID (for compatibility, not used)
+            session_id: Session ID
+            model: New model name (opus/sonnet/haiku)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        return self._repo.update_session_model(session_id, model)
+
+    def delete_session(self, user_id: str, session_id: str) -> bool:
+        """Delete session (soft delete).
+
+        Args:
+            user_id: User ID
+            session_id: Session ID
+
+        Returns:
+            True if successful, False otherwise
+        """
+        result = self._repo.soft_delete_session(session_id)
+        if result:
+            current = self._repo.get_current_session_id(user_id)
+            if current == session_id:
+                previous = self._repo.get_previous_session_id(user_id)
+                self._repo.update_user_current_session(user_id, previous, None)
+        return result
+
     def add_message(
         self,
-        session_id: str,
-        message: str,
+        user_id_or_session_id: str,
+        session_id_or_message: str,
+        message_or_processed: str | bool = "",
         processed: bool = False,
         processor: Optional[str] = None
     ) -> None:
-        """Add message to session history."""
-        self._repo.add_message(session_id, message, processed, processor)
+        """Add message to session history.
+
+        Supports multiple call signatures for backward compatibility:
+        - add_message(session_id, message)
+        - add_message(session_id, message, processed=True, processor="claude")
+        - add_message(user_id, session_id, message, processor=...)
+        """
+        # Detect which signature is being used
+        if isinstance(message_or_processed, bool):
+            # Old signature: add_message(session_id, message, processed=..., processor=...)
+            session_id = user_id_or_session_id
+            message = session_id_or_message
+            actual_processed = message_or_processed
+        elif message_or_processed == "":
+            # Simple signature: add_message(session_id, message)
+            session_id = user_id_or_session_id
+            message = session_id_or_message
+            actual_processed = processed
+        else:
+            # New signature: add_message(user_id, session_id, message, processor=...)
+            session_id = session_id_or_message
+            message = str(message_or_processed)
+            actual_processed = True  # Assume processed when called from handlers
+
+        self._repo.add_message(session_id, message, actual_processed, processor)
 
     def get_session_history(
         self,

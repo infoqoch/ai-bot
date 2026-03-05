@@ -146,6 +146,10 @@ class WorkspaceRegistryAdapter:
 
         return "\n\n".join(lines)
 
+    def get_status_text(self, user_id: str) -> str:
+        """Get workspace status text (alias for get_workspace_summary)."""
+        return self.get_workspace_summary(user_id)
+
     async def recommend_paths(
         self,
         user_id: str,
