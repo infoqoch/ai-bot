@@ -25,6 +25,12 @@ telegram-claude-bot = "src.main:main"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 cache_dir = ".build/.pytest_cache"
+markers = [
+    "integration: 통합 테스트 (텔레그램 목킹, 실제 Repository 사용)",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
 
 [tool.ruff]
 line-length = 100

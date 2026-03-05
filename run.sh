@@ -164,10 +164,20 @@ case "$1" in
     ;;
   test)
     source venv/bin/activate
-    PYTHONPYCACHEPREFIX=.build pytest
+    PYTHONPYCACHEPREFIX=.build pytest tests/ --ignore=tests/integration -v
+    ;;
+  test-integration)
+    echo "🧪 통합 테스트 실행 (텔레그램 목킹, 실제 Repository)"
+    source venv/bin/activate
+    PYTHONPYCACHEPREFIX=.build pytest tests/integration -v --tb=short
+    ;;
+  test-all)
+    echo "🧪 전체 테스트 실행"
+    source venv/bin/activate
+    PYTHONPYCACHEPREFIX=.build pytest tests/ -v --tb=short
     ;;
   *)
-    echo "사용법: $0 {start|stop|restart|status|log|trace|debug|test}"
+    echo "사용법: $0 {start|stop|restart|status|log|trace|debug|test|test-integration|test-all}"
     echo ""
     echo "  start   - 봇 시작 (LOG_LEVEL 환경변수로 조정 가능)"
     echo "  stop    - 봇 중지"
@@ -176,7 +186,9 @@ case "$1" in
     echo "  log     - 로그 보기 (tail -f)"
     echo "  trace   - TRACE 모드로 시작 (최상세 로깅, 디버깅용)"
     echo "  debug   - DEBUG 모드로 시작"
-    echo "  test    - 테스트 실행"
+    echo "  test    - 단위 테스트 실행"
+    echo "  test-integration - 통합 테스트 실행"
+    echo "  test-all - 전체 테스트 실행"
     echo ""
     echo "환경변수:"
     echo "  LOG_LEVEL - 로그 레벨 (TRACE, DEBUG, INFO, WARNING, ERROR)"
