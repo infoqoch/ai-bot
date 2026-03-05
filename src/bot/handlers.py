@@ -33,7 +33,7 @@ __all__ = ["BotHandlers"]
 
 if TYPE_CHECKING:
     from src.claude.client import ClaudeClient
-    from src.claude.session import SessionStore
+    from src.repository.adapters import SessionStoreAdapter
     from src.plugins.loader import PluginLoader
     from .middleware import AuthManager
 
@@ -63,7 +63,7 @@ class BotHandlers:
 
     def __init__(
         self,
-        session_store: "SessionStore",
+        session_store: "SessionStoreAdapter",
         claude_client: "ClaudeClient",
         auth_manager: "AuthManager",
         require_auth: bool,

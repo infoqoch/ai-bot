@@ -150,11 +150,11 @@ def create_app() -> Application:
 
     logger.trace("ClaudeClient 초기화 시작")
     claude_client = ClaudeClient(
-        command=settings.effective_ai_command,
+        command=settings.ai_command,
         system_prompt_file=settings.telegram_prompt_file,
         timeout=300,
     )
-    logger.trace(f"ClaudeClient 초기화 완료 - command: {settings.effective_ai_command}")
+    logger.trace(f"ClaudeClient 초기화 완료 - command: {settings.ai_command}")
 
     logger.trace("AuthManager 초기화 시작")
     auth_manager = AuthManager(

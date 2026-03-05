@@ -9,7 +9,7 @@ from src.scheduler_manager import scheduler_manager
 
 if TYPE_CHECKING:
     from telegram.ext import Application
-    from src.claude.session import SessionStore
+    from src.repository.adapters import SessionStoreAdapter
     from src.claude.client import ClaudeClient
 
 
@@ -27,7 +27,7 @@ class SessionScheduler:
 
     def __init__(
         self,
-        session_store: "SessionStore",
+        session_store: "SessionStoreAdapter",
         claude_client: "ClaudeClient",
         admin_chat_id: Optional[int] = None,
     ):
