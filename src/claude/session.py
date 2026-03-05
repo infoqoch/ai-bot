@@ -301,6 +301,34 @@ class SessionStore:
         logger.trace(f"모델: {model}")
         return model
 
+    def set_session_model(self, user_id: str, session_id: str, model: str) -> bool:
+        """Set model for specific session.
+
+        Args:
+            user_id: User ID
+            session_id: Session ID
+            model: Model name (opus, sonnet, haiku)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        logger.trace(f"set_session_model() - user={user_id}, session={session_id[:8] if session_id else 'None'}, model={model}")
+
+        user_data = self._data.get(user_id)
+        if not user_data:
+            logger.trace("사용자 없음 -> False")
+            return False
+
+        session = user_data.get("sessions", {}).get(session_id)
+        if not session:
+            logger.trace("세션 없음 -> False")
+            return False
+
+        session["model"] = model
+        self._save()
+        logger.info(f"세션 모델 변경됨 - user={user_id}, session={session_id[:8]}, model={model}")
+        return True
+
     def get_session_workspace_path(self, user_id: str, session_id: str) -> str:
         """Get workspace_path for specific session (empty string if not a workspace session)."""
         logger.trace(f"get_session_workspace_path() - user={user_id}, session={session_id[:8] if session_id else 'None'}")
