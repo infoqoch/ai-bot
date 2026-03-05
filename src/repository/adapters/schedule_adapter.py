@@ -34,6 +34,11 @@ class ScheduleData:
         """Return formatted time string HH:MM."""
         return f"{self.hour:02d}:{self.minute:02d}"
 
+    @property
+    def type_emoji(self) -> str:
+        """Return emoji based on schedule type."""
+        return "📂" if self.type == "workspace" else "💬"
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
