@@ -18,6 +18,10 @@ from .constants import (
     WATCHDOG_INTERVAL_SECONDS,
     TASK_TIMEOUT_SECONDS,
     LONG_TASK_THRESHOLD_SECONDS,
+    MAX_TASK_MESSAGE_PREVIEW,
+    MAX_WORKSPACE_PATHS_DISPLAY,
+    MAX_LOCK_STATUS_PREVIEW,
+    MAX_SESSION_NAME_LENGTH,
     get_model_emoji,
 )
 from .formatters import format_session_quick_list, truncate_message
@@ -206,7 +210,7 @@ class BotHandlers:
             user_id=user_id,
             session_id=session_id,
             trace_id=trace_id,
-            message=message[:100],  # 최대 100자
+            message=message[:MAX_TASK_MESSAGE_PREVIEW],
             task=task,
         )
         task.add_done_callback(lambda t: self._active_tasks.pop(id(t), None))
@@ -554,7 +558,7 @@ class BotHandlers:
                 return
 
             buttons = []
-            for i, path in enumerate(paths[:10]):  # 최대 10개
+            for i, path in enumerate(paths[:MAX_WORKSPACE_PATHS_DISPLAY]):
                 name = path.split("/")[-1]
                 buttons.append([
                     InlineKeyboardButton(
@@ -731,7 +735,7 @@ class BotHandlers:
                 session_name = self.sessions.get_session_name(user_id, info.session_id) or info.session_id[:8]
 
                 # 메시지 미리보기
-                msg_preview = info.message[:40] + "..." if len(info.message) > 40 else info.message
+                msg_preview = info.message[:MAX_LOCK_STATUS_PREVIEW] + "..." if len(info.message) > MAX_LOCK_STATUS_PREVIEW else info.message
                 msg_preview = msg_preview.replace("<", "&lt;").replace(">", "&gt;")
 
                 lines.append(
@@ -952,8 +956,8 @@ class BotHandlers:
             session_name = " ".join(context.args)
 
         # 이름 길이 제한
-        if len(session_name) > 50:
-            session_name = session_name[:50]
+        if len(session_name) > MAX_SESSION_NAME_LENGTH:
+            session_name = session_name[:MAX_SESSION_NAME_LENGTH]
 
         logger.info(f"/new 명령 수신 - 새 세션 요청 (model={model}, name={session_name or '(없음)'})")
 
@@ -1181,10 +1185,7 @@ class BotHandlers:
             return
 
         # 세션 데이터에서 모델 변경
-        user_data = self.sessions._data.get(user_id)
-        if user_data and session_id in user_data.get("sessions", {}):
-            user_data["sessions"][session_id]["model"] = new_model
-            self.sessions._save()
+        if self.sessions.set_session_model(user_id, session_id, new_model):
             logger.info(f"모델 변경: {current_model} -> {new_model}, session={session_id[:8]}")
 
             model_emoji = get_model_emoji(new_model)
@@ -1618,7 +1619,6 @@ class BotHandlers:
 
     # ==================== 매니저 명령어 ====================
 
-    @authorized_only
     @authorized_only
     async def back_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /back command - return to previous session."""
@@ -3192,11 +3192,8 @@ class BotHandlers:
 
         full_session_id = session.get("full_session_id", session_id)
 
-        # 모델 변경 (직접 데이터 수정)
-        user_data = self.sessions._data.get(user_id)
-        if user_data and user_data.get("sessions", {}).get(full_session_id):
-            user_data["sessions"][full_session_id]["model"] = model
-            self.sessions._save()
+        # 모델 변경
+        self.sessions.set_session_model(user_id, full_session_id, model)
 
         short_id = full_session_id[:8]
         name = session.get("name") or f"세션 {short_id}"
