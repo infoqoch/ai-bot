@@ -61,6 +61,7 @@ from src.bot.middleware import AuthManager
 from src.plugins.loader import PluginLoader
 from src.scheduler_manager import scheduler_manager
 from src.schedule import init_schedule_manager, get_schedule_manager
+from src.workspace import init_workspace_registry, get_workspace_registry
 
 # Todo 스케줄러 (옵션)
 _todo_scheduler = None
@@ -234,8 +235,16 @@ def create_app() -> Application:
     _schedule_manager.register_all_to_scheduler()
     logger.info("예약 스케줄러 초기화 완료")
 
-    # BotHandlers에 schedule_manager 설정
+    # 워크스페이스 레지스트리 설정
+    workspace_registry = init_workspace_registry(
+        data_dir=settings.data_dir,
+        claude_client=claude_client,
+    )
+    logger.info("워크스페이스 레지스트리 초기화 완료")
+
+    # BotHandlers에 schedule_manager, workspace_registry 설정
     handlers.set_schedule_manager(_schedule_manager)
+    handlers.set_workspace_registry(workspace_registry)
 
     # Register handlers
     logger.trace("핸들러 등록 시작")
@@ -262,6 +271,8 @@ def create_app() -> Application:
     app.add_handler(CommandHandler("lock", handlers.lock_command))
     app.add_handler(CommandHandler("jobs", handlers.jobs_command))
     app.add_handler(CommandHandler("scheduler", handlers.scheduler_command))
+    app.add_handler(CommandHandler("workspace", handlers.workspace_command))
+    app.add_handler(CommandHandler("ws", handlers.workspace_command))  # 단축 명령어
     app.add_handler(CommandHandler("plugins", handlers.plugins_command))
     app.add_handler(CommandHandler("ai", handlers.ai_command))
 

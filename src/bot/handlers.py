@@ -97,6 +97,10 @@ class BotHandlers:
         self._pending_schedule_input: dict[str, dict] = {}
         # 예약 스케줄러 (경로 기반)
         self._schedule_manager = None
+        # 워크스페이스 레지스트리
+        self._workspace_registry = None
+        # 워크스페이스 입력 대기 상태 (ForceReply용)
+        self._pending_workspace_input: dict[str, dict] = {}
 
         self._watchdog_started = False
         logger.trace(f"BotHandlers 설정 - require_auth={require_auth}, allowed_ids={allowed_chat_ids}")
@@ -107,6 +111,11 @@ class BotHandlers:
         """스케줄 매니저 설정."""
         self._schedule_manager = manager
         logger.debug("BotHandlers에 ScheduleManager 연결됨")
+
+    def set_workspace_registry(self, registry) -> None:
+        """워크스페이스 레지스트리 설정."""
+        self._workspace_registry = registry
+        logger.debug("BotHandlers에 WorkspaceRegistry 연결됨")
 
     # ==================== 유틸리티 메서드 ====================
 
@@ -322,10 +331,9 @@ class BotHandlers:
             "/session - 현재 세션 정보\n"
             "/sl - 세션 목록\n"
             "/delete_&lt;id&gt; - 세션 삭제\n\n"
-            "📋 매니저\n"
-            "/m - 매니저 모드 (세션 관리)\n"
-            "/m 질문 - 원샷 질문\n"
             f"{plugin_section}\n"
+            "📁 워크스페이스\n"
+            "/workspace - 워크스페이스 관리\n\n"
             "⏰ 스케줄\n"
             "/scheduler - 세션 스케줄 관리\n"
             "/jobs - 등록된 스케줄 작업\n\n"
@@ -404,6 +412,368 @@ class BotHandlers:
         )
         logger.trace("/scheduler 완료")
         clear_context()
+
+    async def workspace_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /workspace command - manage workspaces."""
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+        chat_id = update.effective_chat.id
+        self._setup_request_context(chat_id)
+        user_id = str(chat_id)
+        logger.info("/workspace 명령 수신")
+
+        if not self._workspace_registry:
+            await update.message.reply_text("❌ 워크스페이스 기능이 초기화되지 않았습니다.")
+            clear_context()
+            return
+
+        text = self._workspace_registry.get_status_text(user_id)
+        keyboard = self._build_workspace_keyboard(user_id)
+
+        await update.message.reply_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML"
+        )
+        logger.trace("/workspace 완료")
+        clear_context()
+
+    def _build_workspace_keyboard(self, user_id: str) -> list:
+        """워크스페이스 UI 키보드 생성."""
+        from telegram import InlineKeyboardButton
+
+        buttons = []
+
+        # 등록된 워크스페이스 목록
+        if self._workspace_registry:
+            workspaces = self._workspace_registry.list_by_user(user_id)
+            for ws in workspaces[:10]:  # 최대 10개
+                buttons.append([
+                    InlineKeyboardButton(
+                        f"📁 {ws.name[:15]}",
+                        callback_data=f"ws:select:{ws.id}"
+                    ),
+                    InlineKeyboardButton("🗑", callback_data=f"ws:delete:{ws.id}"),
+                ])
+
+        # 추가/새로고침 버튼
+        buttons.append([
+            InlineKeyboardButton("➕ 새로 등록", callback_data="ws:add"),
+            InlineKeyboardButton("🔄 새로고침", callback_data="ws:refresh"),
+        ])
+
+        return buttons
+
+    async def _handle_workspace_callback(self, query, chat_id: int, callback_data: str) -> None:
+        """워크스페이스 콜백 처리."""
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
+
+        user_id = str(chat_id)
+        action = callback_data[3:]  # "ws:" 제거
+
+        if not self._workspace_registry:
+            await query.answer("❌ 워크스페이스 기능 비활성화")
+            return
+
+        # 새로고침
+        if action == "refresh":
+            text = self._workspace_registry.get_status_text(user_id)
+            keyboard = self._build_workspace_keyboard(user_id)
+            await query.edit_message_text(
+                text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="HTML"
+            )
+            await query.answer("새로고침 완료")
+            return
+
+        # 워크스페이스 선택 - 액션 선택
+        if action.startswith("select:"):
+            ws_id = action[7:]
+            ws = self._workspace_registry.get(ws_id)
+            if not ws:
+                await query.answer("❌ 워크스페이스를 찾을 수 없음")
+                return
+
+            buttons = [
+                [
+                    InlineKeyboardButton("💬 세션 시작", callback_data=f"ws:session:{ws_id}"),
+                    InlineKeyboardButton("⏰ 스케줄 등록", callback_data=f"ws:schedule:{ws_id}"),
+                ],
+                [InlineKeyboardButton("↩️ 뒤로", callback_data="ws:refresh")],
+            ]
+
+            await query.edit_message_text(
+                f"📁 <b>{ws.name}</b>\n\n"
+                f"📂 <code>{ws.short_path}</code>\n"
+                f"💡 {ws.description}\n\n"
+                f"이 워크스페이스로 무엇을 할까요?",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML"
+            )
+            await query.answer()
+            return
+
+        # 세션 시작 - 모델 선택
+        if action.startswith("session:"):
+            ws_id = action[8:]
+            ws = self._workspace_registry.get(ws_id)
+            if not ws:
+                await query.answer("❌ 워크스페이스를 찾을 수 없음")
+                return
+
+            buttons = [
+                [
+                    InlineKeyboardButton("🚀 Opus", callback_data=f"ws:sess_model:{ws_id}:opus"),
+                    InlineKeyboardButton("⚡ Sonnet", callback_data=f"ws:sess_model:{ws_id}:sonnet"),
+                    InlineKeyboardButton("💨 Haiku", callback_data=f"ws:sess_model:{ws_id}:haiku"),
+                ],
+                [InlineKeyboardButton("↩️ 뒤로", callback_data=f"ws:select:{ws_id}")],
+            ]
+
+            await query.edit_message_text(
+                f"📁 <b>{ws.name}</b> 세션 시작\n\n"
+                f"📂 <code>{ws.short_path}</code>\n\n"
+                f"모델을 선택하세요:",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML"
+            )
+            await query.answer()
+            return
+
+        # 세션 생성 실행
+        if action.startswith("sess_model:"):
+            parts = action.split(":")
+            ws_id, model = parts[1], parts[2]
+            ws = self._workspace_registry.get(ws_id)
+            if not ws:
+                await query.answer("❌ 워크스페이스를 찾을 수 없음")
+                return
+
+            # 워크스페이스 사용 기록
+            self._workspace_registry.mark_used(ws_id)
+
+            # 세션 생성
+            session_id = await self.claude.create_session()
+            if not session_id:
+                await query.edit_message_text("❌ 세션 생성 실패")
+                return
+
+            session_name = f"{ws.name} ({model})"
+            self.sessions.create_session(
+                user_id,
+                session_id,
+                session_name,
+                model=model,
+                workspace_path=ws.path,
+            )
+
+            model_emoji = get_model_emoji(model)
+            await query.edit_message_text(
+                f"✅ <b>워크스페이스 세션 생성!</b>\n\n"
+                f"📁 <b>{ws.name}</b>\n"
+                f"📂 <code>{ws.short_path}</code>\n"
+                f"{model_emoji} 모델: <b>{model}</b>\n\n"
+                f"이제 메시지를 보내면 이 워크스페이스 컨텍스트에서 대화합니다.",
+                parse_mode="HTML"
+            )
+            await query.answer("✅ 세션 생성됨")
+            return
+
+        # 스케줄 등록 - 시간 선택
+        if action.startswith("schedule:"):
+            from src.schedule import AVAILABLE_HOURS
+
+            ws_id = action[9:]
+            ws = self._workspace_registry.get(ws_id)
+            if not ws:
+                await query.answer("❌ 워크스페이스를 찾을 수 없음")
+                return
+
+            # 시간 선택 버튼
+            buttons = []
+            row = []
+            for hour in AVAILABLE_HOURS:
+                row.append(InlineKeyboardButton(
+                    f"{hour:02d}:00",
+                    callback_data=f"ws:sched_time:{ws_id}:{hour}"
+                ))
+                if len(row) == 4:
+                    buttons.append(row)
+                    row = []
+            if row:
+                buttons.append(row)
+            buttons.append([
+                InlineKeyboardButton("↩️ 뒤로", callback_data=f"ws:select:{ws_id}")
+            ])
+
+            await query.edit_message_text(
+                f"📁 <b>{ws.name}</b> 스케줄 등록\n\n"
+                f"📂 <code>{ws.short_path}</code>\n\n"
+                f"실행 시간을 선택하세요 (매일 반복):",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML"
+            )
+            await query.answer()
+            return
+
+        # 스케줄 시간 선택 완료 - 모델 선택
+        if action.startswith("sched_time:"):
+            parts = action.split(":")
+            ws_id, hour = parts[1], int(parts[2])
+            ws = self._workspace_registry.get(ws_id)
+            if not ws:
+                await query.answer("❌ 워크스페이스를 찾을 수 없음")
+                return
+
+            # 대기 상태 저장
+            self._pending_workspace_input[user_id] = {
+                "ws_id": ws_id,
+                "hour": hour,
+                "minute": 0,
+            }
+
+            buttons = [
+                [
+                    InlineKeyboardButton("🚀 Opus", callback_data=f"ws:sched_model:{ws_id}:opus"),
+                    InlineKeyboardButton("⚡ Sonnet", callback_data=f"ws:sched_model:{ws_id}:sonnet"),
+                    InlineKeyboardButton("💨 Haiku", callback_data=f"ws:sched_model:{ws_id}:haiku"),
+                ],
+                [InlineKeyboardButton("↩️ 뒤로", callback_data=f"ws:schedule:{ws_id}")],
+            ]
+
+            await query.edit_message_text(
+                f"📁 <b>{ws.name}</b> 스케줄 등록\n\n"
+                f"⏰ 시간: <b>{hour:02d}:00</b>\n\n"
+                f"모델을 선택하세요:",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML"
+            )
+            await query.answer()
+            return
+
+        # 스케줄 모델 선택 완료 - 메시지 입력
+        if action.startswith("sched_model:"):
+            parts = action.split(":")
+            ws_id, model = parts[1], parts[2]
+            ws = self._workspace_registry.get(ws_id)
+            if not ws:
+                await query.answer("❌ 워크스페이스를 찾을 수 없음")
+                return
+
+            pending = self._pending_workspace_input.get(user_id, {})
+            pending["model"] = model
+            self._pending_workspace_input[user_id] = pending
+
+            hour = pending.get("hour", 9)
+
+            await query.edit_message_text(
+                f"📁 <b>{ws.name}</b> 스케줄 등록\n\n"
+                f"⏰ 시간: <b>{hour:02d}:00</b>\n"
+                f"🤖 모델: <b>{model}</b>\n\n"
+                f"아래에 예약 메시지를 입력하세요:",
+                parse_mode="HTML"
+            )
+
+            await query.message.reply_text(
+                "💬 예약 메시지를 입력하세요:",
+                reply_markup=ForceReply(selective=True, input_field_placeholder="예: 오늘 할 일 정리해줘")
+            )
+            await query.answer()
+            return
+
+        # 새로 등록 - AI 추천 시작
+        if action == "add":
+            await query.edit_message_text(
+                "📁 <b>워크스페이스 등록</b>\n\n"
+                "어떤 용도의 워크스페이스인가요?\n"
+                "AI가 적합한 경로를 추천해드립니다.\n\n"
+                "아래에 용도를 입력하세요:",
+                parse_mode="HTML"
+            )
+
+            # 대기 상태 설정
+            self._pending_workspace_input[user_id] = {"action": "recommend"}
+
+            await query.message.reply_text(
+                "💬 용도를 입력하세요:",
+                reply_markup=ForceReply(selective=True, input_field_placeholder="예: 투자 분석, React 프로젝트")
+            )
+            await query.answer()
+            return
+
+        # 추천 경로 선택
+        if action.startswith("recommend:"):
+            idx = int(action[10:])
+            pending = self._pending_workspace_input.get(user_id, {})
+            recommendations = pending.get("recommendations", [])
+
+            if idx >= len(recommendations):
+                await query.answer("❌ 잘못된 선택")
+                return
+
+            rec = recommendations[idx]
+            # 워크스페이스 등록
+            ws = self._workspace_registry.add(
+                user_id=user_id,
+                path=rec["path"],
+                name=rec["name"],
+                description=rec["description"],
+            )
+
+            del self._pending_workspace_input[user_id]
+
+            text = self._workspace_registry.get_status_text(user_id)
+            keyboard = self._build_workspace_keyboard(user_id)
+
+            await query.edit_message_text(
+                f"✅ <b>워크스페이스 등록 완료!</b>\n\n"
+                f"📁 <b>{ws.name}</b>\n"
+                f"📂 <code>{ws.short_path}</code>\n"
+                f"💡 {ws.description}\n\n"
+                f"────────────\n\n{text}",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="HTML"
+            )
+            await query.answer("✅ 등록됨")
+            return
+
+        # 직접 입력 선택
+        if action == "manual":
+            pending = self._pending_workspace_input.get(user_id, {})
+            pending["action"] = "manual_path"
+            self._pending_workspace_input[user_id] = pending
+
+            await query.edit_message_text(
+                "📁 <b>워크스페이스 직접 등록</b>\n\n"
+                "경로를 직접 입력하세요:",
+                parse_mode="HTML"
+            )
+
+            await query.message.reply_text(
+                "📂 경로를 입력하세요:",
+                reply_markup=ForceReply(selective=True, input_field_placeholder="/path/to/workspace")
+            )
+            await query.answer()
+            return
+
+        # 삭제
+        if action.startswith("delete:"):
+            ws_id = action[7:]
+            if self._workspace_registry.remove(ws_id):
+                await query.answer("✅ 삭제됨")
+                text = self._workspace_registry.get_status_text(user_id)
+                keyboard = self._build_workspace_keyboard(user_id)
+                await query.edit_message_text(
+                    text,
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="HTML"
+                )
+            else:
+                await query.answer("❌ 삭제 실패")
+            return
+
+        await query.answer("❌ 알 수 없는 동작")
 
     def _build_scheduler_keyboard(self, user_id: str) -> list:
         """스케줄러 UI 키보드 생성."""
@@ -1855,6 +2225,12 @@ class BotHandlers:
                 clear_context()
                 return
 
+            # 워크스페이스 관련 ForceReply
+            if user_id in self._pending_workspace_input:
+                await self._handle_workspace_force_reply(update, chat_id, message)
+                clear_context()
+                return
+
         # 플러그인 처리 시도 (인증 전에 처리 - 플러그인은 인증 불필요)
         if self.plugins:
             logger.debug(f"[PLUGIN] 처리 시도 - 로드된 플러그인: {len(self.plugins.plugins)}개")
@@ -2559,6 +2935,11 @@ class BotHandlers:
             await self._handle_scheduler_callback(query, chat_id, callback_data)
             return
 
+        # 워크스페이스 콜백 처리
+        if callback_data.startswith("ws:"):
+            await self._handle_workspace_callback(query, chat_id, callback_data)
+            return
+
         # 세션 큐 콜백 처리 (새 방식)
         if callback_data.startswith("sq:"):
             await self._handle_session_queue_callback(query, chat_id, callback_data)
@@ -2711,6 +3092,218 @@ class BotHandlers:
         )
 
         logger.info(f"스케줄 등록: {schedule.name} @ {schedule.time_str} (type={schedule_type})")
+
+    async def _handle_workspace_force_reply(self, update: Update, chat_id: int, message: str) -> None:
+        """워크스페이스 ForceReply 응답 처리."""
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+        user_id = str(chat_id)
+        pending = self._pending_workspace_input.get(user_id)
+
+        if not pending:
+            await update.message.reply_text("❌ 입력 상태가 만료되었습니다. 다시 시도하세요.")
+            return
+
+        action = pending.get("action")
+
+        # AI 추천 요청
+        if action == "recommend":
+            await update.message.reply_text("🔍 AI가 적합한 워크스페이스를 찾고 있습니다...")
+
+            # AI 추천 받기
+            allowed_paths = self._get_allowed_workspace_paths()
+            recommendations = await self._workspace_registry.recommend_paths(
+                purpose=message,
+                user_id=user_id,
+                allowed_paths=allowed_paths,
+                max_recommendations=3,
+            )
+
+            if not recommendations:
+                # 추천 실패 - 직접 입력으로 전환
+                pending["action"] = "manual_path"
+                pending["purpose"] = message
+                self._pending_workspace_input[user_id] = pending
+
+                from telegram import ForceReply
+                await update.message.reply_text(
+                    "❌ AI 추천을 받지 못했습니다.\n\n"
+                    "경로를 직접 입력하세요:",
+                    reply_markup=ForceReply(selective=True, input_field_placeholder="/path/to/workspace")
+                )
+                return
+
+            # 추천 결과 저장
+            pending["recommendations"] = recommendations
+            pending["purpose"] = message
+            self._pending_workspace_input[user_id] = pending
+
+            # 추천 버튼 생성
+            buttons = []
+            for i, rec in enumerate(recommendations):
+                path_short = rec["path"].replace(str(__import__("pathlib").Path.home()), "~")
+                buttons.append([
+                    InlineKeyboardButton(
+                        f"📁 {rec['name']}",
+                        callback_data=f"ws:recommend:{i}"
+                    )
+                ])
+
+            buttons.append([
+                InlineKeyboardButton("✏️ 직접 입력", callback_data="ws:manual"),
+                InlineKeyboardButton("↩️ 취소", callback_data="ws:refresh"),
+            ])
+
+            # 추천 결과 텍스트
+            rec_text = "\n\n".join([
+                f"<b>{i+1}. {r['name']}</b>\n"
+                f"📂 <code>{r['path'].replace(str(__import__('pathlib').Path.home()), '~')}</code>\n"
+                f"💡 {r['description']}\n"
+                f"🎯 {r.get('reason', '')}"
+                for i, r in enumerate(recommendations)
+            ])
+
+            await update.message.reply_text(
+                f"🤖 <b>AI 추천 결과</b>\n\n"
+                f"용도: <i>{message}</i>\n\n"
+                f"────────────\n\n"
+                f"{rec_text}",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML"
+            )
+            return
+
+        # 직접 경로 입력
+        if action == "manual_path":
+            from pathlib import Path
+
+            path = message.strip()
+            expanded_path = Path(path).expanduser().resolve()
+
+            if not expanded_path.exists():
+                from telegram import ForceReply
+                await update.message.reply_text(
+                    f"❌ 경로가 존재하지 않습니다: <code>{path}</code>\n\n"
+                    f"다시 입력하세요:",
+                    reply_markup=ForceReply(selective=True, input_field_placeholder="/path/to/workspace"),
+                    parse_mode="HTML"
+                )
+                return
+
+            # 이름 입력 요청
+            pending["path"] = str(expanded_path)
+            pending["action"] = "manual_name"
+            self._pending_workspace_input[user_id] = pending
+
+            from telegram import ForceReply
+            await update.message.reply_text(
+                f"✅ 경로 확인: <code>{expanded_path}</code>\n\n"
+                f"워크스페이스 이름을 입력하세요:",
+                reply_markup=ForceReply(selective=True, input_field_placeholder="예: 투자분석"),
+                parse_mode="HTML"
+            )
+            return
+
+        # 이름 입력
+        if action == "manual_name":
+            name = message.strip()[:30]
+            pending["name"] = name
+            pending["action"] = "manual_desc"
+            self._pending_workspace_input[user_id] = pending
+
+            from telegram import ForceReply
+            await update.message.reply_text(
+                f"📁 이름: <b>{name}</b>\n\n"
+                f"워크스페이스 설명을 입력하세요:",
+                reply_markup=ForceReply(selective=True, input_field_placeholder="예: 주식 투자 분석 프로젝트"),
+                parse_mode="HTML"
+            )
+            return
+
+        # 설명 입력 - 등록 완료
+        if action == "manual_desc":
+            description = message.strip()[:100]
+            path = pending.get("path", "")
+            name = pending.get("name", "워크스페이스")
+
+            ws = self._workspace_registry.add(
+                user_id=user_id,
+                path=path,
+                name=name,
+                description=description,
+            )
+
+            del self._pending_workspace_input[user_id]
+
+            text = self._workspace_registry.get_status_text(user_id)
+            keyboard = self._build_workspace_keyboard(user_id)
+
+            await update.message.reply_text(
+                f"✅ <b>워크스페이스 등록 완료!</b>\n\n"
+                f"📁 <b>{ws.name}</b>\n"
+                f"📂 <code>{ws.short_path}</code>\n"
+                f"💡 {ws.description}\n\n"
+                f"────────────\n\n{text}",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="HTML"
+            )
+            return
+
+        # 워크스페이스 스케줄 메시지 입력 (예약 메시지)
+        if "ws_id" in pending and "model" in pending:
+            ws_id = pending.get("ws_id")
+            ws = self._workspace_registry.get(ws_id)
+            if not ws:
+                await update.message.reply_text("❌ 워크스페이스를 찾을 수 없습니다.")
+                del self._pending_workspace_input[user_id]
+                return
+
+            if not self._schedule_manager:
+                await update.message.reply_text("❌ 스케줄 기능이 비활성화되어 있습니다.")
+                del self._pending_workspace_input[user_id]
+                return
+
+            # 스케줄 등록
+            schedule = self._schedule_manager.add(
+                user_id=user_id,
+                chat_id=chat_id,
+                name=ws.name,
+                hour=pending["hour"],
+                minute=pending.get("minute", 0),
+                message=message,
+                schedule_type="workspace",
+                model=pending["model"],
+                workspace_path=ws.path,
+            )
+
+            # 워크스페이스 사용 기록
+            self._workspace_registry.mark_used(ws_id)
+
+            del self._pending_workspace_input[user_id]
+
+            keyboard = [[
+                InlineKeyboardButton("📅 스케줄 목록", callback_data="sched:refresh"),
+                InlineKeyboardButton("📁 워크스페이스", callback_data="ws:refresh"),
+            ]]
+
+            await update.message.reply_text(
+                f"✅ <b>워크스페이스 스케줄 등록 완료!</b>\n\n"
+                f"📁 <b>{ws.name}</b>\n"
+                f"📂 <code>{ws.short_path}</code>\n"
+                f"⏰ 시간: <b>{schedule.time_str}</b> (매일)\n"
+                f"🤖 모델: <b>{pending['model']}</b>\n"
+                f"💬 메시지: <i>{message[:50]}{'...' if len(message) > 50 else ''}</i>",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="HTML"
+            )
+
+            logger.info(f"워크스페이스 스케줄 등록: {ws.name} @ {schedule.time_str}")
+            return
+
+        # 알 수 없는 상태
+        await update.message.reply_text("❌ 알 수 없는 입력 상태입니다. 다시 시도하세요.")
+        if user_id in self._pending_workspace_input:
+            del self._pending_workspace_input[user_id]
 
     async def _handle_todo_callback(self, query, chat_id: int, callback_data: str) -> None:
         """Todo 플러그인 콜백 처리."""

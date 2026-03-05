@@ -323,13 +323,6 @@ HistoryEntry = {
 | 워크스페이스 규칙 | `cwd`의 CLAUDE.md | 코드 스타일, 빌드 명령, 커밋 규칙 |
 | 텔레그램 규칙 | `--append-system-prompt` | HTML 포맷, 간결한 응답 |
 
-### 매니저 모드에서
-
-```
-"my-app 워크스페이스 세션 만들어"
-→ [ACTION:CREATE_WORKSPACE:sonnet:~/Projects/my-app:my-app]
-```
-
 ### 허용 디렉토리
 
 `.env`에서 설정 (기본값):
