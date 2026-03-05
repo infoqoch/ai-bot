@@ -82,38 +82,27 @@ def _setup_hourly_ping_scheduler(app, settings, plugin_loader) -> None:
         logger.debug(f"HourlyPing 스케줄러 비활성화: {e}")
 
 
-def _setup_todo_scheduler(app, settings, plugin_loader) -> None:
-    """Todo 스케줄러 설정."""
+def _setup_todo_scheduler(app, settings) -> None:
+    """Todo 스케줄러 설정 (Repository 기반)."""
     global _todo_scheduler
 
     try:
         from plugins.builtin.todo.scheduler import TodoScheduler
-        from plugins.builtin.todo.manager import TodoManager
 
-        # 데이터 디렉토리
-        data_dir = settings.base_dir / ".data" / "todo"
+        repository = get_repository()
+        if not repository:
+            logger.warning("Todo 스케줄러: Repository 없음")
+            return
 
-        # TodoManager 생성
-        todo_manager = TodoManager(data_dir)
-
-        # 알림 받을 chat_ids (allowed_chat_ids 또는 admin_chat_id)
         chat_ids = settings.allowed_chat_ids.copy() if settings.allowed_chat_ids else []
         if settings.admin_chat_id and settings.admin_chat_id not in chat_ids:
             chat_ids.append(settings.admin_chat_id)
 
-        # 스케줄러 생성 및 설정
         _todo_scheduler = TodoScheduler(
-            todo_manager=todo_manager,
+            repository=repository,
             chat_ids=chat_ids,
         )
         _todo_scheduler.setup_jobs(app)
-
-        # TodoPlugin에 manager 공유 (플러그인이 로드된 경우)
-        if plugin_loader:
-            todo_plugin = plugin_loader.get_plugin_by_name("todo")
-            if todo_plugin:
-                todo_plugin._manager = todo_manager
-                logger.info("Todo 플러그인에 공유 매니저 연결됨")
 
         logger.info(f"Todo 스케줄러 활성화 - chat_ids: {chat_ids}")
 
@@ -206,8 +195,8 @@ def create_app() -> Application:
     scheduler_manager.set_app(app)
     logger.info("SchedulerManager 초기화 완료")
 
-    # Todo 스케줄러 설정 (SchedulerManager 사용)
-    _setup_todo_scheduler(app, settings, plugin_loader)
+    # Todo 스케줄러 설정 (Repository 기반)
+    _setup_todo_scheduler(app, settings)
 
     # 세션 스케줄러 설정 (매니저 세션 compact)
     _setup_session_scheduler(app, session_store, claude_client, settings)

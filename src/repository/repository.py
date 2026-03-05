@@ -919,6 +919,70 @@ class Repository:
         self._conn.commit()
         return cursor.rowcount
 
+    def mark_todo_done(self, todo_id: int, done: bool = True) -> bool:
+        """Mark todo as done/undone."""
+        cursor = self._conn.execute(
+            "UPDATE todos SET done = ? WHERE id = ?",
+            (int(done), todo_id)
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def get_pending_todos(self, chat_id: int, date: str) -> list[Todo]:
+        """Get incomplete todos for date."""
+        cursor = self._conn.execute(
+            "SELECT * FROM todos WHERE chat_id = ? AND date = ? AND done = 0 ORDER BY slot, id",
+            (chat_id, date)
+        )
+        return [self._row_to_todo(row) for row in cursor.fetchall()]
+
+    def move_todos_to_date(self, todo_ids: list[int], new_date: str) -> int:
+        """Move todos to another date."""
+        if not todo_ids:
+            return 0
+        placeholders = ",".join("?" * len(todo_ids))
+        cursor = self._conn.execute(
+            f"UPDATE todos SET date = ? WHERE id IN ({placeholders})",
+            [new_date] + todo_ids
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    def get_todos_by_date_range(
+        self, chat_id: int, start_date: str, end_date: str
+    ) -> dict[str, list[Todo]]:
+        """Get todos for date range, grouped by date."""
+        cursor = self._conn.execute(
+            """SELECT * FROM todos
+               WHERE chat_id = ? AND date >= ? AND date <= ?
+               ORDER BY date, slot, id""",
+            (chat_id, start_date, end_date)
+        )
+        result: dict[str, list[Todo]] = {}
+        for row in cursor.fetchall():
+            todo = self._row_to_todo(row)
+            if todo.date not in result:
+                result[todo.date] = []
+            result[todo.date].append(todo)
+        return result
+
+    def get_todo_stats(self, chat_id: int, date: str) -> dict[str, int]:
+        """Get todo statistics for date."""
+        cursor = self._conn.execute(
+            """SELECT
+                COUNT(*) as total,
+                SUM(CASE WHEN done = 1 THEN 1 ELSE 0 END) as done,
+                SUM(CASE WHEN done = 0 THEN 1 ELSE 0 END) as pending
+               FROM todos WHERE chat_id = ? AND date = ?""",
+            (chat_id, date)
+        )
+        row = cursor.fetchone()
+        return {
+            "total": row["total"] or 0,
+            "done": row["done"] or 0,
+            "pending": row["pending"] or 0
+        }
+
     # ========== Weather Location Operations ==========
 
     def set_weather_location(

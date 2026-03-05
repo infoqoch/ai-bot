@@ -43,11 +43,6 @@ class Plugin(ABC):
         """메시지 처리."""
         pass
 
-    def get_data_dir(self, base_dir: Path) -> Path:
-        """플러그인 데이터 디렉토리 반환 (레거시 지원)."""
-        data_dir = base_dir / ".data" / self.name
-        data_dir.mkdir(parents=True, exist_ok=True)
-        return data_dir
 
 
 class PluginLoader:
@@ -68,10 +63,6 @@ class PluginLoader:
 
     def load_all(self) -> list[str]:
         """모든 플러그인 로드 (builtin + custom).
-
-        플러그인 구조:
-        - 디렉토리 기반: plugins/builtin/memo/__init__.py
-        - 파일 기반 (레거시): plugins/builtin/memo.py
 
         Returns:
             로드된 플러그인 이름 목록
@@ -103,12 +94,12 @@ class PluginLoader:
                         else:
                             logger.warning(f"플러그인 로드 실패: {item.name}")
 
-            # 2. 파일 기반 플러그인 로드 (레거시)
+            # 2. 파일 기반 플러그인 로드
             for py_file in dir_path.glob("*.py"):
                 if py_file.name.startswith("_"):
                     continue
 
-                logger.trace(f"레거시 플러그인 파일 발견: {py_file.name}")
+                logger.trace(f"플러그인 파일 발견: {py_file.name}")
                 plugin = self._load_plugin_safe(py_file)
                 if plugin:
                     self.plugins.append(plugin)

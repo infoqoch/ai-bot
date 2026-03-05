@@ -1,5 +1,42 @@
 # AI Bot - 프로젝트 규칙
 
+## 개발 원칙 (CRITICAL)
+
+### 베타 개발 모드
+
+현재 **베타 개발 중**이므로 아래 원칙을 철저히 준수:
+
+| 원칙 | 설명 |
+|------|------|
+| **레거시 고려 금지** | 하위 호환성 코드, fallback 로직 작성하지 않음 |
+| **코드 품질** | 깔끔하고, 단순하고, 명확한 코드만 허용 |
+| **마이그레이션 가능** | 기존 데이터 → 새 형식으로 변환하여 처리 |
+| **마이그레이션 불가** | 깔끔하게 포기 (복잡한 호환 코드 작성 금지) |
+
+### 금지 패턴
+
+```python
+# ❌ 금지: 레거시 fallback
+if new_system_available():
+    use_new()
+else:
+    use_legacy()  # 이런 코드 작성 금지
+
+# ❌ 금지: 하위 호환 wrapper
+def legacy_compatible_method():
+    """레거시 지원용"""  # 이런 메서드 작성 금지
+
+# ✅ 권장: 새 시스템만 사용
+def process():
+    return new_system.process()  # 단순명확
+```
+
+### 데이터 저장소
+
+- **SQLite Repository** 단일 사용 (`.data/bot.db`)
+- JSON 파일 기반 저장 금지
+- 기존 JSON 데이터 → 마이그레이션으로 SQLite 변환
+
 ## 개발 루틴
 
 ### 실행 스크립트 (run.sh)
@@ -173,9 +210,9 @@ PluginResult.response 즉시 반환 (Claude 호출 없음)
    - 각 플러그인은 try-catch로 격리
    - 실패한 플러그인만 스킵
 
-3. **데이터 저장**: `self.get_data_dir(self._base_dir)`
-   - 경로: `.data/{plugin_name}/`
-   - 예: `.data/memo/12345.json`
+3. **데이터 저장**: `self.repository` (Repository 인스턴스)
+   - 플러그인은 Repository를 통해 SQLite에 데이터 저장
+   - 예: `self.repository.add_memo(chat_id, content)`
 
 4. **검증 후 배포**: custom 플러그인 작성 시
    - `python -m py_compile plugins/custom/my.py`

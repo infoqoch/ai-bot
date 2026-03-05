@@ -29,11 +29,8 @@ _get_running_pid() {
 
 _kill_all_instances() {
     # 모든 관련 프로세스 강제 종료 (supervisor + main)
-    # macOS 호환: pgrep 정규식 대신 개별 패턴으로 검색
-    local pids=""
-    pids="$pids $(pgrep -f 'python.*src.supervisor' 2>/dev/null)"
-    pids="$pids $(pgrep -f 'python.*src.main' 2>/dev/null)"
-    pids=$(echo "$pids" | tr ' ' '\n' | grep -v '^$' | sort -u)
+    # macOS 호환: pgrep 대신 ps + grep + awk 사용
+    local pids=$(ps aux | grep -E 'python.*src\.(supervisor|main)' | grep -v grep | awk '{print $2}')
 
     if [ -n "$pids" ]; then
         for pid in $pids; do
@@ -50,21 +47,15 @@ _is_running() {
 
 case "$1" in
   start)
-    # 기존 프로세스 확인 및 정리 (좀비 방지)
-    # macOS 호환: 개별 패턴으로 검색
-    existing_pids=""
-    existing_pids="$existing_pids $(pgrep -f 'python.*src.supervisor' 2>/dev/null)"
-    existing_pids="$existing_pids $(pgrep -f 'python.*src.main' 2>/dev/null)"
-    existing_pids=$(echo "$existing_pids" | tr ' ' '\n' | grep -v '^$' | sort -u)
-    if [ -n "$existing_pids" ]; then
-        echo "⚠️  기존 프로세스 발견 - 자동 정리 중..."
-        for pid in $existing_pids; do
-            kill -9 "$pid" 2>/dev/null
-        done
-        sleep 1
+    # 이미 실행 중인지 확인
+    if _is_running; then
+        echo "⚠️  봇이 이미 실행 중입니다."
+        echo "   재시작하려면: ./run.sh restart"
+        echo "   상태 확인: ./run.sh status"
+        exit 1
     fi
-    # 락 파일 정리
-    rm -f "$LOCK_FILE" "/tmp/telegram-bot-supervisor.lock" "$PID_FILE"
+    # 주의: 락 파일 삭제 안 함! (삭제하면 race condition 발생)
+    # 좀비 락은 supervisor/main이 PID 체크로 감지함
     source venv/bin/activate
     # supervisor로 시작 (크래시 시 자동 재시작)
     # LOG_LEVEL 환경변수로 조정 (기본: DEBUG)
@@ -133,7 +124,7 @@ case "$1" in
         _kill_all_instances
         sleep 1
     fi
-    rm -f "$LOCK_FILE" "/tmp/telegram-bot-supervisor.lock"
+    # 주의: 락 파일 삭제 안 함! (삭제하면 race condition 발생)
     source venv/bin/activate
     LOG_LEVEL="TRACE" PYTHONPYCACHEPREFIX=.build nohup python -m src.supervisor > "$LOG_FILE" 2>&1 &
     new_pid=$!
@@ -156,7 +147,7 @@ case "$1" in
         _kill_all_instances
         sleep 1
     fi
-    rm -f "$LOCK_FILE" "/tmp/telegram-bot-supervisor.lock"
+    # 주의: 락 파일 삭제 안 함! (삭제하면 race condition 발생)
     source venv/bin/activate
     LOG_LEVEL="DEBUG" PYTHONPYCACHEPREFIX=.build nohup python -m src.supervisor > "$LOG_FILE" 2>&1 &
     new_pid=$!

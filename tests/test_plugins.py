@@ -6,14 +6,14 @@
 - MemoPlugin 기능
 """
 
-import json
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from src.plugins.loader import Plugin, PluginLoader, PluginResult
+from src.repository import init_repository, shutdown_repository, reset_connection
 
 
 class MockPlugin(Plugin):
@@ -59,23 +59,6 @@ class TestPluginResult:
 
         assert result.response is None
         assert result.error is None
-
-
-class TestPlugin:
-    """Plugin 기본 클래스 테스트."""
-
-    def test_plugin_get_data_dir(self):
-        """데이터 디렉토리 생성."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            base_dir = Path(tmpdir)
-            plugin = MockPlugin()
-            plugin._base_dir = base_dir
-
-            data_dir = plugin.get_data_dir(base_dir)
-
-            assert data_dir.exists()
-            assert data_dir.name == "mock"
-            assert data_dir.parent.name == ".data"
 
 
 class TestPluginLoader:
@@ -212,13 +195,21 @@ class TestMemoPluginPatterns:
 
     @pytest.fixture
     def memo_plugin(self):
-        """MemoPlugin 인스턴스 생성."""
+        """MemoPlugin 인스턴스 생성 (Repository 주입)."""
         from plugins.builtin.memo.plugin import MemoPlugin
 
         with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "test.db"
+            repo = init_repository(db_path)
+
             plugin = MemoPlugin()
             plugin._base_dir = Path(tmpdir)
+            plugin._repository = repo
+
             yield plugin
+
+            shutdown_repository()
+            reset_connection()
 
     @pytest.mark.asyncio
     async def test_can_handle_single_entry_points(self, memo_plugin):
