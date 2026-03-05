@@ -25,14 +25,9 @@ class Settings(BaseSettings):
 
     # AI
     ai_command: str = Field(default="claude", alias="AI_COMMAND")
-    claude_command: str = Field(default="")  # Deprecated, use ai_command
     session_timeout_hours: int = Field(default=24)
     response_notify_seconds: int = Field(default=60, description="응답 대기 알림 시간(초)")
     session_list_ai_summary: bool = Field(default=False, description="세션 목록에서 AI 요약 사용")
-
-    @property
-    def effective_ai_command(self) -> str:
-        return self.ai_command or self.claude_command or "claude"
     
     # Authentication
     require_auth: bool = Field(default=True)
@@ -107,9 +102,6 @@ class Settings(BaseSettings):
     def db_path(self) -> Path:
         return self.data_dir / "bot.db"
 
-    @property
-    def sessions_file(self) -> Path:
-        return self.data_dir / "sessions.json"
     
     @property
     def prompts_dir(self) -> Path:

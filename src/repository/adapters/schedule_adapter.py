@@ -211,11 +211,13 @@ class ScheduleManagerAdapter:
     def _register_schedule(self, schedule: ScheduleData) -> None:
         """Register single schedule with scheduler."""
         from datetime import time as dt_time
+        from zoneinfo import ZoneInfo
 
         if not self._scheduler_manager or not self._executor:
             return
 
         job_name = f"schedule_{schedule.id}"
+        KST = ZoneInfo("Asia/Seoul")
 
         # Create callback wrapper for telegram job_queue
         async def job_callback(context) -> None:
@@ -227,7 +229,7 @@ class ScheduleManagerAdapter:
         self._scheduler_manager.register_daily(
             name=job_name,
             callback=job_callback,
-            time_of_day=dt_time(hour=schedule.hour, minute=schedule.minute),
+            time_of_day=dt_time(hour=schedule.hour, minute=schedule.minute, tzinfo=KST),
             owner="ScheduleAdapter",
             metadata={"schedule_id": schedule.id},
         )
