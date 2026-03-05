@@ -317,6 +317,15 @@ class Repository:
         self._conn.commit()
         return cursor.rowcount > 0
 
+    def update_session_model(self, session_id: str, model: str) -> bool:
+        """Update session model."""
+        cursor = self._conn.execute(
+            "UPDATE sessions SET model = ? WHERE id = ?",
+            (model, session_id)
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
     def soft_delete_session(self, session_id: str) -> bool:
         """Soft delete session (mark as deleted)."""
         cursor = self._conn.execute(
