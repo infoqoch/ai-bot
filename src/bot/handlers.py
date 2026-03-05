@@ -75,10 +75,10 @@ class BotHandlers:
     # 세션 락 및 대기열은 session_queue_manager가 단일 진실 소스로 관리
 
     # 스케줄 입력 대기 상태 (ForceReply용)
-    _pending_schedule_input: dict[str, dict] = {}  # user_id -> {session_id, hour, minute, ...}
+    _pending_schedule_input: dict[str, dict] = {}  # user_id -> {type, hour, minute, ...}
 
-    # 세션 예약 스케줄러
-    _session_schedule_manager = None
+    # 예약 스케줄러 (경로 기반)
+    _schedule_manager = None
 
     def __init__(
         self,
@@ -103,13 +103,13 @@ class BotHandlers:
         self._watchdog_started = False
         logger.trace(f"BotHandlers 설정 - require_auth={require_auth}, allowed_ids={allowed_chat_ids}")
 
-    # ==================== 세션 스케줄 매니저 ====================
+    # ==================== 스케줄 매니저 ====================
 
     @classmethod
-    def set_session_schedule_manager(cls, manager) -> None:
-        """세션 스케줄 매니저 설정."""
-        cls._session_schedule_manager = manager
-        logger.debug("BotHandlers에 SessionScheduleManager 연결됨")
+    def set_schedule_manager(cls, manager) -> None:
+        """스케줄 매니저 설정."""
+        cls._schedule_manager = manager
+        logger.debug("BotHandlers에 ScheduleManager 연결됨")
 
     # ==================== 유틸리티 메서드 ====================
 
@@ -384,7 +384,7 @@ class BotHandlers:
         clear_context()
 
     async def scheduler_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /scheduler command - manage session schedules."""
+        """Handle /scheduler command - manage schedules."""
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
         chat_id = update.effective_chat.id
@@ -392,12 +392,12 @@ class BotHandlers:
         user_id = str(chat_id)
         logger.info("/scheduler 명령 수신")
 
-        if not self._session_schedule_manager:
+        if not self._schedule_manager:
             await update.message.reply_text("❌ 스케줄 기능이 초기화되지 않았습니다.")
             clear_context()
             return
 
-        text = self._session_schedule_manager.get_status_text(user_id)
+        text = self._schedule_manager.get_status_text(user_id)
         keyboard = self._build_scheduler_keyboard(user_id)
 
         await update.message.reply_text(
@@ -414,14 +414,15 @@ class BotHandlers:
 
         buttons = []
 
-        # 등록된 스케줄 목록 (삭제 가능한 것만 삭제 버튼)
-        if self._session_schedule_manager:
-            schedules = self._session_schedule_manager.list_by_user(user_id)
+        # 등록된 스케줄 목록
+        if self._schedule_manager:
+            schedules = self._schedule_manager.list_by_user(user_id)
             for s in sorted(schedules, key=lambda x: (x.hour, x.minute)):
                 status = "✅" if s.enabled else "⏸"
+                type_icon = "📁" if s.type == "project" else "💬"
                 buttons.append([
                     InlineKeyboardButton(
-                        f"{status} {s.time_str} {s.session_name[:10]}",
+                        f"{status} {s.time_str} {type_icon} {s.name[:10]}",
                         callback_data=f"sched:toggle:{s.id}"
                     ),
                     InlineKeyboardButton("🗑", callback_data=f"sched:delete:{s.id}"),
@@ -429,26 +430,58 @@ class BotHandlers:
 
         # 추가/새로고침 버튼
         buttons.append([
-            InlineKeyboardButton("➕ 추가", callback_data="sched:add"),
+            InlineKeyboardButton("💬 Claude", callback_data="sched:add:claude"),
+            InlineKeyboardButton("📁 프로젝트", callback_data="sched:add:project"),
+        ])
+        buttons.append([
             InlineKeyboardButton("🔄 새로고침", callback_data="sched:refresh"),
         ])
 
         return buttons
 
+    def _get_allowed_project_paths(self) -> list[str]:
+        """허용된 프로젝트 경로 목록 반환."""
+        import os
+        from pathlib import Path
+
+        # 환경변수에서 허용 경로 가져오기
+        allowed = os.getenv("ALLOWED_PROJECT_PATHS", "")
+        if not allowed:
+            # 기본값: AiSandbox, Projects
+            home = Path.home()
+            return [
+                str(home / "AiSandbox"),
+                str(home / "Projects"),
+            ]
+
+        paths = []
+        for pattern in allowed.split(","):
+            pattern = pattern.strip()
+            if pattern.endswith("/*"):
+                # 와일드카드: 해당 디렉토리의 하위 디렉토리들
+                parent = Path(pattern[:-2]).expanduser()
+                if parent.exists():
+                    paths.extend([str(p) for p in parent.iterdir() if p.is_dir() and not p.name.startswith(".")])
+            else:
+                paths.append(pattern)
+
+        return sorted(paths)
+
     async def _handle_scheduler_callback(self, query, chat_id: int, callback_data: str) -> None:
-        """세션 스케줄 콜백 처리."""
+        """스케줄 콜백 처리."""
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
+        from src.schedule import AVAILABLE_HOURS
 
         user_id = str(chat_id)
         action = callback_data[6:]  # "sched:" 제거
 
-        if not self._session_schedule_manager:
+        if not self._schedule_manager:
             await query.answer("❌ 스케줄 기능 비활성화")
             return
 
         # 새로고침
         if action == "refresh":
-            text = self._session_schedule_manager.get_status_text(user_id)
+            text = self._schedule_manager.get_status_text(user_id)
             keyboard = self._build_scheduler_keyboard(user_id)
             await query.edit_message_text(
                 text,
@@ -461,12 +494,11 @@ class BotHandlers:
         # 토글 (활성화/비활성화)
         if action.startswith("toggle:"):
             schedule_id = action[7:]
-            new_state = self._session_schedule_manager.toggle(schedule_id)
+            new_state = self._schedule_manager.toggle(schedule_id)
             if new_state is not None:
                 status = "활성화" if new_state else "비활성화"
                 await query.answer(f"✅ {status}됨")
-                # UI 새로고침
-                text = self._session_schedule_manager.get_status_text(user_id)
+                text = self._schedule_manager.get_status_text(user_id)
                 keyboard = self._build_scheduler_keyboard(user_id)
                 await query.edit_message_text(
                     text,
@@ -480,10 +512,9 @@ class BotHandlers:
         # 삭제
         if action.startswith("delete:"):
             schedule_id = action[7:]
-            if self._session_schedule_manager.remove(schedule_id):
+            if self._schedule_manager.remove(schedule_id):
                 await query.answer("✅ 삭제됨")
-                # UI 새로고침
-                text = self._session_schedule_manager.get_status_text(user_id)
+                text = self._schedule_manager.get_status_text(user_id)
                 keyboard = self._build_scheduler_keyboard(user_id)
                 await query.edit_message_text(
                     text,
@@ -494,53 +525,14 @@ class BotHandlers:
                 await query.answer("❌ 삭제 실패")
             return
 
-        # 추가 - 세션 선택 화면
-        if action == "add":
-            sessions = self.sessions.list_sessions(user_id)
-            if not sessions:
-                await query.answer("❌ 세션이 없습니다. 먼저 세션을 생성하세요.")
-                return
-
-            buttons = []
-            for s in sessions[:10]:  # 최대 10개
-                short_id = s.get("session_id", s.get("full_session_id", "")[:8])
-                name = s.get("name") or s.get("summary", "")[:15] or short_id
-                buttons.append([
-                    InlineKeyboardButton(
-                        f"📂 {name}",
-                        callback_data=f"sched:session:{short_id}"
-                    )
-                ])
-            buttons.append([
-                InlineKeyboardButton("↩️ 취소", callback_data="sched:refresh")
-            ])
-
-            await query.edit_message_text(
-                "📅 <b>스케줄 추가</b>\n\n예약 메시지를 보낼 세션을 선택하세요:",
-                reply_markup=InlineKeyboardMarkup(buttons),
-                parse_mode="HTML"
-            )
-            await query.answer()
-            return
-
-        # 세션 선택 완료 - 시간 선택 화면
-        if action.startswith("session:"):
-            session_short_id = action[8:]
-            # 세션 ID 찾기
-            sessions = self.sessions.list_sessions(user_id)
-            session = next((s for s in sessions if s.get("session_id", "").startswith(session_short_id) or s.get("full_session_id", "").startswith(session_short_id)), None)
-            if not session:
-                await query.answer("❌ 세션을 찾을 수 없음")
-                return
-
-            from src.session_schedule import AVAILABLE_HOURS
-            # 시간 선택 버튼 (4열)
+        # 추가 - Claude 타입 (시간 선택)
+        if action == "add:claude":
             buttons = []
             row = []
             for hour in AVAILABLE_HOURS:
                 row.append(InlineKeyboardButton(
                     f"{hour:02d}:00",
-                    callback_data=f"sched:time:{session_short_id}:{hour}"
+                    callback_data=f"sched:time:claude:_:{hour}"
                 ))
                 if len(row) == 4:
                     buttons.append(row)
@@ -551,10 +543,82 @@ class BotHandlers:
                 InlineKeyboardButton("↩️ 취소", callback_data="sched:refresh")
             ])
 
-            session_name = session.get("name") or session.get("summary", "")[:15] or session_short_id
             await query.edit_message_text(
-                f"📅 <b>스케줄 추가</b>\n\n"
-                f"📂 세션: <b>{session_name}</b>\n\n"
+                "📅 <b>Claude 스케줄 추가</b>\n\n"
+                "💬 일반 Claude 대화 (새 세션)\n\n"
+                "실행 시간을 선택하세요 (매일 반복):",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML"
+            )
+            await query.answer()
+            return
+
+        # 추가 - Project 타입 (경로 선택)
+        if action == "add:project":
+            paths = self._get_allowed_project_paths()
+            if not paths:
+                await query.answer("❌ 허용된 프로젝트 경로가 없습니다.")
+                return
+
+            buttons = []
+            for i, path in enumerate(paths[:10]):  # 최대 10개
+                name = path.split("/")[-1]
+                buttons.append([
+                    InlineKeyboardButton(
+                        f"📁 {name}",
+                        callback_data=f"sched:path:{i}"
+                    )
+                ])
+
+            # 경로 목록 임시 저장
+            self._pending_schedule_input[user_id] = {"paths": paths}
+
+            buttons.append([
+                InlineKeyboardButton("↩️ 취소", callback_data="sched:refresh")
+            ])
+
+            await query.edit_message_text(
+                "📅 <b>프로젝트 스케줄 추가</b>\n\n"
+                "📁 프로젝트 경로를 선택하세요:",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML"
+            )
+            await query.answer()
+            return
+
+        # 경로 선택 완료 - 시간 선택
+        if action.startswith("path:"):
+            path_idx = int(action[5:])
+            pending = self._pending_schedule_input.get(user_id, {})
+            paths = pending.get("paths", [])
+
+            if path_idx >= len(paths):
+                await query.answer("❌ 잘못된 경로")
+                return
+
+            project_path = paths[path_idx]
+            project_name = project_path.split("/")[-1]
+
+            buttons = []
+            row = []
+            for hour in AVAILABLE_HOURS:
+                row.append(InlineKeyboardButton(
+                    f"{hour:02d}:00",
+                    callback_data=f"sched:time:project:{path_idx}:{hour}"
+                ))
+                if len(row) == 4:
+                    buttons.append(row)
+                    row = []
+            if row:
+                buttons.append(row)
+            buttons.append([
+                InlineKeyboardButton("↩️ 취소", callback_data="sched:refresh")
+            ])
+
+            await query.edit_message_text(
+                f"📅 <b>프로젝트 스케줄 추가</b>\n\n"
+                f"📁 프로젝트: <b>{project_name}</b>\n"
+                f"<code>{project_path}</code>\n\n"
                 f"실행 시간을 선택하세요 (매일 반복):",
                 reply_markup=InlineKeyboardMarkup(buttons),
                 parse_mode="HTML"
@@ -562,37 +626,69 @@ class BotHandlers:
             await query.answer()
             return
 
-        # 시간 선택 완료 - 메시지 입력 (ForceReply)
+        # 시간 선택 완료 - 모델 선택
         if action.startswith("time:"):
             parts = action[5:].split(":")
-            if len(parts) != 2:
+            if len(parts) != 3:
                 await query.answer("❌ 잘못된 요청")
                 return
 
-            session_short_id, hour = parts[0], int(parts[1])
+            schedule_type, path_idx, hour = parts[0], parts[1], int(parts[2])
 
-            # 세션 정보 저장 (ForceReply 응답 처리용)
-            sessions = self.sessions.list_sessions(user_id)
-            session = next((s for s in sessions if s.get("session_id", "").startswith(session_short_id) or s.get("full_session_id", "").startswith(session_short_id)), None)
-            if not session:
-                await query.answer("❌ 세션을 찾을 수 없음")
-                return
+            # 대기 상태 업데이트
+            pending = self._pending_schedule_input.get(user_id, {})
+            pending["type"] = schedule_type
+            pending["hour"] = hour
+            pending["minute"] = 0
 
-            full_session_id = session.get("full_session_id", session.get("session_id", ""))
-            session_name = session.get("name") or session.get("summary", "")[:15] or session_short_id
+            if schedule_type == "project" and path_idx != "_":
+                paths = pending.get("paths", [])
+                idx = int(path_idx)
+                if idx < len(paths):
+                    pending["project_path"] = paths[idx]
+                    pending["name"] = paths[idx].split("/")[-1]
 
-            # 대기 상태 저장
-            self._pending_schedule_input[user_id] = {
-                "session_id": full_session_id,
-                "session_name": session_name,
-                "hour": hour,
-                "minute": 0,
-            }
+            self._pending_schedule_input[user_id] = pending
+
+            # 모델 선택 버튼
+            buttons = [
+                [
+                    InlineKeyboardButton("🚀 Opus", callback_data="sched:model:opus"),
+                    InlineKeyboardButton("⚡ Sonnet", callback_data="sched:model:sonnet"),
+                    InlineKeyboardButton("💨 Haiku", callback_data="sched:model:haiku"),
+                ],
+                [InlineKeyboardButton("↩️ 취소", callback_data="sched:refresh")],
+            ]
+
+            type_label = "프로젝트" if schedule_type == "project" else "Claude"
+            path_info = f"\n📁 경로: <code>{pending.get('project_path', '')}</code>" if schedule_type == "project" else ""
 
             await query.edit_message_text(
-                f"📅 <b>스케줄 추가</b>\n\n"
-                f"📂 세션: <b>{session_name}</b>\n"
-                f"⏰ 시간: <b>{hour:02d}:00</b>\n\n"
+                f"📅 <b>{type_label} 스케줄 추가</b>\n\n"
+                f"⏰ 시간: <b>{hour:02d}:00</b>{path_info}\n\n"
+                f"모델을 선택하세요:",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML"
+            )
+            await query.answer()
+            return
+
+        # 모델 선택 완료 - 메시지 입력 (ForceReply)
+        if action.startswith("model:"):
+            model = action[6:]
+            pending = self._pending_schedule_input.get(user_id, {})
+            pending["model"] = model
+            self._pending_schedule_input[user_id] = pending
+
+            schedule_type = pending.get("type", "claude")
+            hour = pending.get("hour", 9)
+            type_label = "프로젝트" if schedule_type == "project" else "Claude"
+            path_info = f"\n📁 경로: <code>{pending.get('project_path', '')}</code>" if schedule_type == "project" else ""
+
+            await query.edit_message_text(
+                f"📅 <b>{type_label} 스케줄 추가</b>\n\n"
+                f"⏰ 시간: <b>{hour:02d}:00</b>\n"
+                f"🤖 모델: <b>{model}</b>{path_info}\n\n"
                 f"아래에 예약 메시지를 입력하세요:",
                 parse_mode="HTML"
             )
@@ -2558,20 +2654,33 @@ class BotHandlers:
             await update.message.reply_text("❌ 스케줄 입력 상태가 만료되었습니다. 다시 시도하세요.")
             return
 
-        if not self._session_schedule_manager:
+        if not self._schedule_manager:
             await update.message.reply_text("❌ 스케줄 기능이 비활성화되어 있습니다.")
             del self._pending_schedule_input[user_id]
             return
 
+        # 스케줄 타입 및 정보
+        schedule_type = pending.get("type", "claude")
+        project_path = pending.get("project_path") if schedule_type == "project" else None
+        name = pending.get("name", "스케줄")
+        model = pending.get("model", "sonnet")
+
+        # 이름 자동 생성 (Claude 타입인 경우)
+        if schedule_type == "claude" and name == "스케줄":
+            # 메시지 앞 15자를 이름으로 사용
+            name = message[:15].strip() + ("..." if len(message) > 15 else "")
+
         # 스케줄 등록
-        schedule = self._session_schedule_manager.add(
+        schedule = self._schedule_manager.add(
             user_id=user_id,
             chat_id=chat_id,
-            session_id=pending["session_id"],
-            session_name=pending["session_name"],
+            name=name,
             hour=pending["hour"],
-            minute=pending["minute"],
+            minute=pending.get("minute", 0),
             message=message,
+            schedule_type=schedule_type,
+            model=model,
+            project_path=project_path,
         )
 
         # 상태 정리
@@ -2582,16 +2691,20 @@ class BotHandlers:
             InlineKeyboardButton("📅 스케줄 목록", callback_data="sched:refresh"),
         ]]
 
+        type_label = "프로젝트" if schedule_type == "project" else "Claude"
+        path_info = f"\n📁 경로: <code>{project_path}</code>" if project_path else ""
+
         await update.message.reply_text(
             f"✅ <b>스케줄 등록 완료!</b>\n\n"
-            f"📂 세션: <b>{schedule.session_name}</b>\n"
+            f"{schedule.type_emoji} <b>{schedule.name}</b> ({type_label})\n"
             f"⏰ 시간: <b>{schedule.time_str}</b> (매일)\n"
+            f"🤖 모델: <b>{model}</b>{path_info}\n"
             f"💬 메시지: <i>{message[:50]}{'...' if len(message) > 50 else ''}</i>",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="HTML"
         )
 
-        logger.info(f"스케줄 등록: {schedule.session_name} @ {schedule.time_str}")
+        logger.info(f"스케줄 등록: {schedule.name} @ {schedule.time_str} (type={schedule_type})")
 
     async def _handle_todo_callback(self, query, chat_id: int, callback_data: str) -> None:
         """Todo 플러그인 콜백 처리."""

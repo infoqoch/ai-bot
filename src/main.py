@@ -60,7 +60,7 @@ from src.bot.handlers import BotHandlers
 from src.bot.middleware import AuthManager
 from src.plugins.loader import PluginLoader
 from src.scheduler_manager import scheduler_manager
-from src.session_schedule import init_session_schedule_manager, get_session_schedule_manager
+from src.schedule import init_schedule_manager, get_schedule_manager
 
 # Todo 스케줄러 (옵션)
 _todo_scheduler = None
@@ -68,8 +68,8 @@ _todo_scheduler = None
 # 세션 스케줄러 (매니저 compact)
 _session_scheduler = None
 
-# 세션 예약 스케줄러
-_session_schedule_manager = None
+# 예약 스케줄러 (경로 기반)
+_schedule_manager = None
 
 
 def _setup_session_scheduler(app, session_store, claude_client, settings) -> None:
@@ -224,19 +224,18 @@ def create_app() -> Application:
     # HourlyPing 플러그인 스케줄러 설정 (스케줄러 동작 확인용)
     _setup_hourly_ping_scheduler(app, settings, plugin_loader)
 
-    # 세션 예약 스케줄러 설정
-    global _session_schedule_manager
-    _session_schedule_manager = init_session_schedule_manager(
+    # 예약 스케줄러 설정 (경로 기반)
+    global _schedule_manager
+    _schedule_manager = init_schedule_manager(
         data_dir=settings.data_dir,
         claude_client=claude_client,
-        session_store=session_store,
     )
-    _session_schedule_manager.set_bot(app.bot)
-    _session_schedule_manager.register_all_to_scheduler()
-    logger.info("세션 예약 스케줄러 초기화 완료")
+    _schedule_manager.set_bot(app.bot)
+    _schedule_manager.register_all_to_scheduler()
+    logger.info("예약 스케줄러 초기화 완료")
 
-    # BotHandlers에 session_schedule_manager 설정
-    handlers.set_session_schedule_manager(_session_schedule_manager)
+    # BotHandlers에 schedule_manager 설정
+    handlers.set_schedule_manager(_schedule_manager)
 
     # Register handlers
     logger.trace("핸들러 등록 시작")
