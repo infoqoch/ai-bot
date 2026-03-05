@@ -169,8 +169,8 @@ class ClaudeClient:
                 cmd_preview = " ".join(cmd[:-1])  # 마지막 인자(메시지) 제외
                 logger.debug(f"  command: {cmd_preview} <message>")
 
-                if error and ("not found" in error.lower() or "invalid" in error.lower()):
-                    logger.warning("세션을 찾을 수 없음")
+                if error and ("not found" in error.lower() or "no conversation found" in error.lower() or "invalid" in error.lower()):
+                    logger.warning(f"세션을 찾을 수 없음: {error[:100]}")
                     return ChatResponse("", ChatError.SESSION_NOT_FOUND, None)
 
                 # 에러 메시지 결합 (둘 다 있으면 합침)
