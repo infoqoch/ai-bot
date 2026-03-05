@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from telegram import Update
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from src.logging_config import logger, set_trace_id, set_user_id, set_session_id, clear_context
@@ -3353,6 +3354,11 @@ class BotHandlers:
                     reply_markup=result.get("reply_markup"),
                     parse_mode="HTML"
                 )
+        except BadRequest as e:
+            if "Message is not modified" in str(e):
+                pass  # 동일 내용 수정 시도 - 무시
+            else:
+                logger.warning(f"Todo 콜백 BadRequest: {e}")
         except Exception as e:
             logger.exception(f"Todo 콜백 처리 중 오류: {e}")
             try:
@@ -3406,6 +3412,11 @@ class BotHandlers:
                     reply_markup=result.get("reply_markup"),
                     parse_mode="HTML"
                 )
+        except BadRequest as e:
+            if "Message is not modified" in str(e):
+                pass  # 동일 내용 수정 시도 - 무시
+            else:
+                logger.warning(f"Memo 콜백 BadRequest: {e}")
         except Exception as e:
             logger.exception(f"Memo 콜백 처리 중 오류: {e}")
             try:
@@ -3441,6 +3452,11 @@ class BotHandlers:
                     reply_markup=result.get("reply_markup"),
                     parse_mode="HTML"
                 )
+        except BadRequest as e:
+            if "Message is not modified" in str(e):
+                pass  # 동일 내용 수정 시도 - 무시
+            else:
+                logger.warning(f"Weather 콜백 BadRequest: {e}")
         except Exception as e:
             logger.exception(f"Weather 콜백 처리 중 오류: {e}")
             try:
@@ -3506,6 +3522,11 @@ class BotHandlers:
             else:
                 await query.edit_message_text("❌ 알 수 없는 명령")
 
+        except BadRequest as e:
+            if "Message is not modified" in str(e):
+                pass  # 동일 내용 수정 시도 - 무시
+            else:
+                logger.warning(f"세션 콜백 BadRequest: {e}")
         except Exception as e:
             logger.exception(f"세션 콜백 처리 중 오류: {e}")
             try:
@@ -4035,6 +4056,26 @@ class BotHandlers:
                 is_new_session=is_new_session,
                 workspace_path=workspace_path,
             )
+
+            # 세션이 IDLE이면 즉시 처리 시작
+            if not session_queue_manager.is_locked(target_session_id):
+                # 대기열에서 꺼내서 바로 처리
+                if await session_queue_manager.try_lock(target_session_id, user_id, message):
+                    queued_msg = await session_queue_manager.unlock(target_session_id)
+                    if queued_msg:
+                        # 락 다시 획득
+                        await session_queue_manager.try_lock(target_session_id, user_id, message)
+                        self._temp_pending = None
+                        await query.edit_message_text(
+                            f"⚡ <b>바로 처리 시작합니다</b>\n\n"
+                            f"💬 <code>{truncate_message(message, 40)}</code>",
+                            parse_mode="HTML"
+                        )
+                        # 처리 시작
+                        asyncio.create_task(
+                            self._process_queued_message(bot, queued_msg)
+                        )
+                        return
 
             # 세션 정보 조회
             session_info = self.sessions.get_session_info(user_id, target_session_id)

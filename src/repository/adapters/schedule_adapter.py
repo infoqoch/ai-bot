@@ -29,6 +29,11 @@ class ScheduleData:
     last_error: Optional[str]
     run_count: int
 
+    @property
+    def time_str(self) -> str:
+        """Return formatted time string HH:MM."""
+        return f"{self.hour:02d}:{self.minute:02d}"
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
