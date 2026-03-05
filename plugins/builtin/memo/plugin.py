@@ -1,10 +1,6 @@
 """메모 플러그인 - 버튼 기반 단일 진입점."""
 
-import json
 import re
-from datetime import datetime
-from pathlib import Path
-from typing import Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 
@@ -21,13 +17,10 @@ class MemoPlugin(Plugin):
         "<code>메모</code> 또는 <code>/memo</code> 입력"
     )
 
-    # callback_data 접두사
     CALLBACK_PREFIX = "memo:"
 
-    # 트리거 - 단일 진입점만
     TRIGGER_KEYWORDS = ["메모", "memo"]
 
-    # 제외 패턴 - AI에게 넘겨야 하는 경우
     EXCLUDE_PATTERNS = [
         r"(란|이란|가|이)\s*(뭐|무엇|뭔)",
         r"영어로|번역|translate",
@@ -36,15 +29,13 @@ class MemoPlugin(Plugin):
     ]
 
     async def can_handle(self, message: str, chat_id: int) -> bool:
-        """메모 관련 메시지인지 확인 - 단일 키워드만."""
+        """메모 관련 메시지인지 확인."""
         msg = message.strip().lower()
 
-        # 제외 패턴 체크
         for pattern in self.EXCLUDE_PATTERNS:
             if re.search(pattern, msg, re.IGNORECASE):
                 return False
 
-        # 정확히 키워드만
         for keyword in self.TRIGGER_KEYWORDS:
             if msg == keyword:
                 return True
@@ -59,8 +50,6 @@ class MemoPlugin(Plugin):
             response=result["text"],
             reply_markup=result.get("reply_markup")
         )
-
-    # ==================== Callback 처리 ====================
 
     def handle_callback(self, callback_data: str, chat_id: int) -> dict:
         """callback_data 처리."""
@@ -89,8 +78,7 @@ class MemoPlugin(Plugin):
 
     def _handle_main(self, chat_id: int) -> dict:
         """메인 메뉴."""
-        memos = self._load_memos(chat_id)
-        count = len(memos)
+        memos = self.repository.list_memos(chat_id)
 
         buttons = [
             [
@@ -100,14 +88,14 @@ class MemoPlugin(Plugin):
         ]
 
         return {
-            "text": f"📝 <b>메모</b>\n\n저장된 메모: {count}개",
+            "text": f"📝 <b>메모</b>\n\n저장된 메모: {len(memos)}개",
             "reply_markup": InlineKeyboardMarkup(buttons),
             "edit": True,
         }
 
     def _handle_list(self, chat_id: int) -> dict:
         """메모 목록."""
-        memos = self._load_memos(chat_id)
+        memos = self.repository.list_memos(chat_id)
 
         if not memos:
             buttons = [
@@ -124,14 +112,14 @@ class MemoPlugin(Plugin):
         buttons = []
 
         for memo in memos:
-            created = memo.get("created_at", "")[:10]
-            content_preview = memo['content'][:30] + "..." if len(memo['content']) > 30 else memo['content']
-            lines.append(f"<b>#{memo['id']}</b> {memo['content']}\n<i>{created}</i>")
+            created = memo.created_at[:10]
+            content_preview = memo.content[:30] + "..." if len(memo.content) > 30 else memo.content
+            lines.append(f"<b>#{memo.id}</b> {memo.content}\n<i>{created}</i>")
 
             buttons.append([
                 InlineKeyboardButton(
-                    f"🗑️ #{memo['id']} {content_preview[:15]}",
-                    callback_data=f"memo:del:{memo['id']}"
+                    f"🗑️ #{memo.id} {content_preview[:15]}",
+                    callback_data=f"memo:del:{memo.id}"
                 )
             ])
 
@@ -163,10 +151,9 @@ class MemoPlugin(Plugin):
 
     def _handle_delete(self, chat_id: int, memo_id: int) -> dict:
         """삭제 확인."""
-        memos = self._load_memos(chat_id)
-        target = next((m for m in memos if m["id"] == memo_id), None)
+        memo = self.repository.get_memo(memo_id)
 
-        if not target:
+        if not memo:
             return {"text": f"❌ 메모 #{memo_id}을(를) 찾을 수 없습니다.", "edit": True}
 
         keyboard = [
@@ -177,26 +164,24 @@ class MemoPlugin(Plugin):
         ]
 
         return {
-            "text": f"🗑️ <b>삭제 확인</b>\n\n<b>#{target['id']}</b> {target['content']}\n\n정말 삭제?",
+            "text": f"🗑️ <b>삭제 확인</b>\n\n<b>#{memo.id}</b> {memo.content}\n\n정말 삭제?",
             "reply_markup": InlineKeyboardMarkup(keyboard),
             "edit": True,
         }
 
     def _handle_confirm_delete(self, chat_id: int, memo_id: int) -> dict:
         """삭제 실행."""
-        memos = self._load_memos(chat_id)
-        target = next((m for m in memos if m["id"] == memo_id), None)
+        memo = self.repository.get_memo(memo_id)
 
-        if not target:
+        if not memo:
             return {"text": f"❌ 메모 #{memo_id}을(를) 찾을 수 없습니다.", "edit": True}
 
-        self._delete_memo(chat_id, memo_id)
+        content = memo.content
+        self.repository.delete_memo(memo_id)
 
         result = self._handle_list(chat_id)
-        result["text"] = f"🗑️ 삭제됨: <s>{target['content'][:20]}</s>\n\n" + result["text"]
+        result["text"] = f"🗑️ 삭제됨: <s>{content[:20]}</s>\n\n" + result["text"]
         return result
-
-    # ==================== ForceReply 처리 ====================
 
     def handle_force_reply(self, message: str, chat_id: int) -> dict:
         """ForceReply 응답 처리 - 메모 추가."""
@@ -210,7 +195,7 @@ class MemoPlugin(Plugin):
                 ]]),
             }
 
-        memo = self._add_memo(chat_id, content)
+        memo = self.repository.add_memo(chat_id, content)
 
         keyboard = [
             [
@@ -220,74 +205,6 @@ class MemoPlugin(Plugin):
         ]
 
         return {
-            "text": f"✅ 메모 저장됨!\n\n<b>#{memo['id']}</b> {content}",
+            "text": f"✅ 메모 저장됨!\n\n<b>#{memo.id}</b> {content}",
             "reply_markup": InlineKeyboardMarkup(keyboard),
         }
-
-    # ==================== 유틸리티 ====================
-
-    def _get_memo_file(self, chat_id: int) -> Path:
-        """메모 파일 경로 (레거시 지원)."""
-        data_dir = self.get_data_dir(self._base_dir)
-        return data_dir / f"{chat_id}.json"
-
-    def _load_memos(self, chat_id: int) -> list[dict]:
-        """메모 로드 - Repository 우선, 폴백으로 JSON."""
-        # Repository 사용 가능하면 사용
-        if self.repository:
-            memos = self.repository.list_memos(chat_id)
-            return [{"id": m.id, "content": m.content, "created_at": m.created_at} for m in memos]
-
-        # 레거시 JSON 폴백
-        memo_file = self._get_memo_file(chat_id)
-        if not memo_file.exists():
-            return []
-        try:
-            return json.loads(memo_file.read_text(encoding="utf-8"))
-        except Exception:
-            return []
-
-    def _save_memos(self, chat_id: int, memos: list[dict]) -> None:
-        """메모 저장 - Repository 사용 시 무시됨 (개별 add/delete 사용)."""
-        # Repository 사용 시에는 이 메서드 호출 안됨
-        if self.repository:
-            return
-
-        # 레거시 JSON 폴백
-        memo_file = self._get_memo_file(chat_id)
-        memo_file.write_text(
-            json.dumps(memos, ensure_ascii=False, indent=2),
-            encoding="utf-8"
-        )
-
-    def _add_memo(self, chat_id: int, content: str) -> dict:
-        """메모 추가."""
-        if self.repository:
-            memo = self.repository.add_memo(chat_id, content)
-            return {"id": memo.id, "content": memo.content, "created_at": memo.created_at}
-
-        # 레거시
-        memos = self._load_memos(chat_id)
-        new_id = max([m["id"] for m in memos], default=0) + 1
-        memo = {
-            "id": new_id,
-            "content": content,
-            "created_at": datetime.now().isoformat(),
-        }
-        memos.append(memo)
-        self._save_memos(chat_id, memos)
-        return memo
-
-    def _delete_memo(self, chat_id: int, memo_id: int) -> bool:
-        """메모 삭제."""
-        if self.repository:
-            return self.repository.delete_memo(memo_id)
-
-        # 레거시
-        memos = self._load_memos(chat_id)
-        for i, memo in enumerate(memos):
-            if memo["id"] == memo_id:
-                memos.pop(i)
-                self._save_memos(chat_id, memos)
-                return True
-        return False

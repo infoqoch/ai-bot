@@ -5,7 +5,6 @@
 """
 
 import atexit
-import fcntl
 import os
 import signal
 import subprocess
@@ -18,18 +17,18 @@ import httpx
 from dotenv import load_dotenv
 
 from src.logging_config import logger, setup_logging
+from src.lock import ProcessLock
 
 # .env 파일 로드 (supervisor는 별도 프로세스라 직접 로드 필요)
 load_dotenv()
 
 # 상수
-LOCK_FILE = Path("/tmp/telegram-bot-supervisor.lock")
 MAX_RESTART_DELAY = 300  # 최대 5분
 INITIAL_RESTART_DELAY = 5  # 초기 5초
 CRASH_RESET_TIME = 60  # 60초 이상 정상 실행 시 딜레이 리셋
 
 # 전역 상태
-_lock_fd = None
+_process_lock = ProcessLock(Path("/tmp/telegram-bot-supervisor.lock"))
 _child_process = None
 _shutdown_requested = False
 _telegram_token = None
@@ -82,41 +81,6 @@ def notify_admin(message: str) -> bool:
     except Exception as e:
         logger.warning(f"관리자 알림 오류: {e}")
         return False
-
-
-def acquire_lock() -> bool:
-    """Supervisor 싱글톤 락 획득."""
-    global _lock_fd
-    logger.trace(f"acquire_lock() - file={LOCK_FILE}")
-
-    try:
-        _lock_fd = open(LOCK_FILE, "w")
-        fcntl.flock(_lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        _lock_fd.write(str(os.getpid()))
-        _lock_fd.flush()
-        logger.trace("락 획득 성공")
-        return True
-    except (IOError, OSError) as e:
-        logger.trace(f"락 획득 실패: {e}")
-        if _lock_fd:
-            _lock_fd.close()
-        return False
-
-
-def release_lock():
-    """락 해제."""
-    global _lock_fd
-    logger.trace("release_lock()")
-
-    if _lock_fd:
-        try:
-            fcntl.flock(_lock_fd.fileno(), fcntl.LOCK_UN)
-            _lock_fd.close()
-            LOCK_FILE.unlink(missing_ok=True)
-            logger.trace("락 해제 완료")
-        except Exception as e:
-            logger.trace(f"락 해제 오류: {e}")
-        _lock_fd = None
 
 
 def signal_handler(signum, frame):
@@ -185,11 +149,11 @@ def main():
     _load_telegram_config()
 
     # 싱글톤 락
-    if not acquire_lock():
+    if not _process_lock.acquire():
         print("❌ Supervisor가 이미 실행 중입니다.", file=sys.stderr)
         sys.exit(1)
 
-    atexit.register(release_lock)
+    atexit.register(_process_lock.release)
     logger.trace("종료 핸들러 등록됨")
 
     # 시그널 핸들러 등록
