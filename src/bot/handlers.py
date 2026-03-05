@@ -244,39 +244,6 @@ class BotHandlers:
         logger.trace(f"인증 체크 결과: {result}")
         return result
 
-    def _build_manager_context(self, user_id: str, message: str) -> str:
-        """매니저 세션용 컨텍스트 메시지 생성 (세션 목록 + 프로젝트 목록 + 파일 경로 힌트)."""
-        from src.config import get_settings
-
-        sessions_summary = self.sessions.get_all_sessions_summary(user_id)
-
-        # Claude 세션 파일 경로 힌트 (시스템 독립적)
-        project_path = Path.cwd().as_posix().replace("/", "-")[1:]
-        claude_sessions_dir = f"~/.claude/projects/{project_path}/"
-
-        # 허용된 프로젝트 디렉토리 목록
-        settings = get_settings()
-        available_projects = settings.list_available_projects()
-        if available_projects:
-            project_lines = []
-            for i, p in enumerate(available_projects, 1):
-                status = "✅" if p["has_claude"] else "⚠️"
-                project_lines.append(f"{i}. {status} {p['name']} ({p['path']})")
-            projects_summary = "\n".join(project_lines)
-        else:
-            projects_summary = "(허용된 프로젝트 없음)"
-
-        return (
-            f"{MANAGER_SYSTEM_PROMPT}\n\n"
-            f"[Claude 세션 파일 경로]\n"
-            f"{claude_sessions_dir}{{session_id}}.jsonl\n"
-            f"(세션 분석 요청 시 해당 파일을 읽어 대화 내용 확인 가능)\n\n"
-            f"[현재 세션 목록]\n{sessions_summary}\n\n"
-            f"[허용된 프로젝트 디렉토리]\n{projects_summary}\n"
-            f"(프로젝트 세션 생성 시 위 목록에서 선택하거나 전체 경로 사용)\n\n"
-            f"[사용자 요청]\n{message}"
-        )
-
     # ==================== 정보 명령어 ====================
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1550,89 +1517,6 @@ class BotHandlers:
     # ==================== 매니저 명령어 ====================
 
     @authorized_only
-    @authenticated_only
-    async def manager_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /m command - manager session.
-
-        Usage:
-            /m              - 매니저 세션으로 전환
-            /m 질문         - 원샷 질문 (현재 세션 유지)
-        """
-        chat_id = update.effective_chat.id
-        user_id = str(chat_id)
-        trace_id = self._setup_request_context(chat_id)
-        logger.info("/m 명령 수신")
-
-        # 매니저 세션 확인/생성 (기존 haiku/sonnet이면 opus로 재생성)
-        manager_session_id = self.sessions.get_manager_session_id(user_id)
-        manager_model = self.sessions.get_session_model(user_id, manager_session_id) if manager_session_id else None
-
-        if not manager_session_id or manager_model in ("haiku", "sonnet"):
-            if manager_session_id:
-                logger.info(f"기존 매니저 세션({manager_model}) 삭제 후 opus로 재생성")
-                self.sessions.hard_delete_session(user_id, manager_session_id)
-            logger.info("매니저 세션 생성 중... (opus)")
-            await update.message.reply_text("📋 매니저 세션 생성 중... (🧠 Opus)")
-            manager_session_id = await self.claude.create_session()
-            if not manager_session_id:
-                await update.message.reply_text("❌ 매니저 세션 생성 실패")
-                clear_context()
-                return
-            self.sessions.create_manager_session(user_id, manager_session_id)
-
-        # 원샷 모드: /m 질문
-        if context.args:
-            message = " ".join(context.args)
-            logger.info(f"매니저 원샷 질문: {message[:50]}")
-
-            # 세션 컨텍스트 + 파일 경로 힌트 주입
-            full_message = self._build_manager_context(user_id, message)
-
-            await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-
-            response, error, _ = await self.claude.chat(full_message, manager_session_id, model="opus")
-            if error:
-                await update.message.reply_text(f"❌ 오류: {error}")
-            else:
-                # ACTION 패턴 처리
-                action_results = await self._process_manager_actions(
-                    user_id, manager_session_id, response
-                )
-
-                # ACTION 태그 제거
-                response = remove_action_tags(response)
-
-                # 액션 결과 추가
-                if action_results:
-                    response += "\n\n📋 <b>실행 결과</b>\n" + "\n".join(action_results)
-
-                await update.message.reply_text(
-                    f"📋 <b>Manager</b>\n\n{response}",
-                    parse_mode="HTML"
-                )
-            clear_context()
-            return
-
-        # 전환 모드: /m
-        current_session_id = self.sessions.get_current_session_id(user_id)
-        if current_session_id and current_session_id != manager_session_id:
-            self.sessions.set_previous_session_id(user_id, current_session_id)
-
-        self.sessions.set_current(user_id, manager_session_id)
-        set_session_id(manager_session_id)
-
-        await update.message.reply_text(
-            "📋 <b>매니저 모드</b>\n\n"
-            "세션 관리를 도와드릴게요.\n"
-            "• 세션 검색/정리/추천\n"
-            "• 작업 요약\n\n"
-            "/back - 이전 세션으로\n"
-            "/exit - 매니저 종료",
-            parse_mode="HTML"
-        )
-        logger.info(f"매니저 모드 전환됨")
-        clear_context()
-
     @authorized_only
     async def back_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /back command - return to previous session."""
@@ -1669,45 +1553,6 @@ class BotHandlers:
             f"• ID: <code>{prev_session_id[:8]}</code>{name_display}",
             parse_mode="HTML"
         )
-        clear_context()
-
-    @authorized_only
-    async def exit_manager_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /exit command - exit manager mode."""
-        chat_id = update.effective_chat.id
-        user_id = str(chat_id)
-        self._setup_request_context(chat_id)
-        logger.info("/exit 명령 수신")
-
-        # 매니저 세션인지 확인
-        current_session_id = self.sessions.get_current_session_id(user_id)
-        manager_session_id = self.sessions.get_manager_session_id(user_id)
-
-        if current_session_id != manager_session_id:
-            await update.message.reply_text("ℹ️ 매니저 모드가 아닙니다.")
-            clear_context()
-            return
-
-        # 이전 세션 또는 current 해제
-        prev_session_id = self.sessions.get_previous_session_id(user_id)
-        if prev_session_id:
-            self.sessions.set_current(user_id, prev_session_id)
-            self.sessions.set_previous_session_id(user_id, None)
-            name = self.sessions.get_session_name(user_id, prev_session_id)
-            name_display = f" ({name})" if name else ""
-            await update.message.reply_text(
-                f"✅ 매니저 종료, 세션 복귀!\n\n"
-                f"• ID: <code>{prev_session_id[:8]}</code>{name_display}",
-                parse_mode="HTML"
-            )
-        else:
-            self.sessions.clear_current(user_id)
-            await update.message.reply_text(
-                "✅ 매니저 종료!\n\n"
-                "/new 새 세션 시작\n"
-                "/session_list 세션 목록"
-            )
-
         clear_context()
 
     # ==================== /ai 명령어 ====================
@@ -2156,20 +2001,10 @@ class BotHandlers:
         logger.info(f"===== 사용자 질문 (END) =====")
 
         try:
-            # 매니저 세션인지 확인
-            manager_session_id = self.sessions.get_manager_session_id(user_id)
-            is_manager = session_id == manager_session_id
-
             # 프로젝트 세션 경로 가져오기
             project_path = self.sessions.get_session_project_path(user_id, session_id)
             if project_path:
                 logger.trace(f"프로젝트 세션 - project_path={project_path}")
-
-            # 매니저 세션이면 세션 정보 + 파일 경로 힌트 주입
-            actual_message = message
-            if is_manager:
-                actual_message = self._build_manager_context(user_id, message)
-                logger.trace("매니저 세션 - 세션 정보 + 파일 경로 힌트 주입됨")
 
             # 장시간 작업 알림 태스크
             long_task_notified = False
@@ -2194,7 +2029,7 @@ class BotHandlers:
             # Claude 호출
             logger.trace(f"claude.chat() 호출 - model={model}")
             try:
-                response, error, _ = await self.claude.chat(actual_message, session_id, model=model, project_path=project_path or None)
+                response, error, _ = await self.claude.chat(message, session_id, model=model, project_path=project_path or None)
             finally:
                 # Claude 완료 시 알림 태스크 취소
                 notify_task.cancel()
@@ -2236,27 +2071,10 @@ class BotHandlers:
                 logger.error(f"  error: {error}")
                 logger.error(f"  session_id: {session_id[:8]}")
                 logger.error(f"  model: {model}")
-                logger.error(f"  is_manager: {is_manager}")
                 logger.error(f"  is_new_session: {is_new_session}")
-                logger.error(f"  actual_message preview: {actual_message[:200]}")
+                logger.error(f"  message preview: {message[:200]}")
                 logger.error(f"  project_path: {project_path}")
                 response = f"⚠️ <code>{short_message}</code>\n응답이 비어있습니다. 다시 시도해주세요."
-
-            # ACTION 패턴 처리 (매니저 세션)
-            action_results = []
-            if is_manager and response:
-                action_results = await self._process_manager_actions(
-                    user_id, session_id, response
-                )
-
-                # ACTION 태그 제거 (사용자에게는 깔끔하게 표시)
-                response = remove_action_tags(response)
-
-                # 액션 결과 추가
-                if action_results:
-                    response += "\n\n📋 <b>실행 결과</b>\n" + "\n".join(action_results)
-
-                # 매니저 세션 compact는 21:00 스케줄러가 자동 처리 (trim 제거됨)
 
             # 세션 정보 prefix 추가
             session_info = self.sessions.get_session_info(user_id, session_id)
@@ -2266,16 +2084,12 @@ class BotHandlers:
             # 질문 미리보기 (최대 30자)
             question_preview = truncate_message(message, 30)
 
-            if is_manager:
-                prefix = f"📋 <b>[Manager|#{history_count}]</b>\n💬 <code>{question_preview}</code>\n\n"
-                suffix = "\n\n/back 이전세션 | /exit 종료"
-            else:
-                prefix = f"<b>[{session_info}|#{history_count}]</b>\n💬 <code>{question_preview}</code>\n\n"
-                suffix = (
-                    f"\n\n"
-                    f"/s_{session_short_id} 세션이동\n"
-                    f"/h_{session_short_id} 히스토리"
-                )
+            prefix = f"<b>[{session_info}|#{history_count}]</b>\n💬 <code>{question_preview}</code>\n\n"
+            suffix = (
+                f"\n\n"
+                f"/s_{session_short_id} 세션이동\n"
+                f"/h_{session_short_id} 히스토리"
+            )
 
             full_response = prefix + response + suffix
             logger.trace(f"최종 응답 길이: {len(full_response)}")
@@ -2301,206 +2115,6 @@ class BotHandlers:
                 chat_id=chat_id,
                 text="❌ 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
             )
-
-    async def _process_manager_actions(
-        self, user_id: str, session_id: str, response: str
-    ) -> list[str]:
-        """매니저 응답에서 ACTION 패턴을 처리하고 결과 반환."""
-        action_results = []
-
-        # DELETE 액션 처리 (include_deleted=True로 soft-deleted 세션도 찾음)
-        for match in ACTION_DELETE_PATTERN.finditer(response):
-            target_id = match.group(1)
-            logger.info(f"ACTION:DELETE 감지 - target={target_id}")
-            target_info = self.sessions.get_session_by_prefix(user_id, target_id, include_deleted=True)
-            if target_info:
-                if self.sessions.hard_delete_session(user_id, target_info["full_session_id"]):
-                    action_results.append(f"✅ {target_id} 삭제됨")
-                    logger.info(f"ACTION:DELETE 성공 - {target_id}")
-                else:
-                    action_results.append(f"❌ {target_id} 삭제 실패")
-                    logger.warning(f"ACTION:DELETE 실패 - {target_id}")
-            else:
-                action_results.append(f"❌ {target_id} 찾을 수 없음")
-                logger.warning(f"ACTION:DELETE 세션 없음 - {target_id}")
-
-        # RENAME 액션 처리
-        for match in ACTION_RENAME_PATTERN.finditer(response):
-            target_id = match.group(1)
-            new_name = match.group(2).strip()
-            logger.info(f"ACTION:RENAME 감지 - target={target_id}, name={new_name}")
-            target_info = self.sessions.get_session_by_prefix(user_id, target_id, include_deleted=True)
-            if target_info:
-                if self.sessions.rename_session(user_id, target_info["full_session_id"], new_name):
-                    action_results.append(f"✅ {target_id} → {new_name}")
-                    logger.info(f"ACTION:RENAME 성공 - {target_id} -> {new_name}")
-                else:
-                    action_results.append(f"❌ {target_id} 이름 변경 실패")
-                    logger.warning(f"ACTION:RENAME 실패 - {target_id}")
-            else:
-                action_results.append(f"❌ {target_id} 찾을 수 없음")
-                logger.warning(f"ACTION:RENAME 세션 없음 - {target_id}")
-
-        # CREATE 액션 처리 (새 세션 생성 - 매니저 세션 유지)
-        for match in ACTION_CREATE_PATTERN.finditer(response):
-            model = match.group(1)
-            name = match.group(2).strip()
-            logger.info(f"ACTION:CREATE 감지 - model={model}, name={name}")
-            try:
-                new_session_id = await self.claude.create_session()
-                if new_session_id:
-                    # 세션 생성 (current 변경 없이)
-                    self.sessions.create_session_without_switch(user_id, new_session_id, f"(매니저가 생성: {name})", model=model, name=name)
-                    action_results.append(f"✅ 생성: {new_session_id[:8]} ({name}, {model})")
-                    logger.info(f"ACTION:CREATE 성공 - {new_session_id[:8]}, model={model}, name={name}")
-                else:
-                    action_results.append(f"❌ 세션 생성 실패")
-                    logger.warning(f"ACTION:CREATE 실패 - Claude 세션 생성 오류")
-            except Exception as e:
-                action_results.append(f"❌ 세션 생성 오류: {e}")
-                logger.error(f"ACTION:CREATE 예외 - {e}")
-
-        # CREATE_AND_SWITCH 액션 처리 (새 세션 생성 후 즉시 전환)
-        for match in ACTION_CREATE_SWITCH_PATTERN.finditer(response):
-            model = match.group(1)
-            name = match.group(2).strip()
-            logger.info(f"ACTION:CREATE_AND_SWITCH 감지 - model={model}, name={name}")
-            try:
-                new_session_id = await self.claude.create_session()
-                if new_session_id:
-                    # 세션 생성 후 즉시 전환
-                    self.sessions.create_session(user_id, new_session_id, f"(매니저가 생성: {name})", model=model, name=name)
-                    self.sessions.set_previous_session_id(user_id, session_id)  # 매니저를 이전 세션으로
-                    action_results.append(f"✅ 생성+전환: {new_session_id[:8]} ({name}, {model})")
-                    logger.info(f"ACTION:CREATE_AND_SWITCH 성공 - {new_session_id[:8]}, model={model}, name={name}")
-                else:
-                    action_results.append(f"❌ 세션 생성 실패")
-                    logger.warning(f"ACTION:CREATE_AND_SWITCH 실패 - Claude 세션 생성 오류")
-            except Exception as e:
-                action_results.append(f"❌ 세션 생성 오류: {e}")
-                logger.error(f"ACTION:CREATE_AND_SWITCH 예외 - {e}")
-
-        # CREATE_PROJECT 액션 처리 (프로젝트 세션 생성 후 전환)
-        for match in ACTION_CREATE_PROJECT_PATTERN.finditer(response):
-            model = match.group(1)
-            project_path = match.group(2).strip()
-            name = match.group(3).strip()
-            logger.info(f"ACTION:CREATE_PROJECT 감지 - model={model}, path={project_path}, name={name}")
-
-            # 경로 검증
-            from src.config import get_settings
-            from pathlib import Path
-            settings = get_settings()
-            is_valid, error_msg = settings.validate_project_path(project_path)
-
-            if not is_valid:
-                action_results.append(f"❌ 프로젝트 경로 오류: {error_msg}")
-                logger.warning(f"ACTION:CREATE_PROJECT 실패 - {error_msg}")
-                continue
-
-            try:
-                expanded_path = str(Path(project_path).expanduser().resolve())
-                # 프로젝트 세션은 해당 디렉토리에서 생성해야 함
-                new_session_id = await self.claude.create_session(project_path=expanded_path)
-                if new_session_id:
-                    project_name = Path(expanded_path).name
-                    display_name = name or f"📁{project_name}"
-
-                    # 세션 생성 후 즉시 전환
-                    self.sessions.create_session(
-                        user_id, new_session_id, f"(프로젝트: {project_name})",
-                        model=model, name=display_name, project_path=expanded_path
-                    )
-                    self.sessions.set_previous_session_id(user_id, session_id)
-                    action_results.append(f"✅ 프로젝트 세션: {new_session_id[:8]} ({display_name})")
-                    logger.info(f"ACTION:CREATE_PROJECT 성공 - {new_session_id[:8]}, path={expanded_path}")
-                else:
-                    action_results.append(f"❌ 프로젝트 세션 생성 실패")
-                    logger.warning(f"ACTION:CREATE_PROJECT 실패 - Claude 세션 생성 오류")
-            except Exception as e:
-                action_results.append(f"❌ 프로젝트 세션 오류: {e}")
-                logger.error(f"ACTION:CREATE_PROJECT 예외 - {e}")
-
-        # SWITCH 액션 처리 (세션 전환)
-        for match in ACTION_SWITCH_PATTERN.finditer(response):
-            target_id = match.group(1)
-            logger.info(f"ACTION:SWITCH 감지 - target={target_id}")
-            target_info = self.sessions.get_session_by_prefix(user_id, target_id)
-            if target_info:
-                self.sessions.set_current(user_id, target_info["full_session_id"])
-                self.sessions.set_previous_session_id(user_id, session_id)  # 매니저를 이전 세션으로
-                action_results.append(f"✅ 전환됨: {target_id}")
-                logger.info(f"ACTION:SWITCH 성공 - {target_id}")
-            else:
-                action_results.append(f"❌ {target_id} 찾을 수 없음")
-                logger.warning(f"ACTION:SWITCH 세션 없음 - {target_id}")
-
-        # SCHEDULE 액션 처리 (스케줄 등록)
-        schedule_pattern = re.compile(r'\[ACTION:SCHEDULE:([^:]+):(\d{1,2}):([^\]]+)\]')
-        for match in schedule_pattern.finditer(response):
-            target_session_id = match.group(1)
-            hour = int(match.group(2))
-            message = match.group(3)
-            logger.info(f"ACTION:SCHEDULE 감지 - session={target_session_id}, hour={hour}")
-
-            if not self._session_schedule_manager:
-                action_results.append("❌ 스케줄 기능 비활성화")
-                continue
-
-            # 세션 찾기
-            target_info = self.sessions.get_session_by_prefix(user_id, target_session_id)
-            if not target_info:
-                action_results.append(f"❌ 세션 {target_session_id} 찾을 수 없음")
-                continue
-
-            session_name = target_info.get("name") or target_info.get("summary", "")[:15] or target_session_id
-            schedule = self._session_schedule_manager.add(
-                user_id=user_id,
-                chat_id=int(user_id),
-                session_id=target_info["full_session_id"],
-                session_name=session_name,
-                hour=hour,
-                minute=0,
-                message=message,
-            )
-            action_results.append(f"✅ 스케줄 등록: {schedule.time_str} → {session_name}")
-            logger.info(f"ACTION:SCHEDULE 성공 - {schedule.id}")
-
-        # SCHEDULE_LIST 액션 처리
-        if "[ACTION:SCHEDULE_LIST]" in response:
-            logger.info("ACTION:SCHEDULE_LIST 감지")
-            if self._session_schedule_manager:
-                schedules = self._session_schedule_manager.list_by_user(user_id)
-                if schedules:
-                    lines = ["📅 <b>등록된 스케줄</b>"]
-                    for s in sorted(schedules, key=lambda x: (x.hour, x.minute)):
-                        status = "✅" if s.enabled else "⏸"
-                        lines.append(f"{status} {s.time_str} → {s.session_name} (ID: {s.id})")
-                        lines.append(f"   💬 {s.message[:30]}...")
-                    action_results.append("\n".join(lines))
-                else:
-                    action_results.append("📅 등록된 스케줄 없음")
-            else:
-                action_results.append("❌ 스케줄 기능 비활성화")
-
-        # SCHEDULE_DELETE 액션 처리
-        schedule_delete_pattern = re.compile(r'\[ACTION:SCHEDULE_DELETE:([^\]]+)\]')
-        for match in schedule_delete_pattern.finditer(response):
-            schedule_id = match.group(1)
-            logger.info(f"ACTION:SCHEDULE_DELETE 감지 - id={schedule_id}")
-
-            if not self._session_schedule_manager:
-                action_results.append("❌ 스케줄 기능 비활성화")
-                continue
-
-            if self._session_schedule_manager.remove(schedule_id):
-                action_results.append(f"✅ 스케줄 삭제됨: {schedule_id}")
-                logger.info(f"ACTION:SCHEDULE_DELETE 성공 - {schedule_id}")
-            else:
-                action_results.append(f"❌ 스케줄 {schedule_id} 찾을 수 없음")
-                logger.warning(f"ACTION:SCHEDULE_DELETE 실패 - {schedule_id}")
-
-        return action_results
 
     async def _show_session_selection_ui(
         self,
