@@ -38,7 +38,14 @@ class TodoScheduler:
             owner=self.OWNER,
         )
 
-        logger.info("Todo 스케줄러 설정 완료 - 어제 할일 리포트 (09:00)")
+        scheduler_manager.register_daily(
+            name="todo_daily_wrap",
+            callback=self._daily_wrap_callback,
+            time_of_day=time(21, 0, tzinfo=KST),
+            owner=self.OWNER,
+        )
+
+        logger.info("Todo 스케줄러 설정 완료 - 어제 리포트(09:00), 하루 마무리(21:00)")
 
     async def _yesterday_report_callback(self, context) -> None:
         """09:00 - 어제 할일 리포트."""
@@ -82,3 +89,48 @@ class TodoScheduler:
 
             except Exception as e:
                 logger.error(f"어제 할일 리포트 실패: chat_id={chat_id}, error={e}")
+
+    async def _daily_wrap_callback(self, context) -> None:
+        """21:00 - 하루 마무리."""
+        logger.info("하루 마무리 알림 시작")
+        today = date.today().isoformat()
+
+        for chat_id in self.chat_ids:
+            try:
+                stats = self.repository.get_todo_stats(chat_id, today)
+                if stats["total"] == 0:
+                    continue
+
+                lines = ["🌙 <b>하루 마무리</b>\n"]
+
+                if stats["pending"] == 0:
+                    lines.append("🎉 오늘 할일을 모두 완료했어요!")
+                else:
+                    lines.append(f"📊 오늘 진행률: {stats['done']}/{stats['total']} 완료\n")
+                    lines.append("<b>미완료 항목:</b>")
+
+                    pending = self.repository.get_pending_todos(chat_id, today)
+                    for todo in pending:
+                        lines.append(f"  ⬜ {todo.text}")
+
+                    lines.append("\n내일로 넘길 항목이 있나요?")
+
+                buttons = []
+                if stats["pending"] > 0:
+                    buttons.append([
+                        InlineKeyboardButton("📋 멀티 선택", callback_data="td:multi"),
+                    ])
+                buttons.append([
+                    InlineKeyboardButton("📄 리스트", callback_data="td:list"),
+                ])
+
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text="\n".join(lines),
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(buttons)
+                )
+                logger.info(f"하루 마무리 알림 전송: chat_id={chat_id}")
+
+            except Exception as e:
+                logger.error(f"하루 마무리 알림 실패: chat_id={chat_id}, error={e}")
