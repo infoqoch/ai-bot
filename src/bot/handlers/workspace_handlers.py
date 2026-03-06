@@ -144,6 +144,19 @@ class WorkspaceHandlers(BaseHandler):
                 await query.answer("Workspace not found")
                 return
 
+            # Prevent duplicate workspace sessions
+            existing = self.sessions.list_sessions(user_id)
+            for s in existing:
+                if s.get("workspace_path") == ws.path:
+                    self.sessions.switch_session(user_id, s["full_session_id"])
+                    await query.edit_message_text(
+                        f"이미 이 워크스페이스 세션이 있습니다.\n"
+                        f"기존 세션으로 전환했습니다: <b>{s.get('name', ws.name)}</b>",
+                        parse_mode="HTML"
+                    )
+                    await query.answer("Switched to existing session")
+                    return
+
             self._workspace_registry.mark_used(ws_id)
 
             session_id = await self.claude.create_session(workspace_path=ws.path)
