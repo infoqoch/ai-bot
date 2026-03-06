@@ -28,6 +28,22 @@ class HistoryEntry:
 
 
 @dataclass
+class QueuedMessage:
+    """Message queue entry."""
+    id: int
+    chat_id: int
+    session_id: str
+    model: str
+    workspace_path: Optional[str]
+    request: str
+    request_at: str
+    processed: int  # 0: pending, 1: processing, 2: completed
+    processed_at: Optional[str]
+    response: Optional[str]
+    error: Optional[str]
+
+
+@dataclass
 class SessionData:
     """Session data."""
     id: str
@@ -1141,3 +1157,105 @@ class Repository:
             locations
         )
         self._conn.commit()
+
+    # ========== Message Queue Operations ==========
+
+    def enqueue_message(
+        self,
+        chat_id: int,
+        session_id: str,
+        request: str,
+        model: str = "sonnet",
+        workspace_path: Optional[str] = None
+    ) -> int:
+        """Add message to queue. Returns queue entry ID."""
+        cursor = self._conn.execute(
+            """INSERT INTO message_queue (chat_id, session_id, model, workspace_path, request, request_at, processed)
+               VALUES (?, ?, ?, ?, ?, ?, 0)""",
+            (chat_id, session_id, model, workspace_path, request, self._now())
+        )
+        self._conn.commit()
+        return cursor.lastrowid or 0
+
+    def get_next_pending_message(self, chat_id: int) -> Optional[dict[str, Any]]:
+        """Get next unprocessed message for chat. Returns None if queue empty."""
+        cursor = self._conn.execute(
+            """SELECT * FROM message_queue
+               WHERE chat_id = ? AND processed = 0
+               ORDER BY id ASC LIMIT 1""",
+            (chat_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return dict(row)
+
+    def claim_message(self, queue_id: int) -> bool:
+        """Mark message as processing (processed=1). Returns True if claimed."""
+        cursor = self._conn.execute(
+            """UPDATE message_queue SET processed = 1
+               WHERE id = ? AND processed = 0""",
+            (queue_id,)
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def complete_message(
+        self,
+        queue_id: int,
+        response: Optional[str] = None,
+        error: Optional[str] = None
+    ) -> bool:
+        """Mark message as completed with response or error."""
+        cursor = self._conn.execute(
+            """UPDATE message_queue
+               SET processed = 2, processed_at = ?, response = ?, error = ?
+               WHERE id = ?""",
+            (self._now(), response, error, queue_id)
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def get_pending_message_count(self, chat_id: int) -> int:
+        """Get count of pending messages for chat."""
+        cursor = self._conn.execute(
+            "SELECT COUNT(*) FROM message_queue WHERE chat_id = ? AND processed = 0",
+            (chat_id,)
+        )
+        row = cursor.fetchone()
+        return row[0] if row else 0
+
+    def get_processing_message(self, chat_id: int) -> Optional[dict[str, Any]]:
+        """Get currently processing message for chat (processed=1)."""
+        cursor = self._conn.execute(
+            """SELECT * FROM message_queue
+               WHERE chat_id = ? AND processed = 1
+               ORDER BY id ASC LIMIT 1""",
+            (chat_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return dict(row)
+
+    def reset_stale_processing_messages(self, timeout_minutes: int = 30) -> int:
+        """Reset messages stuck in processing state back to pending."""
+        cursor = self._conn.execute(
+            """UPDATE message_queue SET processed = 0
+               WHERE processed = 1
+               AND datetime(request_at) < datetime('now', ?)""",
+            (f'-{timeout_minutes} minutes',)
+        )
+        self._conn.commit()
+        return cursor.rowcount
+
+    def cleanup_old_completed_messages(self, days: int = 7) -> int:
+        """Delete completed messages older than N days."""
+        cursor = self._conn.execute(
+            """DELETE FROM message_queue
+               WHERE processed = 2
+               AND datetime(processed_at) < datetime('now', ?)""",
+            (f'-{days} days',)
+        )
+        self._conn.commit()
+        return cursor.rowcount

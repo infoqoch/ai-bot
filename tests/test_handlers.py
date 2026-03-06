@@ -44,6 +44,15 @@ def mock_auth_manager():
 
 
 @pytest.fixture
+def mock_repository():
+    """모의 Repository."""
+    repo = MagicMock()
+    repo.enqueue_message.return_value = 1
+    repo.get_pending_message_count.return_value = 1
+    return repo
+
+
+@pytest.fixture
 def handlers(mock_session_service, mock_claude_client, mock_auth_manager):
     """테스트용 핸들러 생성."""
     return BotHandlers(
@@ -368,117 +377,61 @@ class TestHandleMessage:
     """handle_message 메서드 테스트 (Fire-and-Forget 패턴)."""
 
     @pytest.mark.asyncio
-    async def test_handle_message_creates_background_task(self, handlers, mock_session_service):
-        """백그라운드 태스크 생성 확인."""
+    async def test_handle_message_creates_background_task(self, handlers, mock_session_service, mock_repository):
+        """메시지가 큐에 저장되는지 확인."""
         update = MagicMock()
         update.effective_chat.id = 12345
         update.message.text = "안녕하세요"
         update.message.reply_text = AsyncMock()
         context = MagicMock()
-        context.bot.send_chat_action = AsyncMock()
         context.bot.send_message = AsyncMock()
 
         mock_session_service.get_current_session_id.return_value = "existing-session"
 
-        # 백그라운드 태스크를 실제로 실행 (경고 방지)
-        original_create_task = asyncio.create_task
-        created_tasks = []
-
-        def tracking_create_task(coro):
-            task = original_create_task(coro)
-            created_tasks.append(task)
-            return task
-
-        with patch("asyncio.create_task", side_effect=tracking_create_task):
+        with patch("src.bot.handlers.message_handlers.get_repository", return_value=mock_repository):
             await handlers.handle_message(update, context)
 
-            # create_task 호출 확인 (watchdog + 실제 태스크)
-            assert len(created_tasks) >= 1
-
-            # NOTE: send_chat_action("typing")은 타임아웃 원인으로 제거됨
-            # 더 이상 호출되지 않음
-
-            # 생성된 태스크들 정리 (경고 방지)
-            for task in created_tasks:
-                if not task.done():
-                    task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):
-                    pass
+            # 큐에 메시지 저장 확인
+            mock_repository.enqueue_message.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_handle_message_returns_immediately(self, handlers, mock_session_service):
-        """핸들러가 Claude 응답을 기다리지 않고 즉시 리턴."""
+    async def test_handle_message_returns_immediately(self, handlers, mock_session_service, mock_repository):
+        """핸들러가 큐에 저장 후 즉시 리턴."""
         update = MagicMock()
         update.effective_chat.id = 12345
         update.message.text = "질문"
+        update.message.reply_text = AsyncMock()
         context = MagicMock()
-        context.bot.send_chat_action = AsyncMock()
         context.bot.send_message = AsyncMock()
 
         mock_session_service.get_current_session_id.return_value = "session-123"
 
-        # 백그라운드 태스크를 실제로 실행 (경고 방지)
-        original_create_task = asyncio.create_task
-        created_tasks = []
-
-        def tracking_create_task(coro):
-            task = original_create_task(coro)
-            created_tasks.append(task)
-            return task
-
-        with patch("asyncio.create_task", side_effect=tracking_create_task):
+        with patch("src.bot.handlers.message_handlers.get_repository", return_value=mock_repository):
             await handlers.handle_message(update, context)
 
-            # create_task가 호출되어 백그라운드 실행 확인
-            assert len(created_tasks) >= 1
-
-            # 생성된 태스크들 정리 (경고 방지)
-            for task in created_tasks:
-                if not task.done():
-                    task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):
-                    pass
+            # 큐에 저장되었는지 확인 (백그라운드 처리 대신 큐 기반)
+            mock_repository.enqueue_message.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_handle_message_truncates_long_message(self, handlers, mock_session_service):
+    async def test_handle_message_truncates_long_message(self, handlers, mock_session_service, mock_repository):
         """긴 메시지는 MAX_MESSAGE_LENGTH로 자름."""
         update = MagicMock()
         update.effective_chat.id = 12345
         update.message.text = "A" * 5000  # MAX_MESSAGE_LENGTH(4096) 초과
         context = MagicMock()
-        context.bot.send_chat_action = AsyncMock()
         context.bot.send_message = AsyncMock()
 
         mock_session_service.get_current_session_id.return_value = "session-123"
 
-        # 백그라운드 태스크를 실제로 실행 (경고 방지)
-        original_create_task = asyncio.create_task
-        created_tasks = []
-
-        def tracking_create_task(coro):
-            task = original_create_task(coro)
-            created_tasks.append(task)
-            return task
-
-        with patch("asyncio.create_task", side_effect=tracking_create_task):
+        with patch("src.bot.handlers.message_handlers.get_repository", return_value=mock_repository):
             await handlers.handle_message(update, context)
 
-            # 생성된 태스크들 정리 (경고 방지)
-            for task in created_tasks:
-                if not task.done():
-                    task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):
-                    pass
+            # 큐에 저장 확인 (메시지 truncation은 큐 워커에서 처리)
+            mock_repository.enqueue_message.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_handle_message_new_session_creation(
-        self, handlers, mock_session_service, mock_claude_client
+        self, handlers, mock_session_service, mock_claude_client, mock_repository
     ):
         """세션이 없을 때 새 세션 생성."""
         update = MagicMock()
@@ -486,23 +439,13 @@ class TestHandleMessage:
         update.message.text = "첫 질문"
         update.message.reply_text = AsyncMock()
         context = MagicMock()
-        context.bot.send_chat_action = AsyncMock()
         context.bot.send_message = AsyncMock()
 
         # 세션 없음
         mock_session_service.get_current_session_id.return_value = None
         mock_claude_client.create_session = AsyncMock(return_value="new-session-123")
 
-        # 백그라운드 태스크를 실제로 실행 (경고 방지)
-        original_create_task = asyncio.create_task
-        created_tasks = []
-
-        def tracking_create_task(coro):
-            task = original_create_task(coro)
-            created_tasks.append(task)
-            return task
-
-        with patch("asyncio.create_task", side_effect=tracking_create_task):
+        with patch("src.bot.handlers.message_handlers.get_repository", return_value=mock_repository):
             await handlers.handle_message(update, context)
 
             # 새 세션 생성 확인
@@ -511,62 +454,42 @@ class TestHandleMessage:
                 "12345", "new-session-123", first_message="첫 질문"
             )
 
-            # 생성된 태스크들 정리 (경고 방지)
-            for task in created_tasks:
-                if not task.done():
-                    task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):
-                    pass
-
     @pytest.mark.asyncio
     async def test_handle_message_uses_existing_session(
-        self, handlers, mock_session_service, mock_claude_client
+        self, handlers, mock_session_service, mock_claude_client, mock_repository
     ):
         """기존 세션이 있으면 새로 생성하지 않음."""
         update = MagicMock()
         update.effective_chat.id = 12345
         update.message.text = "질문"
         context = MagicMock()
-        context.bot.send_chat_action = AsyncMock()
         context.bot.send_message = AsyncMock()
 
         # 기존 세션 존재
         mock_session_service.get_current_session_id.return_value = "existing-session"
 
-        # 백그라운드 태스크를 실제로 실행 (경고 방지)
-        original_create_task = asyncio.create_task
-        created_tasks = []
-
-        def tracking_create_task(coro):
-            task = original_create_task(coro)
-            created_tasks.append(task)
-            return task
-
-        with patch("asyncio.create_task", side_effect=tracking_create_task):
+        with patch("src.bot.handlers.message_handlers.get_repository", return_value=mock_repository):
             await handlers.handle_message(update, context)
 
             # 새 세션 생성하지 않음
             mock_claude_client.create_session.assert_not_called()
             mock_session_service.create_session.assert_not_called()
 
-            # 생성된 태스크들 정리 (경고 방지)
-            for task in created_tasks:
-                if not task.done():
-                    task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):
-                    pass
-
 
 class TestUserLock:
     """User Lock을 통한 Race Condition 방지 테스트."""
 
+    @pytest.fixture
+    def mock_repository(self):
+        """Repository mock fixture."""
+        repo = MagicMock()
+        repo.enqueue_message = MagicMock(return_value=1)
+        repo.get_pending_message_count = MagicMock(return_value=0)
+        return repo
+
     @pytest.mark.asyncio
     async def test_user_lock_prevents_race_condition(
-        self, handlers, mock_session_service, mock_claude_client
+        self, handlers, mock_session_service, mock_claude_client, mock_repository
     ):
         """세션 생성 중 두 번째 메시지는 블로킹됨."""
         update1 = MagicMock()
@@ -574,7 +497,6 @@ class TestUserLock:
         update1.message.text = "첫 번째 메시지"
         update1.message.reply_text = AsyncMock()
         context1 = MagicMock()
-        context1.bot.send_chat_action = AsyncMock()
         context1.bot.send_message = AsyncMock()
 
         update2 = MagicMock()
@@ -582,7 +504,6 @@ class TestUserLock:
         update2.message.text = "두 번째 메시지"
         update2.message.reply_text = AsyncMock()
         context2 = MagicMock()
-        context2.bot.send_chat_action = AsyncMock()
         context2.bot.send_message = AsyncMock()
 
         # 세션 없음 (새 세션 생성 케이스)
@@ -599,30 +520,12 @@ class TestUserLock:
 
         mock_claude_client.create_session = track_create_session
 
-        # 백그라운드 태스크를 실제로 실행 (경고 방지)
-        original_create_task = asyncio.create_task
-        created_tasks = []
-
-        def tracking_create_task(coro):
-            task = original_create_task(coro)
-            created_tasks.append(task)
-            return task
-
-        with patch("asyncio.create_task", side_effect=tracking_create_task):
+        with patch("src.bot.handlers.message_handlers.get_repository", return_value=mock_repository):
             # 동시에 두 메시지 처리
             await asyncio.gather(
                 handlers.handle_message(update1, context1),
                 handlers.handle_message(update2, context2),
             )
-
-            # 생성된 태스크들 정리 (경고 방지)
-            for task in created_tasks:
-                if not task.done():
-                    task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):
-                    pass
 
         # 세션 생성 중 블로킹으로 인해 create_session은 한 번만 호출됨
         # 두 번째 메시지는 "세션 준비 중" 메시지로 블로킹됨

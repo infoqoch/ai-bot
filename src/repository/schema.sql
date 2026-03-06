@@ -122,6 +122,33 @@ CREATE TABLE IF NOT EXISTS weather_locations (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Message queue table: request/response queue for sequential processing
+CREATE TABLE IF NOT EXISTS message_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    session_id TEXT NOT NULL,
+    model TEXT NOT NULL DEFAULT 'sonnet',
+    workspace_path TEXT,
+
+    -- 요청
+    request TEXT NOT NULL,
+    request_at TEXT NOT NULL DEFAULT (datetime('now')),
+
+    -- 처리 상태
+    processed INTEGER NOT NULL DEFAULT 0,  -- 0: 대기, 1: 처리중, 2: 완료
+    processed_at TEXT,
+
+    -- 응답
+    response TEXT,
+    error TEXT,
+
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_queue_chat_id ON message_queue(chat_id);
+CREATE INDEX IF NOT EXISTS idx_message_queue_processed ON message_queue(processed);
+CREATE INDEX IF NOT EXISTS idx_message_queue_request_at ON message_queue(request_at);
+
 -- Migration tracking table
 CREATE TABLE IF NOT EXISTS migrations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
