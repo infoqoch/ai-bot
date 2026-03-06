@@ -191,6 +191,7 @@ class WorkspaceRegistryAdapter:
             {
                 "path": w.path,
                 "name": w.name,
+                "description": w.description,
                 "reason": f"키워드 매칭: {', '.join(w.keywords)}" if w.keywords else w.description
             }
             for _, w in recommendations[:3]
