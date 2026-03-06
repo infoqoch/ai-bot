@@ -21,6 +21,14 @@ def init_repository(db_path: Path) -> Repository:
     global _repository
 
     conn = get_connection(db_path)
+
+    # message_queue → message_log 테이블명 변경 (기존 DB 호환)
+    try:
+        conn.execute("ALTER TABLE message_queue RENAME TO message_log")
+        conn.commit()
+    except Exception:
+        pass  # 이미 변경되었거나 테이블 없음
+
     schema_path = Path(__file__).parent / "schema.sql"
     init_schema(conn, schema_path)
 

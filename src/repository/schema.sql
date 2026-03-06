@@ -122,8 +122,8 @@ CREATE TABLE IF NOT EXISTS weather_locations (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Message queue table: request/response queue for sequential processing
-CREATE TABLE IF NOT EXISTS message_queue (
+-- Message log table: AI 메시지 요청/응답 기록
+CREATE TABLE IF NOT EXISTS message_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     chat_id INTEGER NOT NULL,
     session_id TEXT NOT NULL,
@@ -145,9 +145,9 @@ CREATE TABLE IF NOT EXISTS message_queue (
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_message_queue_chat_id ON message_queue(chat_id);
-CREATE INDEX IF NOT EXISTS idx_message_queue_processed ON message_queue(processed);
-CREATE INDEX IF NOT EXISTS idx_message_queue_request_at ON message_queue(request_at);
+CREATE INDEX IF NOT EXISTS idx_message_log_chat_id ON message_log(chat_id);
+CREATE INDEX IF NOT EXISTS idx_message_log_processed ON message_log(processed);
+CREATE INDEX IF NOT EXISTS idx_message_log_request_at ON message_log(request_at);
 
 -- Migration tracking table
 CREATE TABLE IF NOT EXISTS migrations (
