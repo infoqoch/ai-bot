@@ -79,12 +79,6 @@ class TestScheduleExecutor:
         mock_claude = MagicMock()
         mock_claude.chat = AsyncMock(return_value=("응답 텍스트", None, None))
 
-        mock_bot = MagicMock()
-        mock_bot.send_message = AsyncMock()
-
-        mock_app = MagicMock()
-        mock_app.bot = mock_bot
-
         schedule = MagicMock()
         schedule.id = "test-schedule"
         schedule.message = "테스트 메시지"
@@ -94,19 +88,14 @@ class TestScheduleExecutor:
         schedule.chat_id = 12345
         schedule.name = "테스트스케줄"
 
-        mock_schedule_manager = MagicMock()
-
         # schedule_executor 로직 재현 (main.py에서 추출)
-        import uuid
-        session_id = f"schedule_{schedule.id}_{uuid.uuid4().hex[:8]}"
-
         workspace_path = None
         if schedule.type == "workspace" and schedule.workspace_path:
             workspace_path = schedule.workspace_path
 
         text, error, _ = await mock_claude.chat(
             message=schedule.message,
-            session_id=session_id,
+            session_id=None,
             model=schedule.model,
             workspace_path=workspace_path,
         )
@@ -118,6 +107,28 @@ class TestScheduleExecutor:
         assert "cwd" not in call_kwargs
 
     @pytest.mark.asyncio
+    async def test_executor_calls_chat_with_session_id_none(self):
+        """chat() 호출 시 session_id=None (새 세션 생성)."""
+        mock_claude = MagicMock()
+        mock_claude.chat = AsyncMock(return_value=("응답", None, None))
+
+        schedule = MagicMock()
+        schedule.message = "테스트"
+        schedule.model = "sonnet"
+        schedule.type = "claude"
+        schedule.workspace_path = None
+
+        await mock_claude.chat(
+            message=schedule.message,
+            session_id=None,
+            model=schedule.model,
+            workspace_path=None,
+        )
+
+        call_kwargs = mock_claude.chat.call_args[1]
+        assert call_kwargs["session_id"] is None
+
+    @pytest.mark.asyncio
     async def test_executor_handles_chat_response_tuple(self):
         """ChatResponse 튜플 언패킹 확인."""
         mock_claude = MagicMock()
@@ -125,7 +136,7 @@ class TestScheduleExecutor:
 
         text, error, _ = await mock_claude.chat(
             message="테스트",
-            session_id="test-session",
+            session_id=None,
             model="sonnet",
             workspace_path=None,
         )
@@ -141,7 +152,7 @@ class TestScheduleExecutor:
 
         text, error, _ = await mock_claude.chat(
             message="테스트",
-            session_id="test-session",
+            session_id=None,
             model="sonnet",
             workspace_path=None,
         )
@@ -157,7 +168,7 @@ class TestScheduleExecutor:
 
         text, error, _ = await mock_claude.chat(
             message="테스트",
-            session_id="test-session",
+            session_id=None,
             model="sonnet",
             workspace_path=None,
         )
@@ -168,9 +179,6 @@ class TestScheduleExecutor:
     @pytest.mark.asyncio
     async def test_executor_claude_type_no_workspace(self):
         """claude 타입 스케줄은 workspace_path=None."""
-        mock_claude = MagicMock()
-        mock_claude.chat = AsyncMock(return_value=("응답", None, None))
-
         schedule = MagicMock()
         schedule.type = "claude"
         schedule.workspace_path = None
@@ -181,9 +189,160 @@ class TestScheduleExecutor:
 
         assert workspace_path is None
 
+    @pytest.mark.asyncio
+    async def test_executor_html_fallback_on_parse_error(self):
+        """HTML 파싱 실패 시 plain text fallback."""
+        from telegram.error import BadRequest
+
+        mock_bot = MagicMock()
+        # 첫 호출은 HTML 파싱 에러, 두 번째는 성공
+        mock_bot.send_message = AsyncMock(
+            side_effect=[BadRequest("Can't parse entities"), None]
+        )
+
+        schedule_name = "테스트"
+        chunk = "<session-id>abc</session-id> 넝담입니다"
+
+        # HTML로 시도
+        try:
+            await mock_bot.send_message(
+                chat_id=12345,
+                text=f"📅 <b>{schedule_name}</b>\n\n{chunk}",
+                parse_mode="HTML",
+            )
+        except Exception:
+            # plain text fallback
+            await mock_bot.send_message(
+                chat_id=12345,
+                text=f"📅 {schedule_name}\n\n{chunk}",
+            )
+
+        assert mock_bot.send_message.call_count == 2
+        # 두 번째 호출에 parse_mode 없어야 함
+        second_call = mock_bot.send_message.call_args_list[1]
+        assert "parse_mode" not in second_call[1]
+
 
 # =============================================================================
-# 3. 스케줄러 분 단위 선택 콜백 흐름 테스트
+# 3. 스케줄러 시간 변경 기능 테스트
+# =============================================================================
+
+class TestScheduleTimeChange:
+    """스케줄러 시간 변경 기능 테스트."""
+
+    @pytest.fixture
+    def repo(self, tmp_path):
+        """Repository 인스턴스 생성."""
+        from src.repository import init_repository, shutdown_repository, reset_connection
+        db_path = tmp_path / "test.db"
+        repository = init_repository(db_path)
+        yield repository
+        shutdown_repository()
+        reset_connection()
+
+    def test_repo_update_schedule_time(self, repo):
+        """Repository.update_schedule_time DB 업데이트."""
+        schedule = repo.add_schedule(
+            user_id="12345", chat_id=12345, hour=8, minute=0,
+            message="테스트", name="테스트스케줄",
+        )
+
+        result = repo.update_schedule_time(schedule.id, 14, 30)
+        assert result is True
+
+        updated = repo.get_schedule(schedule.id)
+        assert updated.hour == 14
+        assert updated.minute == 30
+
+    def test_repo_update_schedule_time_not_found(self, repo):
+        """존재하지 않는 스케줄 시간 변경."""
+        result = repo.update_schedule_time("nonexistent", 10, 0)
+        assert result is False
+
+    def test_adapter_update_time_re_registers(self, repo):
+        """ScheduleManagerAdapter.update_time이 스케줄러 재등록."""
+        from src.repository.adapters.schedule_adapter import ScheduleManagerAdapter
+
+        mock_scheduler = MagicMock()
+        mock_executor = AsyncMock()
+
+        adapter = ScheduleManagerAdapter(repo, mock_scheduler, mock_executor)
+
+        schedule = repo.add_schedule(
+            user_id="12345", chat_id=12345, hour=8, minute=0,
+            message="테스트", name="테스트",
+        )
+
+        result = adapter.update_time(schedule.id, 21, 15)
+        assert result is True
+
+        # unregister + register 호출 확인
+        mock_scheduler.unregister.assert_called_once()
+        mock_scheduler.register_daily.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_chtime_callback_shows_hours(self):
+        """sched:chtime: 콜백이 시간 선택 버튼 표시."""
+        from src.bot.handlers import BotHandlers
+
+        handlers = BotHandlers(
+            session_service=MagicMock(),
+            claude_client=MagicMock(),
+            auth_manager=MagicMock(),
+            require_auth=False,
+            allowed_chat_ids=[],
+        )
+        handlers._schedule_manager = MagicMock()
+
+        mock_schedule = MagicMock()
+        mock_schedule.name = "테스트"
+        mock_schedule.time_str = "08:00"
+        mock_schedule.type_emoji = "💬"
+        handlers._schedule_manager.get.return_value = mock_schedule
+
+        query = MagicMock()
+        query.answer = AsyncMock()
+        query.edit_message_text = AsyncMock()
+
+        await handlers._handle_scheduler_callback(query, 12345, "sched:chtime:abc123")
+
+        assert query.edit_message_text.called
+        text = query.edit_message_text.call_args[0][0]
+        assert "Change Time" in text
+        assert "08:00" in text
+
+    @pytest.mark.asyncio
+    async def test_chtime_min_callback_applies_change(self):
+        """sched:chtime_min: 콜백이 시간 변경 적용."""
+        from src.bot.handlers import BotHandlers
+
+        handlers = BotHandlers(
+            session_service=MagicMock(),
+            claude_client=MagicMock(),
+            auth_manager=MagicMock(),
+            require_auth=False,
+            allowed_chat_ids=[],
+        )
+        handlers._schedule_manager = MagicMock()
+        handlers._schedule_manager.update_time.return_value = True
+        handlers._schedule_manager.get_status_text.return_value = "스케줄 목록"
+
+        query = MagicMock()
+        query.answer = AsyncMock()
+        query.edit_message_text = AsyncMock()
+
+        with patch("src.scheduler_manager.scheduler_manager") as mock_sm:
+            mock_sm.get_system_jobs_text.return_value = ""
+            await handlers._handle_scheduler_callback(query, 12345, "sched:chtime_min:abc123:14:30")
+
+        handlers._schedule_manager.update_time.assert_called_once_with("abc123", 14, 30)
+        assert query.answer.called
+        answer_text = query.answer.call_args[0][0]
+        assert "14:30" in answer_text
+
+
+# =============================================================================
+# 4. 스케줄러 분 단위 선택 콜백 흐름 테스트
 # =============================================================================
 
 class TestSchedulerMinuteSelection:

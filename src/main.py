@@ -219,19 +219,15 @@ def create_app() -> Application:
         """Execute scheduled task."""
         from src.repository.repository import Schedule
         try:
-            # Create session for schedule
-            import uuid
-            session_id = f"schedule_{schedule.id}_{uuid.uuid4().hex[:8]}"
-
             # Determine workspace path
             workspace_path = None
             if schedule.type == "workspace" and schedule.workspace_path:
                 workspace_path = schedule.workspace_path
 
-            # Call Claude
+            # Call Claude (session_id=None → new session each time)
             text, error, _ = await claude_client.chat(
                 message=schedule.message,
-                session_id=session_id,
+                session_id=None,
                 model=schedule.model,
                 workspace_path=workspace_path,
             )

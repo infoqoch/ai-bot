@@ -613,6 +613,15 @@ class Repository:
         )
         self._conn.commit()
 
+    def update_schedule_time(self, schedule_id: str, hour: int, minute: int) -> bool:
+        """Update schedule time."""
+        cursor = self._conn.execute(
+            "UPDATE schedules SET hour = ?, minute = ? WHERE id = ?",
+            (hour, minute, schedule_id)
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
     def list_schedules_by_user(self, user_id: str) -> list[Schedule]:
         """List schedules for user."""
         cursor = self._conn.execute(

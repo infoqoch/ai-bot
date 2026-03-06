@@ -766,6 +766,95 @@ class CallbackHandlers(BaseHandler):
                 await query.answer("Delete failed")
             return
 
+        # Change time - hour selection
+        if action.startswith("chtime:"):
+            schedule_id = action[7:]
+            schedule = self._schedule_manager.get(schedule_id)
+            if not schedule:
+                await query.answer("Schedule not found")
+                return
+
+            buttons = []
+            row = []
+            for hour in AVAILABLE_HOURS:
+                row.append(InlineKeyboardButton(
+                    f"{hour:02d}시",
+                    callback_data=f"sched:chtime_hour:{schedule_id}:{hour}"
+                ))
+                if len(row) == 4:
+                    buttons.append(row)
+                    row = []
+            if row:
+                buttons.append(row)
+            buttons.append([
+                InlineKeyboardButton("Cancel", callback_data="sched:refresh")
+            ])
+
+            await query.edit_message_text(
+                f"<b>Change Time</b>\n\n"
+                f"{schedule.type_emoji} <b>{schedule.name}</b>\n"
+                f"Current: <b>{schedule.time_str}</b>\n\n"
+                f"Select new hour:",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML"
+            )
+            await query.answer()
+            return
+
+        # Change time - minute selection
+        if action.startswith("chtime_hour:"):
+            parts = action[12:].split(":")
+            schedule_id, hour = parts[0], int(parts[1])
+
+            buttons = []
+            row = []
+            for minute in range(0, 60, 5):
+                row.append(InlineKeyboardButton(
+                    f":{minute:02d}",
+                    callback_data=f"sched:chtime_min:{schedule_id}:{hour}:{minute}"
+                ))
+                if len(row) == 4:
+                    buttons.append(row)
+                    row = []
+            if row:
+                buttons.append(row)
+            buttons.append([
+                InlineKeyboardButton("Cancel", callback_data="sched:refresh")
+            ])
+
+            await query.edit_message_text(
+                f"<b>Change Time</b>\n\n"
+                f"New hour: <b>{hour:02d}시</b>\n\n"
+                f"Select minute:",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML"
+            )
+            await query.answer()
+            return
+
+        # Change time - apply
+        if action.startswith("chtime_min:"):
+            from src.scheduler_manager import scheduler_manager
+
+            parts = action[11:].split(":")
+            schedule_id, hour, minute = parts[0], int(parts[1]), int(parts[2])
+
+            result = self._schedule_manager.update_time(schedule_id, hour, minute)
+            if result:
+                await query.answer(f"Changed to {hour:02d}:{minute:02d}")
+            else:
+                await query.answer("Update failed")
+
+            text = self._schedule_manager.get_status_text(user_id)
+            text += scheduler_manager.get_system_jobs_text()
+            keyboard = self._build_scheduler_keyboard(user_id)
+            await query.edit_message_text(
+                text,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="HTML"
+            )
+            return
+
         # Add - Claude type (time selection)
         if action == "add:claude":
             buttons = []
