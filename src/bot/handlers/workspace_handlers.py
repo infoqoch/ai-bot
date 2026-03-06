@@ -346,7 +346,7 @@ class WorkspaceHandlers(BaseHandler):
                 user_id=user_id,
                 path=rec["path"],
                 name=rec["name"],
-                description=rec["description"],
+                description=rec.get("description", rec.get("reason", "")),
             )
 
             del self._pending_workspace_input[user_id]
