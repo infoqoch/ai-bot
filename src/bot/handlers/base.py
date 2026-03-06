@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     from src.services.session_service import SessionService
     from src.plugins.loader import PluginLoader
     from ..middleware import AuthManager
-    from ..queue_worker import QueueWorker
 
 
 @dataclass
@@ -84,8 +83,6 @@ class BaseHandler:
         self._watchdog_started = False
         # Temporary pending for session queue callbacks
         self._temp_pending: Optional[dict] = None
-        # Queue worker (set later via set_queue_worker)
-        self._queue_worker: Optional["QueueWorker"] = None
 
         logger.trace(f"BaseHandler config - require_auth={require_auth}, allowed_ids={allowed_chat_ids}")
 
@@ -98,11 +95,6 @@ class BaseHandler:
         """Set workspace registry."""
         self._workspace_registry = registry
         logger.debug("WorkspaceRegistry connected to handlers")
-
-    def set_queue_worker(self, worker: "QueueWorker") -> None:
-        """Set queue worker."""
-        self._queue_worker = worker
-        logger.debug("QueueWorker connected to handlers")
 
     def _setup_request_context(self, chat_id: int) -> str:
         """Setup request context (trace_id, user_id). Returns trace_id."""

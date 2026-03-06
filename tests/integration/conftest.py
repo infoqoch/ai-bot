@@ -242,36 +242,14 @@ def plugin_loader(repository) -> PluginLoader:
 
 
 @pytest.fixture
-async def queue_worker(repository, mock_claude, session_store):
-    """QueueWorker 인스턴스 (테스트용)."""
-    from src.bot.queue_worker import QueueWorker
-    from unittest.mock import MagicMock
-
-    # Mock bot
-    mock_bot = MagicMock()
-    mock_bot.send_message = AsyncMock()
-
-    worker = QueueWorker(
-        repository=repository,
-        claude_client=mock_claude,
-        session_service=session_store,
-        bot=mock_bot,
-    )
-    worker.start()
-    yield worker
-    worker.stop()
-
-
-@pytest.fixture
 async def handlers(
     session_store,
     mock_claude,
     auth_manager,
     plugin_loader,
-    queue_worker,
 ) -> BotHandlers:
     """BotHandlers 인스턴스."""
-    h = BotHandlers(
+    return BotHandlers(
         session_service=session_store,
         claude_client=mock_claude,
         auth_manager=auth_manager,
@@ -279,16 +257,6 @@ async def handlers(
         allowed_chat_ids=[],  # 빈 리스트 = 모두 허용
         plugin_loader=plugin_loader,
     )
-    h.set_queue_worker(queue_worker)
-    return h
-
-
-@pytest.fixture(autouse=True)
-def patch_get_repository(repository):
-    """모든 통합 테스트에서 get_repository를 실제 repository로 패치."""
-    from unittest.mock import patch
-    with patch("src.bot.handlers.message_handlers.get_repository", return_value=repository):
-        yield
 
 
 @pytest.fixture
@@ -395,20 +363,6 @@ async def wait_for_handlers(handlers, timeout: float = 2.0):
             task_objects = [t.task for t in tasks if t.task is not None]
             if task_objects:
                 await asyncio.wait(task_objects, timeout=timeout)
-
-    # QueueWorker가 메시지 처리할 시간 대기
-    if hasattr(handlers, '_queue_worker') and handlers._queue_worker:
-        # Repository에서 처리 중인 메시지가 완료될 때까지 대기
-        from src.repository import get_repository
-        repo = get_repository()
-        if repo:
-            end_time = asyncio.get_event_loop().time() + timeout
-            while asyncio.get_event_loop().time() < end_time:
-                # 처리 중인 메시지가 없으면 완료
-                processing = repo.get_processing_message(12345)  # default chat_id
-                if not processing:
-                    break
-                await asyncio.sleep(0.1)
 
     # 추가로 짧은 대기
     await asyncio.sleep(0.2)
