@@ -27,7 +27,15 @@ def init_repository(db_path: Path) -> Repository:
         conn.execute("ALTER TABLE message_queue RENAME TO message_log")
         conn.commit()
     except Exception:
-        pass  # 이미 변경되었거나 테이블 없음
+        pass
+
+    # schedules 테이블에 plugin 관련 컬럼 추가
+    for col in ["plugin_name TEXT", "action_name TEXT"]:
+        try:
+            conn.execute(f"ALTER TABLE schedules ADD COLUMN {col}")
+            conn.commit()
+        except Exception:
+            pass
 
     schema_path = Path(__file__).parent / "schema.sql"
     init_schema(conn, schema_path)

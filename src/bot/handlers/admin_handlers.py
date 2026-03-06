@@ -256,7 +256,7 @@ class AdminHandlers(BaseHandler):
             schedules = self._schedule_manager.list_by_user(user_id)
             for s in sorted(schedules, key=lambda x: (x.hour, x.minute)):
                 status = "✅" if s.enabled else "⏸"
-                type_icon = "📂" if s.type == "workspace" else "💬"
+                type_icon = "🔌" if s.type == "plugin" else ("📂" if s.type == "workspace" else "💬")
                 buttons.append([
                     InlineKeyboardButton(
                         f"{status} {s.time_str} {type_icon} {s.name[:15]}",
@@ -267,6 +267,7 @@ class AdminHandlers(BaseHandler):
         buttons.append([
             InlineKeyboardButton("+ Claude", callback_data="sched:add:claude"),
             InlineKeyboardButton("+ Workspace", callback_data="sched:add:workspace"),
+            InlineKeyboardButton("+ Plugin", callback_data="sched:add:plugin"),
         ])
         buttons.append([
             InlineKeyboardButton("Refresh", callback_data="sched:refresh"),

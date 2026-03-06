@@ -5,7 +5,7 @@ from datetime import date, timedelta
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 
-from src.plugins.loader import Plugin, PluginResult
+from src.plugins.loader import Plugin, PluginResult, ScheduledAction
 from src.logging_config import logger
 
 
@@ -106,6 +106,80 @@ class TodoPlugin(Plugin):
         if handler:
             return handler()
         return {"text": "❌ 알 수 없는 명령", "edit": True}
+
+    def get_scheduled_actions(self) -> list[ScheduledAction]:
+        """스케줄 가능한 액션 목록."""
+        return [
+            ScheduledAction(name="morning_check", description="오전 할일 리마인더"),
+            ScheduledAction(name="afternoon_check", description="오후 할일 리마인더"),
+            ScheduledAction(name="evening_check", description="저녁 할일 리마인더"),
+            ScheduledAction(name="daily_wrap", description="하루 마무리 리포트"),
+        ]
+
+    async def execute_scheduled_action(self, action_name: str, chat_id: int) -> str:
+        """스케줄된 액션 실행."""
+        today = self._today()
+
+        if action_name == "daily_wrap":
+            return self._generate_daily_wrap(chat_id, today)
+
+        # morning/afternoon/evening check
+        slot_map = {
+            "morning_check": "morning",
+            "afternoon_check": "afternoon",
+            "evening_check": "evening",
+        }
+        slot = slot_map.get(action_name)
+        if not slot:
+            raise NotImplementedError(f"Action '{action_name}' not implemented")
+
+        return self._generate_slot_reminder(chat_id, today, slot)
+
+    def _generate_slot_reminder(self, chat_id: int, today: str, slot: str) -> str:
+        """시간대별 리마인더 텍스트 생성."""
+        slot_name = self.SLOT_NAMES[slot]
+        todos = self.repository.list_todos_by_slot(chat_id, today, slot)
+
+        if not todos:
+            return ""  # 할일 없으면 빈 문자열 (메시지 안 보냄)
+
+        pending = [t for t in todos if not t.done]
+        if not pending:
+            return f"{slot_name} 할일 모두 완료! 👏"
+
+        lines = [f"<b>{slot_name} 할일 리마인더</b>\n"]
+        for i, todo in enumerate(todos, 1):
+            status = "✅" if todo.done else "⬜"
+            lines.append(f"{status} {i}. {todo.text}")
+
+        lines.append(f"\n📊 {len(todos) - len(pending)}/{len(todos)} 완료")
+        return "\n".join(lines)
+
+    def _generate_daily_wrap(self, chat_id: int, today: str) -> str:
+        """하루 마무리 리포트 텍스트 생성."""
+        stats = self.repository.get_todo_stats(chat_id, today)
+        if stats["total"] == 0:
+            return ""  # 할일 없으면 빈 문자열
+
+        lines = ["🌙 <b>하루 마무리</b>\n"]
+
+        if stats["pending"] == 0:
+            lines.append("🎉 오늘 할일을 모두 완료했어요!")
+        else:
+            lines.append(f"📊 오늘 진행률: {stats['done']}/{stats['total']} 완료\n")
+            lines.append("<b>미완료 항목:</b>")
+
+            pending = self.repository.get_pending_todos(chat_id, today)
+            current_slot = None
+            for todo in pending:
+                if todo.slot != current_slot:
+                    current_slot = todo.slot
+                    lines.append(f"\n{self.SLOT_NAMES[todo.slot]}")
+                lines.append(f"  ⬜ {todo.text}")
+
+            lines.append("\n내일로 넘길 항목이 있나요?")
+
+        return "\n".join(lines)
 
     def _today(self) -> str:
         return date.today().isoformat()

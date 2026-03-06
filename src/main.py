@@ -39,9 +39,6 @@ from src.repository.adapters import (
 )
 from src.services.session_service import SessionService
 
-# Todo 스케줄러 (옵션)
-_todo_scheduler = None
-
 # 세션 스케줄러 (매니저 compact)
 _session_scheduler = None
 
@@ -81,35 +78,6 @@ def _setup_hourly_ping_scheduler(app, settings, plugin_loader) -> None:
     except Exception as e:
         logger.debug(f"HourlyPing 스케줄러 비활성화: {e}")
 
-
-def _setup_todo_scheduler(app, settings) -> None:
-    """Todo 스케줄러 설정 (Repository 기반)."""
-    global _todo_scheduler
-
-    try:
-        from plugins.builtin.todo.scheduler import TodoScheduler
-
-        repository = get_repository()
-        if not repository:
-            logger.warning("Todo 스케줄러: Repository 없음")
-            return
-
-        chat_ids = settings.allowed_chat_ids.copy() if settings.allowed_chat_ids else []
-        if settings.admin_chat_id and settings.admin_chat_id not in chat_ids:
-            chat_ids.append(settings.admin_chat_id)
-
-        _todo_scheduler = TodoScheduler(
-            repository=repository,
-            chat_ids=chat_ids,
-        )
-        _todo_scheduler.setup_jobs(app)
-
-        logger.info(f"Todo 스케줄러 활성화 - chat_ids: {chat_ids}")
-
-    except ImportError as e:
-        logger.debug(f"Todo 스케줄러 비활성화 (모듈 없음): {e}")
-    except Exception as e:
-        logger.warning(f"Todo 스케줄러 초기화 실패: {e}")
 
 
 def create_app() -> Application:
@@ -195,9 +163,6 @@ def create_app() -> Application:
     scheduler_manager.set_app(app)
     logger.info("SchedulerManager 초기화 완료")
 
-    # Todo 스케줄러 설정 (Repository 기반)
-    _setup_todo_scheduler(app, settings)
-
     # 세션 스케줄러 설정 (매니저 세션 compact)
     _setup_session_scheduler(app, session_service, claude_client, settings)
 
@@ -214,29 +179,36 @@ def create_app() -> Application:
     workspace_registry = WorkspaceRegistryAdapter(repo=repo)
     logger.info("워크스페이스 레지스트리 어댑터 초기화 완료")
 
-    # Schedule executor 설정 (Claude 호출 로직)
+    # Schedule executor 설정 (Claude 호출 / 플러그인 실행)
     async def schedule_executor(schedule):
         """Execute scheduled task."""
         from src.repository.repository import Schedule
         try:
-            # Determine workspace path
-            workspace_path = None
-            if schedule.type == "workspace" and schedule.workspace_path:
-                workspace_path = schedule.workspace_path
+            # Plugin type: execute plugin action directly
+            if schedule.type == "plugin" and schedule.plugin_name and schedule.action_name:
+                plugin = plugin_loader.get_plugin_by_name(schedule.plugin_name)
+                if not plugin:
+                    raise RuntimeError(f"Plugin '{schedule.plugin_name}' not found")
 
-            # Call Claude (session_id=None → new session each time)
-            text, error, _ = await claude_client.chat(
-                message=schedule.message,
-                session_id=None,
-                model=schedule.model,
-                workspace_path=workspace_path,
-            )
+                response = await plugin.execute_scheduled_action(
+                    schedule.action_name, schedule.chat_id
+                )
+            else:
+                # Claude/Workspace type: call Claude CLI
+                workspace_path = None
+                if schedule.type == "workspace" and schedule.workspace_path:
+                    workspace_path = schedule.workspace_path
 
-            response = text or error or "(응답 없음)"
+                text, error, _ = await claude_client.chat(
+                    message=schedule.message,
+                    session_id=None,
+                    model=schedule.model,
+                    workspace_path=workspace_path,
+                )
+                response = text or error or "(응답 없음)"
 
             # Send response to Telegram
-            if app.bot and schedule.chat_id:
-                # Chunk response if too long
+            if app.bot and schedule.chat_id and response:
                 max_len = 4000
                 for i in range(0, len(response), max_len):
                     chunk = response[i:i + max_len]
