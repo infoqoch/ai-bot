@@ -163,6 +163,19 @@ class ScheduleManagerAdapter:
 
         return new_state
 
+    def update_time(self, schedule_id: str, hour: int, minute: int) -> bool:
+        """Update schedule time and re-register with scheduler."""
+        result = self._repo.update_schedule_time(schedule_id, hour, minute)
+
+        if result and self._scheduler_manager and self._executor:
+            # Re-register with new time
+            self._unregister_schedule(schedule_id)
+            schedule = self._repo.get_schedule(schedule_id)
+            if schedule and schedule.enabled:
+                self._register_schedule(ScheduleData.from_repo_schedule(schedule))
+
+        return result
+
     def get(self, schedule_id: str) -> Optional[ScheduleData]:
         """Get schedule by ID."""
         schedule = self._repo.get_schedule(schedule_id)

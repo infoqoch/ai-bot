@@ -262,6 +262,7 @@ class AdminHandlers(BaseHandler):
                         f"{status} {s.time_str} {type_icon} {s.name[:10]}",
                         callback_data=f"sched:toggle:{s.id}"
                     ),
+                    InlineKeyboardButton("Time", callback_data=f"sched:chtime:{s.id}"),
                     InlineKeyboardButton("Del", callback_data=f"sched:delete:{s.id}"),
                 ])
 
