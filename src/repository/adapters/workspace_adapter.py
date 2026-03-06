@@ -222,11 +222,11 @@ class WorkspaceRegistryAdapter:
             f'[{{"path": "/full/path", "name": "표시이름", "description": "설명", "reason": "선택이유"}}]'
         )
 
-        ai_command = os.getenv("AI_COMMAND", "claude")
+        ai_command = os.getenv("AI_COMMAND", "claude").split()
         try:
             env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
             proc = await asyncio.create_subprocess_exec(
-                ai_command, "-p", prompt, "--model", "haiku",
+                *ai_command, "-p", prompt, "--model", "opus",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
