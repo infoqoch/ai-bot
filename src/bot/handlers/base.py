@@ -280,8 +280,8 @@ class BaseHandler:
         logger.trace(f"update.effective_user={update.effective_user}")
 
         if not self._is_authorized(chat_id):
-            logger.debug("/start 거부 - 권한 없음")
-            await update.message.reply_text("⛔ 권한이 없습니다.")
+            logger.debug("/start denied - unauthorized")
+            await update.message.reply_text("⛔ Access denied.")
             clear_context()
             return
 
@@ -295,21 +295,21 @@ class BaseHandler:
         if self.require_auth:
             is_auth = self.auth.is_authenticated(user_id)
             remaining = self.auth.get_remaining_minutes(user_id)
-            auth_status = f"✅ 인증됨 ({remaining}분 남음)" if is_auth else "🔒 인증 필요"
-            auth_line = f"인증: {auth_status}\n"
-            logger.trace(f"인증 상태 - is_auth={is_auth}, remaining={remaining}")
+            auth_status = f"✅ Authenticated ({remaining}m remaining)" if is_auth else "🔒 Authentication required"
+            auth_line = f"Auth: {auth_status}\n"
+            logger.trace(f"Auth status - is_auth={is_auth}, remaining={remaining}")
         else:
-            auth_line = "🔓 <b>인증 없이 사용 가능</b>\n"
+            auth_line = "🔓 <b>No authentication required</b>\n"
 
-        logger.trace("응답 전송 중")
+        logger.trace("Sending response")
         await update.message.reply_text(
             f"🤖 <b>Claude Code Bot</b>\n\n"
             f"{auth_line}"
-            f"세션: [{session_info}] ({history_count}개 질문)\n\n"
-            f"/help 로 명령어 확인",
+            f"Session: [{session_info}] ({history_count} messages)\n\n"
+            f"/help for commands",
             parse_mode="HTML"
         )
-        logger.trace("/start 완료")
+        logger.trace("/start complete")
         clear_context()
 
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -390,9 +390,9 @@ class BaseHandler:
         error_msg = str(context.error)
 
         friendly_errors = {
-            "Query is too old": "⏰ 버튼이 만료되었습니다. 다시 시도해주세요.",
+            "Query is too old": "⏰ Button expired. Please try again.",
             "Message is not modified": None,
-            "message to edit not found": "🗑️ 메시지가 삭제되어 수정할 수 없습니다.",
+            "message to edit not found": "🗑️ Message deleted, cannot edit.",
         }
 
         for pattern, friendly_msg in friendly_errors.items():
@@ -410,10 +410,10 @@ class BaseHandler:
         logger.trace(f"Error detail: {context.error}", exc_info=context.error)
 
         if update and update.effective_chat:
-            logger.trace("사용자에게 에러 메시지 전송")
+            logger.trace("Sending error message to user")
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text="❌ 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+                text="❌ An error occurred. Please try again later."
             )
 
         clear_context()

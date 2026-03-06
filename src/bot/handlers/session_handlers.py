@@ -38,11 +38,11 @@ class SessionHandlers(BaseHandler):
                     InlineKeyboardButton("Haiku", callback_data="sess:new:haiku"),
                 ],
                 [
-                    InlineKeyboardButton("📋 세션 목록", callback_data="sess:list"),
+                    InlineKeyboardButton("📋 Session List", callback_data="sess:list"),
                 ]
             ]
             await update.message.reply_text(
-                "🆕 <b>새 세션 생성</b>\n\n사용할 모델을 선택하세요:",
+                "🆕 <b>New Session</b>\n\nSelect a model:",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="HTML"
             )
@@ -63,33 +63,33 @@ class SessionHandlers(BaseHandler):
         if len(session_name) > MAX_SESSION_NAME_LENGTH:
             session_name = session_name[:MAX_SESSION_NAME_LENGTH]
 
-        logger.info(f"/new 명령 수신 - 새 세션 요청 (model={model}, name={session_name or '(없음)'})")
+        logger.info(f"/new command - new session request (model={model}, name={session_name or '(none)'})")
 
         model_emoji = get_model_emoji(model)
-        logger.trace("세션 생성 메시지 전송")
-        await update.message.reply_text(f"새 Claude 세션 생성 중... {model_emoji} {model}")
+        logger.trace("Sending session creation message")
+        await update.message.reply_text(f"Creating new Claude session... {model_emoji} {model}")
 
-        logger.trace(f"Claude 세션 생성 - model={model}")
+        logger.trace(f"Creating Claude session - model={model}")
         session_id = await self.claude.create_session()
         if not session_id:
-            logger.error("Claude 세션 생성 실패")
-            await update.message.reply_text("❌ Claude 세션 생성 실패. 다시 시도해주세요.")
+            logger.error("Claude session creation failed")
+            await update.message.reply_text("❌ Failed to create Claude session. Please try again.")
             clear_context()
             return
 
-        logger.info(f"새 세션 생성됨: {session_id[:8]}, model={model}")
+        logger.info(f"New session created: {session_id[:8]}, model={model}")
 
-        logger.trace("세션 저장 중")
-        self.sessions.create_session(user_id, session_id, model=model, name=session_name, first_message="(새 세션)")
+        logger.trace("Saving session")
+        self.sessions.create_session(user_id, session_id, model=model, name=session_name, first_message="(new session)")
 
-        name_line = f"\n- 이름: {session_name}" if session_name else ""
+        name_line = f"\n- Name: {session_name}" if session_name else ""
         await update.message.reply_text(
-            f"✅ 새 세션 시작!\n"
+            f"✅ New session created!\n"
             f"- ID: <code>{session_id[:8]}</code>{name_line}\n"
-            f"- 모델: {model_emoji} {model}",
+            f"- Model: {model_emoji} {model}",
             parse_mode="HTML"
         )
-        logger.trace("/new 완료")
+        logger.trace("/new complete")
         clear_context()
 
     async def new_session_opus(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -135,12 +135,12 @@ class SessionHandlers(BaseHandler):
 
         if not args:
             await update.message.reply_text(
-                "📁 <b>워크스페이스 세션 사용법</b>\n\n"
-                "<code>/new_workspace 경로 [모델] [이름]</code>\n\n"
-                "예시:\n"
+                "📁 <b>Workspace Session Usage</b>\n\n"
+                "<code>/new_workspace path [model] [name]</code>\n\n"
+                "Examples:\n"
                 "• <code>/new_workspace ~/Projects/my-app</code>\n"
                 "• <code>/new_workspace ~/AiSandbox/bot opus</code>\n"
-                "• <code>/new_workspace ~/work/api haiku API봇</code>",
+                "• <code>/new_workspace ~/work/api haiku MyBot</code>",
                 parse_mode="HTML"
             )
             return
@@ -172,7 +172,7 @@ class SessionHandlers(BaseHandler):
 
         session_id = await self.claude.create_session(workspace_path=expanded_path)
         if not session_id:
-            await update.message.reply_text("❌ 세션 생성 실패", parse_mode="HTML")
+            await update.message.reply_text("❌ Session creation failed.", parse_mode="HTML")
             return
 
         self.sessions.create_session(
@@ -184,15 +184,15 @@ class SessionHandlers(BaseHandler):
 
         claude_md_exists = (Path(expanded_path) / "CLAUDE.md").exists()
         claude_dir_exists = (Path(expanded_path) / ".claude").exists()
-        config_status = "CLAUDE.md" if claude_md_exists else (".claude/" if claude_dir_exists else "설정 없음")
+        config_status = "CLAUDE.md" if claude_md_exists else (".claude/" if claude_dir_exists else "No config")
 
         await update.message.reply_text(
-            f"📁 <b>워크스페이스 세션 생성됨</b>\n\n"
-            f"- 경로: <code>{expanded_path}</code>\n"
-            f"- 모델: {model_emoji}\n"
-            f"- 이름: {display_name}\n"
-            f"- 설정: {config_status}\n\n"
-            f"이 세션은 워크스페이스의 CLAUDE.md 규칙을 따릅니다.",
+            f"📁 <b>Workspace Session Created</b>\n\n"
+            f"- Path: <code>{expanded_path}</code>\n"
+            f"- Model: {model_emoji}\n"
+            f"- Name: {display_name}\n"
+            f"- Config: {config_status}\n\n"
+            f"This session follows the workspace's CLAUDE.md rules.",
             parse_mode="HTML"
         )
 
@@ -229,10 +229,10 @@ class SessionHandlers(BaseHandler):
 
         session_id = self.sessions.get_current_session_id(user_id)
         if not session_id:
-            logger.trace("활성 세션 없음")
+            logger.trace("No active session")
             await update.message.reply_text(
-                "❌ 활성 세션이 없습니다.\n\n"
-                "새 세션 시작:\n"
+                "❌ No active session.\n\n"
+                "Create a new session:\n"
                 "/new_opus - Opus\n"
                 "/new_sonnet - Sonnet\n"
                 "/new_haiku - Haiku",
@@ -245,13 +245,13 @@ class SessionHandlers(BaseHandler):
 
         if not context.args:
             model_emoji = get_model_emoji(current_model)
-            logger.trace(f"현재 모델 표시: {current_model}")
+            logger.trace(f"Showing current model: {current_model}")
             await update.message.reply_text(
-                f"<b>현재 모델</b>: {model_emoji} {current_model}\n\n"
-                f"변경하려면:\n"
-                f"/model opus - 최고 품질\n"
-                f"/model sonnet - 균형\n"
-                f"/model haiku - 빠름",
+                f"<b>Current Model</b>: {model_emoji} {current_model}\n\n"
+                f"Change to:\n"
+                f"/model opus - Best quality\n"
+                f"/model sonnet - Balanced\n"
+                f"/model haiku - Fast",
                 parse_mode="HTML"
             )
             clear_context()
@@ -260,30 +260,30 @@ class SessionHandlers(BaseHandler):
         new_model = context.args[0].lower()
         if new_model not in SUPPORTED_MODELS:
             await update.message.reply_text(
-                f"❌ 지원하지 않는 모델: {new_model}\n\n"
-                f"사용 가능: {', '.join(SUPPORTED_MODELS)}",
+                f"❌ Unsupported model: {new_model}\n\n"
+                f"Available: {', '.join(SUPPORTED_MODELS)}",
             )
             clear_context()
             return
 
         if new_model == current_model:
             model_emoji = get_model_emoji(current_model)
-            await update.message.reply_text(f"이미 {model_emoji} {current_model} 모델을 사용 중입니다.")
+            await update.message.reply_text(f"Already using {model_emoji} {current_model}.")
             clear_context()
             return
 
         if self.sessions.update_session_model(session_id, new_model):
-            logger.info(f"모델 변경됨: {current_model} -> {new_model}, session={session_id[:8]}")
+            logger.info(f"Model changed: {current_model} -> {new_model}, session={session_id[:8]}")
 
             model_emoji = get_model_emoji(new_model)
             await update.message.reply_text(
-                f"✅ 모델 변경됨!\n\n"
-                f"- 이전: {current_model}\n"
-                f"- 현재: {model_emoji} {new_model}",
+                f"✅ Model changed!\n\n"
+                f"- Previous: {current_model}\n"
+                f"- Current: {model_emoji} {new_model}",
                 parse_mode="HTML"
             )
         else:
-            await update.message.reply_text("❌ 세션을 찾을 수 없습니다.")
+            await update.message.reply_text("❌ Session not found.")
 
         clear_context()
 
@@ -300,7 +300,7 @@ class SessionHandlers(BaseHandler):
         logger.trace("Getting current session")
         session_id = self.sessions.get_current_session_id(user_id)
         if not session_id:
-            logger.trace("활성 세션 없음")
+            logger.trace("No active session")
             keyboard = [
                 [
                     InlineKeyboardButton("+Opus", callback_data="sess:new:opus"),
@@ -308,11 +308,11 @@ class SessionHandlers(BaseHandler):
                     InlineKeyboardButton("+Haiku", callback_data="sess:new:haiku"),
                 ],
                 [
-                    InlineKeyboardButton("📋 세션 목록", callback_data="sess:list"),
+                    InlineKeyboardButton("📋 Session List", callback_data="sess:list"),
                 ]
             ]
             await update.message.reply_text(
-                "❌ 활성 세션이 없습니다.\n\n새 세션 생성:",
+                "❌ No active session.\n\nCreate new session:",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="HTML"
             )
@@ -360,21 +360,21 @@ class SessionHandlers(BaseHandler):
                 InlineKeyboardButton("Haiku", callback_data=f"sess:model:haiku:{session_id}"),
             ],
             [
-                InlineKeyboardButton("📜 히스토리", callback_data=f"sess:history:{session_id}"),
-                InlineKeyboardButton("🗑️ 삭제", callback_data=f"sess:delete:{session_id}"),
+                InlineKeyboardButton("📜 History", callback_data=f"sess:history:{session_id}"),
+                InlineKeyboardButton("🗑️ Delete", callback_data=f"sess:delete:{session_id}"),
             ],
             [
-                InlineKeyboardButton("📋 세션 목록", callback_data="sess:list"),
+                InlineKeyboardButton("📋 Session List", callback_data="sess:list"),
             ]
         ]
 
         await update.message.reply_text(
-            f"<b>현재 세션</b>\n\n"
+            f"<b>Current Session</b>\n\n"
             f"- ID: <code>{session_id[:8]}</code>\n"
             f"{name_line}"
-            f"- 모델: {model_emoji} {model}\n"
-            f"- 메시지: {count}개\n\n"
-            f"<b>대화 내용</b> (최근 10개)\n{history_text}",
+            f"- Model: {model_emoji} {model}\n"
+            f"- Messages: {count}\n\n"
+            f"<b>History</b> (last 10)\n{history_text}",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="HTML"
         )
@@ -398,11 +398,11 @@ class SessionHandlers(BaseHandler):
 
         current_session_id = self.sessions.get_current_session_id(user_id)
 
-        lines = ["<b>세션 목록</b>\n"]
+        lines = ["<b>Session List</b>\n"]
         buttons = []
 
         if not sessions:
-            lines.append("세션이 없습니다.")
+            lines.append("No sessions.")
         else:
             for s in sessions[:10]:
                 sid = s["full_session_id"]
@@ -537,8 +537,8 @@ class SessionHandlers(BaseHandler):
         # Current session rename (/rename or /rename_newname)
         session_id = self.sessions.get_current_session_id(user_id)
         if not session_id:
-            logger.trace("활성 세션 없음")
-            await update.message.reply_text("❌ 활성 세션이 없습니다.")
+            logger.trace("No active session")
+            await update.message.reply_text("❌ No active session.")
             clear_context()
             return
 
@@ -549,32 +549,32 @@ class SessionHandlers(BaseHandler):
             new_name = " ".join(context.args)
         else:
             current_name = self.sessions.get_session_name(session_id)
-            logger.trace(f"현재 이름: {current_name or '(없음)'}")
+            logger.trace(f"Current name: {current_name or '(none)'}")
             await update.message.reply_text(
-                f"<b>세션 이름 변경</b>\n\n"
-                f"- 현재: {current_name or '(이름 없음)'}\n"
-                f"- 세션: <code>{session_id[:8]}</code>\n\n"
-                f"사용법: <code>/rename_새이름</code>\n"
-                f"또는: <code>/r_세션ID_새이름</code>",
+                f"<b>Rename Session</b>\n\n"
+                f"- Current: {current_name or '(unnamed)'}\n"
+                f"- Session: <code>{session_id[:8]}</code>\n\n"
+                f"Usage: <code>/rename_newname</code>\n"
+                f"Or: <code>/r_sessionID_newname</code>",
                 parse_mode="HTML"
             )
             clear_context()
             return
 
         if len(new_name) > 50:
-            await update.message.reply_text("❌ 이름이 너무 깁니다. (최대 50자)")
+            await update.message.reply_text("❌ Name too long. (max 50 chars)")
             clear_context()
             return
 
         if self.sessions.rename_session(session_id, new_name):
             await update.message.reply_text(
-                f"✅ 세션 이름 변경됨!\n\n"
-                f"- 세션: <code>{session_id[:8]}</code>\n"
-                f"- 이름: {new_name}",
+                f"✅ Session renamed!\n\n"
+                f"- Session: <code>{session_id[:8]}</code>\n"
+                f"- Name: {new_name}",
                 parse_mode="HTML"
             )
         else:
-            await update.message.reply_text("❌ 이름 변경 실패")
+            await update.message.reply_text("❌ Rename failed.")
 
         clear_context()
 
@@ -595,12 +595,12 @@ class SessionHandlers(BaseHandler):
             clear_context()
             return
 
-        logger.info(f"세션 삭제 요청: {target}")
+        logger.info(f"Session delete request: {target}")
 
         target_info = self.sessions.get_session_by_prefix(user_id, target)
         if not target_info:
-            logger.debug(f"세션을 찾을 수 없음: {target}")
-            await update.message.reply_text(f"❌ 세션 '{target}'을(를) 찾을 수 없습니다.")
+            logger.debug(f"Session not found: {target}")
+            await update.message.reply_text(f"❌ Session '{target}' not found.")
             clear_context()
             return
 
@@ -611,9 +611,9 @@ class SessionHandlers(BaseHandler):
         if current_session_id == full_session_id:
             name_info = f" ({session_name})" if session_name else ""
             await update.message.reply_text(
-                f"❌ 현재 세션은 삭제할 수 없습니다.\n\n"
+                f"❌ Cannot delete the current session.\n\n"
                 f"- ID: <code>{target_info['session_id']}</code>{name_info}\n\n"
-                f"먼저 다른 세션으로 전환하거나 새 세션을 만드세요.",
+                f"Switch to another session or create a new one first.",
                 parse_mode="HTML"
             )
             clear_context()
@@ -622,13 +622,13 @@ class SessionHandlers(BaseHandler):
         if self.sessions.delete_session(user_id, full_session_id):
             name_info = f" ({session_name})" if session_name else ""
             await update.message.reply_text(
-                f"🗑️ 세션 삭제됨!\n\n"
+                f"🗑️ Session deleted!\n\n"
                 f"- ID: <code>{target_info['session_id']}</code>{name_info}\n"
-                f"- 메시지: {target_info['history_count']}개",
+                f"- Messages: {target_info['history_count']}",
                 parse_mode="HTML"
             )
         else:
-            await update.message.reply_text("❌ 세션 삭제 실패")
+            await update.message.reply_text("❌ Session delete failed.")
 
         clear_context()
 
@@ -650,21 +650,21 @@ class SessionHandlers(BaseHandler):
             clear_context()
             return
 
-        logger.info(f"히스토리 조회 요청: {target}")
+        logger.info(f"History request: {target}")
 
-        logger.trace(f"세션 검색 - prefix={target}")
+        logger.trace(f"Searching session - prefix={target}")
         target_info = self.sessions.get_session_by_prefix(user_id, target)
         if not target_info:
-            logger.debug(f"세션을 찾을 수 없음: {target}")
-            await update.message.reply_text(f"❌ 세션 '{target}'을(를) 찾을 수 없습니다.")
+            logger.debug(f"Session not found: {target}")
+            await update.message.reply_text(f"❌ Session '{target}' not found.")
             clear_context()
             return
 
-        logger.trace(f"히스토리 조회 - session={target_info['full_session_id'][:8]}")
+        logger.trace(f"History lookup - session={target_info['full_session_id'][:8]}")
         history = self.sessions.get_session_history(target_info["full_session_id"])
         if not history:
-            logger.trace("히스토리 없음")
-            await update.message.reply_text("📭 히스토리가 없습니다.")
+            logger.trace("No history")
+            await update.message.reply_text("📭 No history.")
             clear_context()
             return
 
@@ -678,14 +678,14 @@ class SessionHandlers(BaseHandler):
         history_text = "\n".join(history_lines)
 
         await update.message.reply_text(
-            f"<b>세션 히스토리</b>\n"
+            f"<b>Session History</b>\n"
             f"- ID: <code>{target_info['session_id']}</code>\n"
-            f"- 메시지: {len(history)}개\n\n"
+            f"- Messages: {len(history)}\n\n"
             f"{history_text}\n\n"
-            f"/s_{target_info['session_id']} 이 세션으로 전환",
+            f"/s_{target_info['session_id']} Switch to this session",
             parse_mode="HTML"
         )
-        logger.trace("히스토리 조회 완료")
+        logger.trace("History lookup complete")
         clear_context()
 
     @authorized_only
@@ -694,20 +694,20 @@ class SessionHandlers(BaseHandler):
         chat_id = update.effective_chat.id
         user_id = str(chat_id)
         self._setup_request_context(chat_id)
-        logger.info("/back 명령 수신")
+        logger.info("/back command received")
 
         prev_session_id = self.sessions.get_previous_session_id(user_id)
         if not prev_session_id:
             await update.message.reply_text(
-                "❌ 이전 세션이 없습니다.\n\n"
-                "/session_list 로 세션 목록 확인"
+                "❌ No previous session.\n\n"
+                "Use /session_list to see all sessions."
             )
             clear_context()
             return
 
         session_info = self.sessions.get_session_by_prefix(user_id, prev_session_id[:8])
         if not session_info:
-            await update.message.reply_text("❌ 이전 세션을 찾을 수 없습니다.")
+            await update.message.reply_text("❌ Previous session not found.")
             self.sessions.set_previous_session_id(user_id, None)
             clear_context()
             return
@@ -719,7 +719,7 @@ class SessionHandlers(BaseHandler):
         name_display = f" ({name})" if name else ""
 
         await update.message.reply_text(
-            f"✅ 세션으로 돌아왔습니다!\n\n"
+            f"✅ Switched back!\n\n"
             f"- ID: <code>{prev_session_id[:8]}</code>{name_display}",
             parse_mode="HTML"
         )

@@ -53,8 +53,8 @@ class MessageHandlers(BaseHandler):
         if user_id in self._creating_sessions:
             logger.info(f"Session creation in progress - /ai blocked: user={user_id}")
             await update.message.reply_text(
-                "<b>세션 준비 중...</b>\n\n"
-                "잠시 후 다시 시도해주세요!",
+                "<b>Session initializing...</b>\n\n"
+                "Please try again shortly!",
                 parse_mode="HTML"
             )
             clear_context()
@@ -74,7 +74,7 @@ class MessageHandlers(BaseHandler):
 
                     if not session_id:
                         logger.error("Claude session creation failed")
-                        await update.message.reply_text("❌ Claude 세션 생성 실패. 다시 시도해주세요.")
+                        await update.message.reply_text("❌ Failed to create Claude session. Please try again.")
                         clear_context()
                         return
 
@@ -126,8 +126,8 @@ class MessageHandlers(BaseHandler):
         logger.trace(f"Full message length: {len(message)}")
 
         if not self._is_authorized(chat_id):
-            logger.debug("메시지 거부 - 권한 없음")
-            await update.message.reply_text("⛔ 권한이 없습니다.")
+            logger.debug("Message denied - unauthorized")
+            await update.message.reply_text("⛔ Access denied.")
             clear_context()
             return
 
@@ -206,11 +206,11 @@ class MessageHandlers(BaseHandler):
             logger.debug("[PLUGIN] No plugin loader")
 
         if not self._is_authenticated(user_id):
-            logger.debug("메시지 거부 - 인증 필요")
+            logger.debug("Message denied - auth required")
             await update.message.reply_text(
-                "🔒 인증이 필요합니다.\n"
-                f"/auth <키>로 인증하세요. ({self.auth.timeout_minutes}분간 유효)\n"
-                "/help 도움말"
+                "🔒 Authentication required.\n"
+                f"Use /auth <key> to authenticate. (Valid for {self.auth.timeout_minutes}m)\n"
+                "/help for commands"
             )
             clear_context()
             return
@@ -218,8 +218,8 @@ class MessageHandlers(BaseHandler):
         if user_id in self._creating_sessions:
             logger.info(f"Session creation in progress - message blocked: user={user_id}")
             await update.message.reply_text(
-                "<b>세션 준비 중...</b>\n\n"
-                "잠시 후 다시 시도해주세요!",
+                "<b>Session initializing...</b>\n\n"
+                "Please try again shortly!",
                 parse_mode="HTML"
             )
             clear_context()
@@ -239,7 +239,7 @@ class MessageHandlers(BaseHandler):
 
                     if not session_id:
                         logger.error("Claude session creation failed")
-                        await update.message.reply_text("❌ Claude 세션 생성 실패. 다시 시도해주세요.")
+                        await update.message.reply_text("❌ Failed to create Claude session. Please try again.")
                         clear_context()
                         return
 
@@ -414,11 +414,11 @@ class MessageHandlers(BaseHandler):
                 self.sessions.add_message(session_id, message, processor="claude")
 
             if error == "TIMEOUT":
-                logger.warning("Claude 타임아웃")
-                response = "⏱️ 응답 시간 초과. 다시 시도해주세요."
+                logger.warning("Claude timeout")
+                response = "⏱️ Response timed out. Please try again."
             elif error and error != "SESSION_NOT_FOUND":
-                logger.error(f"Claude 오류: {error}")
-                response = f"❌ 오류 발생: {error}"
+                logger.error(f"Claude error: {error}")
+                response = f"❌ Error: {error}"
             elif not response or not response.strip():
                 logger.error(f"[EMPTY RESPONSE] Claude 빈 응답 감지!")
                 logger.error(f"  response type: {type(response)}")
@@ -429,7 +429,7 @@ class MessageHandlers(BaseHandler):
                 logger.error(f"  is_new_session: {is_new_session}")
                 logger.error(f"  message preview: {message[:200]}")
                 logger.error(f"  workspace_path: {workspace_path}")
-                response = f"⚠️ <code>{short_message}</code>\n응답이 비어있습니다. 다시 시도해주세요."
+                response = f"⚠️ <code>{short_message}</code>\nResponse is empty. Please try again."
 
             session_info = self.sessions.get_session_info(session_id)
             session_short_id = session_id[:8]
@@ -461,10 +461,10 @@ class MessageHandlers(BaseHandler):
             logger.trace("Response sent")
 
         except Exception as e:
-            logger.exception(f"Claude 처리 실패: {e}")
+            logger.exception(f"Claude processing failed: {e}")
             await bot.send_message(
                 chat_id=chat_id,
-                text="❌ 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+                text="❌ An error occurred. Please try again later."
             )
 
     async def _show_session_selection_ui(

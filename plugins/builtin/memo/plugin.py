@@ -1,4 +1,4 @@
-"""메모 플러그인 - 버튼 기반 단일 진입점."""
+"""Memo plugin - button-based single entry point."""
 
 import re
 from typing import Optional
@@ -9,13 +9,13 @@ from src.plugins.loader import Plugin, PluginResult
 
 
 class MemoPlugin(Plugin):
-    """버튼 기반 메모 플러그인 - 단일 진입점."""
+    """Button-based memo plugin - single entry point."""
 
     name = "memo"
-    description = "메모 저장, 조회, 삭제"
+    description = "Save, view, and delete memos"
     usage = (
-        "📝 <b>메모 플러그인</b>\n\n"
-        "<code>메모</code> 또는 <code>/memo</code> 입력"
+        "📝 <b>Memo Plugin</b>\n\n"
+        "<code>memo</code> or <code>/memo</code>"
     )
 
     CALLBACK_PREFIX = "memo:"
@@ -35,7 +35,7 @@ class MemoPlugin(Plugin):
         self._selected: dict[int, set[int]] = {}  # chat_id -> set of memo_ids
 
     async def can_handle(self, message: str, chat_id: int) -> bool:
-        """메모 관련 메시지인지 확인."""
+        """Check if message is memo-related."""
         msg = message.strip().lower()
 
         for pattern in self.EXCLUDE_PATTERNS:
@@ -49,7 +49,7 @@ class MemoPlugin(Plugin):
         return False
 
     async def handle(self, message: str, chat_id: int) -> PluginResult:
-        """메모 메인 화면 표시."""
+        """Show memo main screen."""
         result = self._handle_main(chat_id)
         return PluginResult(
             handled=True,
@@ -58,10 +58,10 @@ class MemoPlugin(Plugin):
         )
 
     def handle_callback(self, callback_data: str, chat_id: int) -> dict:
-        """callback_data 처리."""
+        """Handle callback_data."""
         parts = callback_data.split(":")
         if len(parts) < 2:
-            return {"text": "❌ 잘못된 요청", "edit": True}
+            return {"text": "❌ Invalid request.", "edit": True}
 
         action = parts[1]
 
@@ -93,52 +93,52 @@ class MemoPlugin(Plugin):
             self._clear_selection(chat_id)
             return self._handle_list(chat_id)
         else:
-            return {"text": "❌ 알 수 없는 명령", "edit": True}
+            return {"text": "❌ Unknown command.", "edit": True}
 
     def _clear_selection(self, chat_id: int) -> None:
-        """선택 목록 초기화."""
+        """Clear selection."""
         self._selected.pop(chat_id, None)
 
     def _get_selection(self, chat_id: int) -> set[int]:
-        """선택된 메모 ID 목록."""
+        """Selected memo IDs."""
         return self._selected.get(chat_id, set())
 
     def _handle_main(self, chat_id: int) -> dict:
-        """메인 메뉴."""
+        """Main menu."""
         memos = self.repository.list_memos(chat_id)
         count = len(memos)
 
         buttons = [
             [
-                InlineKeyboardButton("📄 목록", callback_data="memo:list"),
-                InlineKeyboardButton("➕ 추가", callback_data="memo:add"),
+                InlineKeyboardButton("📄 List", callback_data="memo:list"),
+                InlineKeyboardButton("➕ Add", callback_data="memo:add"),
             ]
         ]
 
-        limit_text = f" (최대 {self.MAX_MEMOS}개)" if count >= self.MAX_MEMOS else ""
+        limit_text = f" (max {self.MAX_MEMOS})" if count >= self.MAX_MEMOS else ""
 
         return {
-            "text": f"📝 <b>메모</b>\n\n저장된 메모: {count}개{limit_text}",
+            "text": f"📝 <b>Memo</b>\n\nSaved: {count}{limit_text}",
             "reply_markup": InlineKeyboardMarkup(buttons),
             "edit": True,
         }
 
     def _handle_list(self, chat_id: int) -> dict:
-        """메모 목록."""
+        """Memo list."""
         memos = self.repository.list_memos(chat_id)
 
         if not memos:
             buttons = [
-                [InlineKeyboardButton("➕ 추가", callback_data="memo:add")],
-                [InlineKeyboardButton("⬅️ 뒤로", callback_data="memo:main")],
+                [InlineKeyboardButton("➕ Add", callback_data="memo:add")],
+                [InlineKeyboardButton("⬅️ Back", callback_data="memo:main")],
             ]
             return {
-                "text": "📭 저장된 메모가 없습니다.",
+                "text": "📭 No saved memos.",
                 "reply_markup": InlineKeyboardMarkup(buttons),
                 "edit": True,
             }
 
-        lines = ["📝 <b>메모 목록</b>\n"]
+        lines = ["📝 <b>Memo List</b>\n"]
         buttons = []
 
         for memo in memos:
@@ -153,18 +153,18 @@ class MemoPlugin(Plugin):
                 )
             ])
 
-        # 멀티 선택 삭제 버튼 (2개 이상일 때만)
+        # Multi-select delete button (2+ memos)
         if len(memos) >= 2:
             buttons.append([
-                InlineKeyboardButton("☑️ 여러 개 삭제", callback_data="memo:select"),
+                InlineKeyboardButton("☑️ Multi-delete", callback_data="memo:select"),
             ])
 
         buttons.append([
-            InlineKeyboardButton("➕ 추가", callback_data="memo:add"),
-            InlineKeyboardButton("🔄 새로고침", callback_data="memo:list"),
+            InlineKeyboardButton("➕ Add", callback_data="memo:add"),
+            InlineKeyboardButton("🔄 Refresh", callback_data="memo:list"),
         ])
         buttons.append([
-            InlineKeyboardButton("⬅️ 뒤로", callback_data="memo:main"),
+            InlineKeyboardButton("⬅️ Back", callback_data="memo:main"),
         ])
 
         return {
@@ -174,14 +174,14 @@ class MemoPlugin(Plugin):
         }
 
     def _handle_select_mode(self, chat_id: int) -> dict:
-        """멀티 선택 모드."""
+        """Multi-select mode."""
         memos = self.repository.list_memos(chat_id)
         selected = self._get_selection(chat_id)
 
         if not memos:
             return self._handle_list(chat_id)
 
-        lines = ["☑️ <b>삭제할 메모 선택</b>\n\n선택한 메모를 체크하세요."]
+        lines = ["☑️ <b>Select Memos to Delete</b>\n\nTap to select."]
         buttons = []
 
         for memo in memos:
@@ -200,13 +200,13 @@ class MemoPlugin(Plugin):
         if selected_count > 0:
             buttons.append([
                 InlineKeyboardButton(
-                    f"🗑️ {selected_count}개 삭제",
+                    f"🗑️ Delete {selected_count}",
                     callback_data="memo:del_selected"
                 ),
             ])
 
         buttons.append([
-            InlineKeyboardButton("❌ 취소", callback_data="memo:cancel_select"),
+            InlineKeyboardButton("❌ Cancel", callback_data="memo:cancel_select"),
         ])
 
         return {
@@ -216,7 +216,7 @@ class MemoPlugin(Plugin):
         }
 
     def _handle_toggle_selection(self, chat_id: int, memo_id: int) -> dict:
-        """메모 선택 토글."""
+        """Toggle memo selection."""
         if chat_id not in self._selected:
             self._selected[chat_id] = set()
 
@@ -228,7 +228,7 @@ class MemoPlugin(Plugin):
         return self._handle_select_mode(chat_id)
 
     def _handle_delete_selected(self, chat_id: int) -> dict:
-        """선택된 메모 삭제 확인."""
+        """Confirm selected memo deletion."""
         selected = self._get_selection(chat_id)
 
         if not selected:
@@ -237,17 +237,17 @@ class MemoPlugin(Plugin):
         memos = self.repository.list_memos(chat_id)
         selected_memos = [m for m in memos if m.id in selected]
 
-        lines = [f"🗑️ <b>{len(selected_memos)}개 메모 삭제 확인</b>\n"]
+        lines = [f"🗑️ <b>Delete {len(selected_memos)} Memos?</b>\n"]
         for memo in selected_memos:
             content_preview = memo.content[:30] + "..." if len(memo.content) > 30 else memo.content
             lines.append(f"• #{memo.id} {content_preview}")
 
-        lines.append("\n정말 삭제하시겠습니까?")
+        lines.append("\nAre you sure?")
 
         keyboard = [
             [
-                InlineKeyboardButton("✅ 삭제", callback_data="memo:confirm_del_selected"),
-                InlineKeyboardButton("❌ 취소", callback_data="memo:cancel_select"),
+                InlineKeyboardButton("✅ Delete", callback_data="memo:confirm_del_selected"),
+                InlineKeyboardButton("❌ Cancel", callback_data="memo:cancel_select"),
             ]
         ]
 
@@ -258,7 +258,7 @@ class MemoPlugin(Plugin):
         }
 
     def _handle_confirm_delete_selected(self, chat_id: int) -> dict:
-        """선택된 메모 삭제 실행."""
+        """Execute selected memo deletion."""
         selected = self._get_selection(chat_id)
 
         if not selected:
@@ -272,86 +272,82 @@ class MemoPlugin(Plugin):
         self._clear_selection(chat_id)
 
         result = self._handle_list(chat_id)
-        result["text"] = f"🗑️ {deleted_count}개 메모 삭제됨\n\n" + result["text"]
+        result["text"] = f"🗑️ {deleted_count} memos deleted\n\n" + result["text"]
         return result
 
     def _handle_add_prompt(self, chat_id: int) -> dict:
-        """메모 추가 - ForceReply."""
+        """Add memo - ForceReply."""
         memos = self.repository.list_memos(chat_id)
         if len(memos) >= self.MAX_MEMOS:
             keyboard = [
-                [InlineKeyboardButton("📄 목록", callback_data="memo:list")],
-                [InlineKeyboardButton("⬅️ 뒤로", callback_data="memo:main")],
+                [InlineKeyboardButton("📄 List", callback_data="memo:list")],
+                [InlineKeyboardButton("⬅️ Back", callback_data="memo:main")],
             ]
             return {
-                "text": f"❌ 메모가 최대 {self.MAX_MEMOS}개입니다.\n기존 메모를 삭제 후 추가하세요.",
+                "text": f"❌ Maximum {self.MAX_MEMOS} memos reached.\nDelete some before adding new ones.",
                 "reply_markup": InlineKeyboardMarkup(keyboard),
                 "edit": True,
             }
 
         return {
-            "text": "📝 <b>메모 추가</b>\n\n아래에 메모 내용을 입력하세요.",
+            "text": "📝 <b>Add Memo</b>\n\nEnter your memo below.",
             "force_reply": ForceReply(
                 selective=True,
-                input_field_placeholder="메모 내용 입력..."
+                input_field_placeholder="Enter memo..."
             ),
             "force_reply_marker": "memo_add",
             "edit": False,
         }
 
     def _handle_delete(self, chat_id: int, memo_id: int) -> dict:
-        """삭제 확인."""
         memo = self.repository.get_memo(memo_id)
 
         if not memo:
-            return {"text": f"❌ 메모 #{memo_id}을(를) 찾을 수 없습니다.", "edit": True}
+            return {"text": f"❌ Memo #{memo_id} not found.", "edit": True}
 
         keyboard = [
             [
-                InlineKeyboardButton("✅ 삭제", callback_data=f"memo:confirm_del:{memo_id}"),
-                InlineKeyboardButton("❌ 취소", callback_data="memo:cancel"),
+                InlineKeyboardButton("✅ Delete", callback_data=f"memo:confirm_del:{memo_id}"),
+                InlineKeyboardButton("❌ Cancel", callback_data="memo:cancel"),
             ]
         ]
 
         return {
-            "text": f"🗑️ <b>삭제 확인</b>\n\n<b>#{memo.id}</b> {memo.content}\n\n정말 삭제?",
+            "text": f"🗑️ <b>Delete?</b>\n\n<b>#{memo.id}</b> {memo.content}",
             "reply_markup": InlineKeyboardMarkup(keyboard),
             "edit": True,
         }
 
     def _handle_confirm_delete(self, chat_id: int, memo_id: int) -> dict:
-        """삭제 실행."""
         memo = self.repository.get_memo(memo_id)
 
         if not memo:
-            return {"text": f"❌ 메모 #{memo_id}을(를) 찾을 수 없습니다.", "edit": True}
+            return {"text": f"❌ Memo #{memo_id} not found.", "edit": True}
 
         content = memo.content
         self.repository.delete_memo(memo_id)
 
         result = self._handle_list(chat_id)
-        result["text"] = f"🗑️ 삭제됨: <s>{content[:20]}</s>\n\n" + result["text"]
+        result["text"] = f"🗑️ Deleted: <s>{content[:20]}</s>\n\n" + result["text"]
         return result
 
     def handle_force_reply(self, message: str, chat_id: int) -> dict:
-        """ForceReply 응답 처리 - 메모 추가."""
         content = message.strip()
 
         if not content:
             return {
-                "text": "❌ 메모 내용이 비어있습니다.",
+                "text": "❌ Memo content is empty.",
                 "reply_markup": InlineKeyboardMarkup([[
-                    InlineKeyboardButton("📝 다시 시도", callback_data="memo:add"),
+                    InlineKeyboardButton("📝 Try again", callback_data="memo:add"),
                 ]]),
             }
 
-        # 30개 제한 체크
         memos = self.repository.list_memos(chat_id)
         if len(memos) >= self.MAX_MEMOS:
             return {
-                "text": f"❌ 메모가 최대 {self.MAX_MEMOS}개입니다.\n기존 메모를 삭제 후 추가하세요.",
+                "text": f"❌ Maximum {self.MAX_MEMOS} memos reached.\nDelete some before adding new ones.",
                 "reply_markup": InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📄 목록", callback_data="memo:list")],
+                    [InlineKeyboardButton("📄 List", callback_data="memo:list")],
                 ]),
             }
 
@@ -359,12 +355,12 @@ class MemoPlugin(Plugin):
 
         keyboard = [
             [
-                InlineKeyboardButton("📄 목록", callback_data="memo:list"),
-                InlineKeyboardButton("➕ 추가", callback_data="memo:add"),
+                InlineKeyboardButton("📄 List", callback_data="memo:list"),
+                InlineKeyboardButton("➕ Add", callback_data="memo:add"),
             ]
         ]
 
         return {
-            "text": f"✅ 메모 저장됨!\n\n<b>#{memo.id}</b> {content}",
+            "text": f"✅ Memo saved!\n\n<b>#{memo.id}</b> {content}",
             "reply_markup": InlineKeyboardMarkup(keyboard),
         }

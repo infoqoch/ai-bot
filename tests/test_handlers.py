@@ -113,7 +113,7 @@ class TestBotHandlers:
 
         update.message.reply_text.assert_called_once()
         call_args = update.message.reply_text.call_args[0][0]
-        assert "권한이 없습니다" in call_args
+        assert "Access denied" in call_args
 
     @pytest.mark.asyncio
     async def test_handle_message_unauthenticated(self, handlers, mock_auth_manager):
@@ -130,7 +130,7 @@ class TestBotHandlers:
 
         update.message.reply_text.assert_called_once()
         call_args = update.message.reply_text.call_args[0][0]
-        assert "인증이 필요합니다" in call_args
+        assert "Authentication required" in call_args
 
     @pytest.mark.asyncio
     async def test_error_handler_generic_message(self, handlers):
@@ -146,7 +146,7 @@ class TestBotHandlers:
         # 사용자에게는 일반적인 메시지만 전송되어야 함
         call_kwargs = context.bot.send_message.call_args[1]
         assert "Internal error details" not in call_kwargs["text"]
-        assert "오류가 발생했습니다" in call_kwargs["text"]
+        assert "error occurred" in call_kwargs["text"]
 
 
 class TestProcessClaudeRequest:
@@ -209,7 +209,7 @@ class TestProcessClaudeRequest:
 
         bot.send_message.assert_called_once()
         call_kwargs = bot.send_message.call_args[1]
-        assert "응답 시간 초과" in call_kwargs["text"]
+        assert "timed out" in call_kwargs["text"]
 
     @pytest.mark.asyncio
     async def test_process_claude_request_cli_error(self, handlers, mock_claude_client):
@@ -230,7 +230,7 @@ class TestProcessClaudeRequest:
 
         bot.send_message.assert_called_once()
         call_kwargs = bot.send_message.call_args[1]
-        assert "오류 발생" in call_kwargs["text"]
+        assert "Error" in call_kwargs["text"]
         assert "CLI_ERROR" in call_kwargs["text"]
 
     @pytest.mark.asyncio
@@ -301,7 +301,7 @@ class TestProcessClaudeRequest:
         # 에러 메시지 전송 확인
         bot.send_message.assert_called_once()
         call_kwargs = bot.send_message.call_args[1]
-        assert "오류가 발생했습니다" in call_kwargs["text"]
+        assert "error occurred" in call_kwargs["text"]
 
 
 class TestSendMessageToChat:
@@ -526,4 +526,4 @@ class TestUserLock:
         # 두 번째 메시지에 블로킹 응답이 전송됨
         assert update2.message.reply_text.called
         reply_call = update2.message.reply_text.call_args
-        assert "세션 준비 중" in reply_call[0][0]
+        assert "Session initializing" in reply_call[0][0]

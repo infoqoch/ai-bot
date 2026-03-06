@@ -1,5 +1,6 @@
 -- SQLite Schema for Telegram Claude Bot
--- Unified repository replacing JSON-based storage
+-- 이 파일이 DB 스키마의 단일 소스 (Single Source of Truth)
+-- 테이블 추가/변경 시 이 파일만 수정
 
 PRAGMA foreign_keys = ON;
 PRAGMA journal_mode = WAL;
@@ -126,7 +127,7 @@ CREATE TABLE IF NOT EXISTS weather_locations (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Message log table: AI 메시지 요청/응답 기록
+-- Message log table: AI message request/response tracking
 CREATE TABLE IF NOT EXISTS message_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     chat_id INTEGER NOT NULL,
@@ -134,15 +135,15 @@ CREATE TABLE IF NOT EXISTS message_log (
     model TEXT NOT NULL DEFAULT 'sonnet',
     workspace_path TEXT,
 
-    -- 요청
+    -- request
     request TEXT NOT NULL,
     request_at TEXT NOT NULL DEFAULT (datetime('now')),
 
-    -- 처리 상태
-    processed INTEGER NOT NULL DEFAULT 0,  -- 0: 대기, 1: 처리중, 2: 완료
+    -- processing state
+    processed INTEGER NOT NULL DEFAULT 0,  -- 0: pending, 1: processing, 2: completed
     processed_at TEXT,
 
-    -- 응답
+    -- response
     response TEXT,
     error TEXT,
 
@@ -152,13 +153,6 @@ CREATE TABLE IF NOT EXISTS message_log (
 CREATE INDEX IF NOT EXISTS idx_message_log_chat_id ON message_log(chat_id);
 CREATE INDEX IF NOT EXISTS idx_message_log_processed ON message_log(processed);
 CREATE INDEX IF NOT EXISTS idx_message_log_request_at ON message_log(request_at);
-
--- Migration tracking table
-CREATE TABLE IF NOT EXISTS migrations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    applied_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
 
 -- Triggers for updated_at
 CREATE TRIGGER IF NOT EXISTS update_users_timestamp

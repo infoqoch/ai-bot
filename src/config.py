@@ -153,13 +153,13 @@ class Settings(BaseSettings):
         expanded = Path(path).expanduser().resolve()
 
         if not expanded.exists():
-            return False, f"경로가 존재하지 않습니다: {path}"
+            return False, f"Path does not exist: {path}"
 
         if not expanded.is_dir():
-            return False, f"디렉토리가 아닙니다: {path}"
+            return False, f"Not a directory: {path}"
 
         if not self.is_allowed_project_path(path):
-            return False, f"허용되지 않은 경로입니다: {path}"
+            return False, f"Path not allowed: {path}"
 
         # CLAUDE.md 또는 .claude 디렉토리 존재 확인 (권장사항)
         has_claude_config = (
@@ -167,7 +167,7 @@ class Settings(BaseSettings):
             (expanded / ".claude").exists()
         )
 
-        return True, "" if has_claude_config else "⚠️ CLAUDE.md 없음 (선택사항)"
+        return True, "" if has_claude_config else "⚠️ No CLAUDE.md (optional)"
 
 
 @lru_cache

@@ -283,7 +283,7 @@ class TestScheduleService:
 
         result = service.get_status_text("user1")
 
-        assert "없습니다" in result
+        assert "No scheduled tasks" in result
 
     def test_get_status_text_with_schedules(self, service, mock_repo):
         """Test status text with schedules."""

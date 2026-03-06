@@ -51,7 +51,7 @@ class TestGetSystemJobsText:
         self.manager.register_daily("session_compact", callback, time(22, 0), "SessionScheduler")
 
         text = self.manager.get_system_jobs_text()
-        assert "시스템 작업" in text
+        assert "System Jobs" in text
         assert "todo_morning" in text
         assert "session_compact" in text
 
@@ -141,7 +141,7 @@ class TestScheduleExecutor:
             workspace_path=None,
         )
 
-        response = text or error or "(응답 없음)"
+        response = text or error or "(no response)"
         assert response == "응답 텍스트"
 
     @pytest.mark.asyncio
@@ -157,7 +157,7 @@ class TestScheduleExecutor:
             workspace_path=None,
         )
 
-        response = text or error or "(응답 없음)"
+        response = text or error or "(no response)"
         assert response == "TIMEOUT"
 
     @pytest.mark.asyncio
@@ -173,8 +173,8 @@ class TestScheduleExecutor:
             workspace_path=None,
         )
 
-        response = text or error or "(응답 없음)"
-        assert response == "(응답 없음)"
+        response = text or error or "(no response)"
+        assert response == "(no response)"
 
     @pytest.mark.asyncio
     async def test_executor_claude_type_no_workspace(self):
@@ -432,7 +432,7 @@ class TestSchedulerMinuteSelection:
         text = call_kwargs[0][0] if call_kwargs[0] else call_kwargs[1].get("text", "")
 
         # 분 선택 관련 텍스트
-        assert "10시" in text or "minute" in text.lower() or "Select minute" in text
+        assert "10:00" in text or "minute" in text.lower() or "Select minute" in text
 
         # reply_markup에 분 버튼이 있는지
         markup = call_kwargs[1].get("reply_markup") if len(call_kwargs) > 1 else call_kwargs[0][1] if len(call_kwargs[0]) > 1 else None
@@ -571,7 +571,7 @@ class TestSchedulerSystemJobsIntegration:
         context = MagicMock()
 
         with patch("src.scheduler_manager.scheduler_manager") as mock_sm:
-            mock_sm.get_system_jobs_text.return_value = "\n\n시스템 작업\n  매일 08:00 KST - todo_morning"
+            mock_sm.get_system_jobs_text.return_value = "\n\n⚙️ <b>System Jobs</b>\n  Daily 08:00 KST - todo_morning"
 
             await handlers.scheduler_command(update, context)
 
@@ -581,7 +581,7 @@ class TestSchedulerSystemJobsIntegration:
             # reply_text에 시스템 잡 정보 포함
             reply_call = update.message.reply_text.call_args
             text = reply_call[0][0] if reply_call[0] else reply_call[1].get("text", "")
-            assert "시스템 작업" in text
+            assert "System Jobs" in text
             assert "todo_morning" in text
 
 

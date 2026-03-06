@@ -101,9 +101,9 @@ class SchedulerManager:
                 data=data,
             )
 
-            schedule_info = f"매일 {time_of_day.strftime('%H:%M')} KST"
+            schedule_info = f"Daily {time_of_day.strftime('%H:%M')} KST"
             if days != (0, 1, 2, 3, 4, 5, 6):
-                day_names = ["월", "화", "수", "목", "금", "토", "일"]
+                day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
                 schedule_info = f"{','.join(day_names[d] for d in days)} {time_of_day.strftime('%H:%M')} KST"
 
             self._jobs[name] = ScheduledJob(
@@ -159,11 +159,11 @@ class SchedulerManager:
             )
 
             if interval >= 3600:
-                schedule_info = f"매 {int(interval // 3600)}시간마다"
+                schedule_info = f"Every {int(interval // 3600)}h"
             elif interval >= 60:
-                schedule_info = f"매 {int(interval // 60)}분마다"
+                schedule_info = f"Every {int(interval // 60)}m"
             else:
-                schedule_info = f"매 {int(interval)}초마다"
+                schedule_info = f"Every {int(interval)}s"
 
             self._jobs[name] = ScheduledJob(
                 name=name,
@@ -212,7 +212,7 @@ class SchedulerManager:
                 data=data,
             )
 
-            schedule_info = f"{int(when)}초 후 1회"
+            schedule_info = f"Once in {int(when)}s"
 
             self._jobs[name] = ScheduledJob(
                 name=name,
@@ -281,9 +281,9 @@ class SchedulerManager:
     def get_status_text(self) -> str:
         """등록된 작업 현황 텍스트 생성."""
         if not self._jobs:
-            return "등록된 스케줄 작업 없음"
+            return "No scheduled jobs"
 
-        lines = [f"📅 <b>스케줄 작업</b> ({len(self._jobs)}개)\n"]
+        lines = [f"📅 <b>Scheduled Jobs</b> ({len(self._jobs)})\n"]
 
         # owner별로 그룹화
         by_owner: dict[str, list[ScheduledJob]] = {}
@@ -309,7 +309,7 @@ class SchedulerManager:
         if not system_jobs:
             return ""
 
-        lines = ["\n\n⚙️ <b>시스템 작업</b>"]
+        lines = ["\n\n⚙️ <b>System Jobs</b>"]
         for job in system_jobs:
             lines.append(f"  {job.schedule_info} - {job.name}")
 

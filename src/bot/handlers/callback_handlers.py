@@ -110,7 +110,7 @@ class CallbackHandlers(BaseHandler):
 
         session_id = await self.claude.create_session()
         if not session_id:
-            await update.message.reply_text("❌ 세션 생성 실패")
+            await update.message.reply_text("❌ Session creation failed.")
             return
 
         session_name = name.strip()[:50] if name.strip() else ""
@@ -445,7 +445,7 @@ class CallbackHandlers(BaseHandler):
 
         session_id = await self.claude.create_session()
         if not session_id:
-            await query.edit_message_text("❌ 세션 생성 실패")
+            await query.edit_message_text("❌ Session creation failed.")
             return
 
         self.sessions.create_session(user_id, session_id, model=model_name, name=name, first_message="(new session)")
@@ -472,7 +472,7 @@ class CallbackHandlers(BaseHandler):
         user_id = str(chat_id)
         session = self.sessions.get_session_by_prefix(user_id, session_id[:8])
         if not session:
-            await query.edit_message_text("❌ 세션을 찾을 수 없습니다.")
+            await query.edit_message_text("❌ Session not found.")
             return
 
         full_session_id = session.get("full_session_id", session_id)
@@ -507,7 +507,7 @@ class CallbackHandlers(BaseHandler):
         user_id = str(chat_id)
         session = self.sessions.get_session_by_prefix(user_id, session_id[:8])
         if not session:
-            await query.edit_message_text("❌ 세션을 찾을 수 없습니다.")
+            await query.edit_message_text("❌ Session not found.")
             return
 
         full_session_id = session.get("full_session_id", session_id)
@@ -547,7 +547,7 @@ class CallbackHandlers(BaseHandler):
         user_id = str(chat_id)
         session = self.sessions.get_session_by_prefix(user_id, session_id[:8])
         if not session:
-            await query.edit_message_text("❌ 세션을 찾을 수 없습니다.")
+            await query.edit_message_text("❌ Session not found.")
             return
 
         full_session_id = session.get("full_session_id", session_id)
@@ -575,7 +575,7 @@ class CallbackHandlers(BaseHandler):
         user_id = str(chat_id)
         session = self.sessions.get_session_by_prefix(user_id, session_id[:8])
         if not session:
-            await query.edit_message_text("❌ 세션을 찾을 수 없습니다.")
+            await query.edit_message_text("❌ Session not found.")
             return
 
         full_session_id = session.get("full_session_id", session_id)
@@ -659,7 +659,7 @@ class CallbackHandlers(BaseHandler):
         user_id = str(chat_id)
         session = self.sessions.get_session_by_prefix(user_id, session_id[:8])
         if not session:
-            await query.edit_message_text("❌ 세션을 찾을 수 없습니다.")
+            await query.edit_message_text("❌ Session not found.")
             return
 
         full_session_id = session.get("full_session_id", session_id)
@@ -803,7 +803,7 @@ class CallbackHandlers(BaseHandler):
             row = []
             for hour in AVAILABLE_HOURS:
                 row.append(InlineKeyboardButton(
-                    f"{hour:02d}시",
+                    f"{hour:02d}h",
                     callback_data=f"sched:chtime_hour:{schedule_id}:{hour}"
                 ))
                 if len(row) == 4:
@@ -849,7 +849,7 @@ class CallbackHandlers(BaseHandler):
 
             await query.edit_message_text(
                 f"<b>Change Time</b>\n\n"
-                f"New hour: <b>{hour:02d}시</b>\n\n"
+                f"New hour: <b>{hour:02d}h</b>\n\n"
                 f"Select minute:",
                 reply_markup=InlineKeyboardMarkup(buttons),
                 parse_mode="HTML"
@@ -886,7 +886,7 @@ class CallbackHandlers(BaseHandler):
             row = []
             for hour in AVAILABLE_HOURS:
                 row.append(InlineKeyboardButton(
-                    f"{hour:02d}시",
+                    f"{hour:02d}h",
                     callback_data=f"sched:time:claude:_:{hour}"
                 ))
                 if len(row) == 4:
@@ -917,8 +917,8 @@ class CallbackHandlers(BaseHandler):
             workspaces = self._workspace_registry.list_by_user(user_id)
             if not workspaces:
                 await query.edit_message_text(
-                    "<b>등록된 워크스페이스가 없습니다.</b>\n\n"
-                    "/workspace 에서 먼저 워크스페이스를 등록하세요.",
+                    "<b>No workspaces registered.</b>\n\n"
+                    "Register one first at /workspace.",
                     parse_mode="HTML"
                 )
                 await query.answer()
@@ -954,7 +954,7 @@ class CallbackHandlers(BaseHandler):
         if action == "add:plugin":
             if not self.plugins or not self.plugins.plugins:
                 await query.edit_message_text(
-                    "<b>로드된 플러그인이 없습니다.</b>",
+                    "<b>No plugins loaded.</b>",
                     parse_mode="HTML"
                 )
                 await query.answer()
@@ -969,7 +969,7 @@ class CallbackHandlers(BaseHandler):
                     plugin_map[idx] = {"name": plugin.name, "actions": actions}
                     buttons.append([
                         InlineKeyboardButton(
-                            f"🔌 {plugin.name} ({len(actions)}개 액션)",
+                            f"🔌 {plugin.name} ({len(actions)} actions)",
                             callback_data=f"sched:plugin:{idx}"
                         )
                     ])
@@ -977,8 +977,8 @@ class CallbackHandlers(BaseHandler):
 
             if not buttons:
                 await query.edit_message_text(
-                    "<b>스케줄 가능한 플러그인이 없습니다.</b>\n\n"
-                    "플러그인에 <code>get_scheduled_actions()</code>를 구현하세요.",
+                    "<b>No schedulable plugins.</b>\n\n"
+                    "Implement <code>get_scheduled_actions()</code> in your plugin.",
                     parse_mode="HTML"
                 )
                 await query.answer()
@@ -1062,7 +1062,7 @@ class CallbackHandlers(BaseHandler):
             row = []
             for hour in AVAILABLE_HOURS:
                 row.append(InlineKeyboardButton(
-                    f"{hour:02d}시",
+                    f"{hour:02d}h",
                     callback_data=f"sched:time:plugin:_:{hour}"
                 ))
                 if len(row) == 4:
@@ -1103,7 +1103,7 @@ class CallbackHandlers(BaseHandler):
             row = []
             for hour in AVAILABLE_HOURS:
                 row.append(InlineKeyboardButton(
-                    f"{hour:02d}시",
+                    f"{hour:02d}h",
                     callback_data=f"sched:time:workspace:{path_idx}:{hour}"
                 ))
                 if len(row) == 4:
@@ -1149,7 +1149,7 @@ class CallbackHandlers(BaseHandler):
 
             self._pending_schedule_input[user_id] = pending
 
-            # 분 선택 버튼 (00~55, 5분 단위)
+            # Minute selection buttons (00~55, 5-min intervals)
             buttons = []
             row = []
             for minute in range(0, 60, 5):
@@ -1171,7 +1171,7 @@ class CallbackHandlers(BaseHandler):
 
             await query.edit_message_text(
                 f"<b>Add {type_label} Schedule</b>\n\n"
-                f"Hour: <b>{hour:02d}시</b>{path_info}\n\n"
+                f"Hour: <b>{hour:02d}h</b>{path_info}\n\n"
                 f"Select minute:",
                 reply_markup=InlineKeyboardMarkup(buttons),
                 parse_mode="HTML"
@@ -1272,8 +1272,8 @@ class CallbackHandlers(BaseHandler):
             )
 
             await query.message.reply_text(
-                "예약 메시지를 입력하세요 (schedule_input):",
-                reply_markup=ForceReply(selective=True, input_field_placeholder="예: 오늘 할 일 정리해줘")
+                "Enter scheduled message (schedule_input):",
+                reply_markup=ForceReply(selective=True, input_field_placeholder="e.g., Summarize today's tasks")
             )
             await query.answer()
             return
@@ -1320,7 +1320,7 @@ class CallbackHandlers(BaseHandler):
         if action == "s":
             session_info = self.sessions.get_session_by_prefix(user_id, target[:8])
             if not session_info:
-                await query.edit_message_text("❌ 세션을 찾을 수 없습니다.")
+                await query.edit_message_text("❌ Session not found.")
                 return
 
             full_session_id = session_info["full_session_id"]
@@ -1354,7 +1354,7 @@ class CallbackHandlers(BaseHandler):
             logger.info(f"Alternative session - creating new {model} session")
             new_session_id = await self.claude.create_session()
             if not new_session_id:
-                await query.message.reply_text("❌ 세션 생성 실패. Please try again.")
+                await query.message.reply_text("❌ Session creation failed.. Please try again.")
                 return
 
             self.sessions.create_session(user_id, new_session_id, model=model, first_message=message)
@@ -1462,7 +1462,7 @@ class CallbackHandlers(BaseHandler):
                     break
 
             if not target_session:
-                await query.edit_message_text("❌ 세션을 찾을 수 없습니다.")
+                await query.edit_message_text("❌ Session not found.")
                 return
 
             target_session_id = target_session["full_session_id"]
@@ -1503,7 +1503,7 @@ class CallbackHandlers(BaseHandler):
 
             new_session_id = await self.claude.create_session()
             if not new_session_id:
-                await query.message.reply_text("❌ 세션 생성 실패. Please try again.")
+                await query.message.reply_text("❌ Session creation failed.. Please try again.")
                 return
 
             self.sessions.create_session(user_id, new_session_id, model=new_model, first_message=message)

@@ -20,20 +20,20 @@ async def send_dev_report(
         print("⚠️ ADMIN_CHAT_ID not set, skipping notification")
         return False
 
-    changes_text = "\n".join(f"• {c}" for c in changes) if changes else "• (없음)"
-    files_text = "\n".join(f"• {f}" for f in files) if files else "• (없음)"
-    test_status = "✅ 통과" if test_passed else "❌ 실패"
+    changes_text = "\n".join(f"• {c}" for c in changes) if changes else "• (none)"
+    files_text = "\n".join(f"• {f}" for f in files) if files else "• (none)"
+    test_status = "✅ Passed" if test_passed else "❌ Failed"
 
-    message = f"""🔧 <b>개발 완료 리포트</b>
+    message = f"""🔧 <b>Deploy Report</b>
 
-📝 <b>변경사항:</b>
+📝 <b>Changes:</b>
 {changes_text}
 
-📁 <b>수정된 파일:</b>
+📁 <b>Modified Files:</b>
 {files_text}
 
-🧪 <b>테스트:</b> {test_status}
-🚀 <b>상태:</b> 배포 완료"""
+🧪 <b>Tests:</b> {test_status}
+🚀 <b>Status:</b> Deployed"""
 
     if extra_message:
         message += f"\n\n💬 {extra_message}"
@@ -80,4 +80,4 @@ if __name__ == "__main__":
         files = []
     
     success = notify_sync(changes, files)
-    print("✅ 리포트 전송 완료" if success else "❌ 리포트 전송 실패")
+    print("✅ Report sent" if success else "❌ Report send failed")

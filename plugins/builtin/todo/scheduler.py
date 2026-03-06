@@ -1,4 +1,4 @@
-"""Todo 스케줄러 - 어제 할일 리포트."""
+"""Todo scheduler - yesterday report and daily wrap-up."""
 
 from datetime import date, time, timedelta
 from typing import Optional, TYPE_CHECKING
@@ -17,7 +17,7 @@ KST = ZoneInfo("Asia/Seoul")
 
 
 class TodoScheduler:
-    """어제 할일 리포트 스케줄러."""
+    """Yesterday report and daily wrap-up scheduler."""
 
     OWNER = "TodoScheduler"
 
@@ -27,7 +27,7 @@ class TodoScheduler:
         self._app: Optional["Application"] = None
 
     def setup_jobs(self, app: "Application") -> None:
-        """스케줄 작업 설정."""
+        """Set up scheduled jobs."""
         self._app = app
         scheduler_manager.unregister_by_owner(self.OWNER)
 
@@ -45,11 +45,11 @@ class TodoScheduler:
             owner=self.OWNER,
         )
 
-        logger.info("Todo 스케줄러 설정 완료 - 어제 리포트(09:00), 하루 마무리(21:00)")
+        logger.info("Todo scheduler setup complete - Yesterday report(09:00), Daily wrap-up(21:00)")
 
     async def _yesterday_report_callback(self, context) -> None:
-        """09:00 - 어제 할일 리포트."""
-        logger.info("어제 할일 리포트 시작")
+        """09:00 - Yesterday's todo report."""
+        logger.info("Yesterday todo report starting")
         yesterday = (date.today() - timedelta(days=1)).isoformat()
 
         for chat_id in self.chat_ids:
@@ -58,7 +58,7 @@ class TodoScheduler:
                 if not todos:
                     continue
 
-                lines = [f"📋 <b>어제({yesterday}) 할일 리포트</b>\n"]
+                lines = [f"📋 <b>Yesterday's Todos ({yesterday})</b>\n"]
                 pending_count = 0
                 for todo in todos:
                     status = "✅" if todo.done else "⬜"
@@ -67,16 +67,16 @@ class TodoScheduler:
                         pending_count += 1
 
                 done_count = len(todos) - pending_count
-                lines.append(f"\n📊 {done_count}/{len(todos)} 완료")
+                lines.append(f"\n📊 {done_count}/{len(todos)} completed")
 
                 buttons = []
                 if pending_count > 0:
-                    lines.append(f"\n미완료 {pending_count}개 항목을 오늘로 이전할 수 있어요.")
+                    lines.append(f"\n{pending_count} incomplete items can be carried over to today.")
                     buttons.append([
-                        InlineKeyboardButton("📋 미완료 항목 이전", callback_data="td:yday"),
+                        InlineKeyboardButton("📋 Carry over", callback_data="td:yday"),
                     ])
                 buttons.append([
-                    InlineKeyboardButton("📄 오늘 할일", callback_data="td:list"),
+                    InlineKeyboardButton("📄 Today", callback_data="td:list"),
                 ])
 
                 await context.bot.send_message(
@@ -85,14 +85,14 @@ class TodoScheduler:
                     parse_mode="HTML",
                     reply_markup=InlineKeyboardMarkup(buttons)
                 )
-                logger.info(f"어제 할일 리포트 전송: chat_id={chat_id}")
+                logger.info(f"Yesterday todo report sent: chat_id={chat_id}")
 
             except Exception as e:
-                logger.error(f"어제 할일 리포트 실패: chat_id={chat_id}, error={e}")
+                logger.error(f"Yesterday todo report failed: chat_id={chat_id}, error={e}")
 
     async def _daily_wrap_callback(self, context) -> None:
-        """21:00 - 하루 마무리."""
-        logger.info("하루 마무리 알림 시작")
+        """21:00 - Daily wrap-up."""
+        logger.info("Daily wrap-up starting")
         today = date.today().isoformat()
 
         for chat_id in self.chat_ids:
@@ -101,27 +101,27 @@ class TodoScheduler:
                 if stats["total"] == 0:
                     continue
 
-                lines = ["🌙 <b>하루 마무리</b>\n"]
+                lines = ["🌙 <b>Daily Wrap-up</b>\n"]
 
                 if stats["pending"] == 0:
-                    lines.append("🎉 오늘 할일을 모두 완료했어요!")
+                    lines.append("🎉 All todos completed today!")
                 else:
-                    lines.append(f"📊 오늘 진행률: {stats['done']}/{stats['total']} 완료\n")
-                    lines.append("<b>미완료 항목:</b>")
+                    lines.append(f"📊 Today's progress: {stats['done']}/{stats['total']} completed\n")
+                    lines.append("<b>Incomplete:</b>")
 
                     pending = self.repository.get_pending_todos(chat_id, today)
                     for todo in pending:
                         lines.append(f"  ⬜ {todo.text}")
 
-                    lines.append("\n내일로 넘길 항목이 있나요?")
+                    lines.append("\nAny items to move to tomorrow?")
 
                 buttons = []
                 if stats["pending"] > 0:
                     buttons.append([
-                        InlineKeyboardButton("📋 멀티 선택", callback_data="td:multi"),
+                        InlineKeyboardButton("📋 Multi-select", callback_data="td:multi"),
                     ])
                 buttons.append([
-                    InlineKeyboardButton("📄 리스트", callback_data="td:list"),
+                    InlineKeyboardButton("📄 List", callback_data="td:list"),
                 ])
 
                 await context.bot.send_message(
@@ -130,7 +130,7 @@ class TodoScheduler:
                     parse_mode="HTML",
                     reply_markup=InlineKeyboardMarkup(buttons)
                 )
-                logger.info(f"하루 마무리 알림 전송: chat_id={chat_id}")
+                logger.info(f"Daily wrap-up sent: chat_id={chat_id}")
 
             except Exception as e:
-                logger.error(f"하루 마무리 알림 실패: chat_id={chat_id}, error={e}")
+                logger.error(f"Daily wrap-up failed: chat_id={chat_id}, error={e}")

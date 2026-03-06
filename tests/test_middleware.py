@@ -209,7 +209,7 @@ class TestAuthorizedOnlyDecorator:
 
         assert handler.method_called is False
         assert result is None
-        assert update.reply_message == "⛔ 권한이 없습니다."
+        assert update.reply_message == "⛔ Access denied."
 
     def test_authorized_only_preserves_method_name(self):
         """functools.wraps로 메서드 이름 보존 확인."""
@@ -261,7 +261,7 @@ class TestAuthenticatedOnlyDecorator:
 
         assert handler.method_called is False
         assert result is None
-        assert update.reply_message == "🔒 먼저 인증이 필요합니다.\n/auth <키>"
+        assert update.reply_message == "🔒 Authentication required first.\n/auth <key>"
 
     def test_authenticated_only_preserves_method_name(self):
         """functools.wraps로 메서드 이름 보존 확인."""
@@ -310,7 +310,7 @@ class TestRequireAuthDecoratorFactory:
         result = await handler(update, None)
 
         assert result is None
-        assert update.reply_message == "⛔ 권한이 없습니다."
+        assert update.reply_message == "⛔ Access denied."
 
     @pytest.mark.asyncio
     async def test_require_auth_decorator_unauthenticated(self):
@@ -327,7 +327,7 @@ class TestRequireAuthDecoratorFactory:
         result = await handler(update, None)
 
         assert result is None
-        assert "🔒 인증이 필요합니다." in update.reply_message
+        assert "🔒 Authentication required." in update.reply_message
 
 
 class TestRequireAllowedChatDecoratorFactory:
@@ -360,7 +360,7 @@ class TestRequireAllowedChatDecoratorFactory:
         result = await handler(update, None)
 
         assert result is None
-        assert update.reply_message == "⛔ 권한이 없습니다."
+        assert update.reply_message == "⛔ Access denied."
 
     @pytest.mark.asyncio
     async def test_require_allowed_chat_empty_list_allows_all(self):

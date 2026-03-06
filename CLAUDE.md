@@ -64,7 +64,25 @@ def process():
 
 - **SQLite Repository** 단일 사용 (`.data/bot.db`)
 - JSON 파일 기반 저장 금지
-- 기존 JSON 데이터 → 마이그레이션으로 SQLite 변환
+
+### DDL 관리 (CRITICAL)
+
+- **`src/repository/schema.sql`** = DB 스키마의 **단일 소스 (Single Source of Truth)**
+- 테이블 추가/변경 시 `schema.sql`만 수정
+- `CREATE TABLE IF NOT EXISTS` + `CREATE INDEX IF NOT EXISTS`로 멱등성 보장
+- 별도 마이그레이션 시스템 없음 (로컬 싱글유저 봇이므로 불필요)
+- 봇 시작 시 `init_schema()`가 `schema.sql` 실행 → 테이블 자동 생성
+
+```
+봇 시작 → get_connection() → init_schema(schema.sql) → Repository 생성
+```
+
+| 상황 | 처리 방법 |
+|------|----------|
+| 새 테이블 추가 | `schema.sql`에 `CREATE TABLE IF NOT EXISTS` 추가 |
+| 컬럼 추가 | `schema.sql` 수정 + 기존 DB는 재생성 |
+| 테이블 구조 변경 | `schema.sql` 수정 + 기존 DB 재생성 |
+| 최초 실행 | `schema.sql`이 모든 테이블 자동 생성 |
 
 ## 개발 루틴
 

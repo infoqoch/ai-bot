@@ -1,4 +1,4 @@
-"""날씨 플러그인 - 버튼 기반 날씨 조회 (Open-Meteo API)."""
+"""Weather plugin - button-based weather lookup (Open-Meteo API)."""
 
 import re
 from typing import Optional
@@ -10,16 +10,16 @@ from src.plugins.loader import Plugin, PluginResult
 
 
 class WeatherPlugin(Plugin):
-    """버튼 기반 날씨 조회 플러그인 (Open-Meteo API)."""
+    """Button-based weather plugin (Open-Meteo API)."""
 
     name = "weather"
-    description = "날씨 조회 및 위치 설정"
+    description = "Weather lookup and location settings"
     usage = (
-        "🌤️ <b>날씨 플러그인 사용법</b>\n\n"
-        "<b>날씨 조회</b>\n"
-        "• <code>날씨</code> - 버튼으로 도시 선택\n"
-        "• <code>서울 날씨</code> - 특정 도시 날씨\n\n"
-        "<b>위치 설정</b>\n"
+        "🌤️ <b>Weather Plugin</b>\n\n"
+        "<b>Check Weather</b>\n"
+        "• <code>날씨</code> - Select city\n"
+        "• <code>서울 날씨</code> - Specific city\n\n"
+        "<b>Set Location</b>\n"
         "• <code>위치 설정: 서울</code>"
     )
 
@@ -71,17 +71,16 @@ class WeatherPlugin(Plugin):
     ]
 
     WEATHER_CODES = {
-        0: ("☀️", "맑음"), 1: ("🌤️", "대체로 맑음"), 2: ("⛅", "구름 조금"),
-        3: ("☁️", "흐림"), 45: ("🌫️", "안개"), 48: ("🌫️", "안개(서리)"),
-        51: ("🌧️", "이슬비"), 53: ("🌧️", "이슬비"), 55: ("🌧️", "이슬비"),
-        61: ("🌧️", "비"), 63: ("🌧️", "비"), 65: ("🌧️", "폭우"),
-        71: ("🌨️", "눈"), 73: ("🌨️", "눈"), 75: ("❄️", "폭설"),
-        80: ("🌦️", "소나기"), 81: ("🌦️", "소나기"), 82: ("⛈️", "폭우"),
-        95: ("⛈️", "뇌우"), 96: ("⛈️", "뇌우(우박)"), 99: ("⛈️", "뇌우(우박)"),
+        0: ("☀️", "Clear"), 1: ("🌤️", "Mostly clear"), 2: ("⛅", "Partly cloudy"),
+        3: ("☁️", "Overcast"), 45: ("🌫️", "Fog"), 48: ("🌫️", "Rime fog"),
+        51: ("🌧️", "Drizzle"), 53: ("🌧️", "Drizzle"), 55: ("🌧️", "Drizzle"),
+        61: ("🌧️", "Rain"), 63: ("🌧️", "Rain"), 65: ("🌧️", "Heavy rain"),
+        71: ("🌨️", "Snow"), 73: ("🌨️", "Snow"), 75: ("❄️", "Heavy snow"),
+        80: ("🌦️", "Showers"), 81: ("🌦️", "Showers"), 82: ("⛈️", "Heavy showers"),
+        95: ("⛈️", "Thunderstorm"), 96: ("⛈️", "Thunderstorm (hail)"), 99: ("⛈️", "Thunderstorm (hail)"),
     }
 
     async def can_handle(self, message: str, chat_id: int) -> bool:
-        """날씨 관련 메시지인지 확인."""
         msg = message.strip()
 
         for pattern in self.EXCLUDE_PATTERNS:
@@ -99,7 +98,6 @@ class WeatherPlugin(Plugin):
         return False
 
     async def handle(self, message: str, chat_id: int) -> PluginResult:
-        """날씨 명령 처리."""
         msg = message.strip()
 
         for pattern in self.SET_LOCATION_PATTERNS:
@@ -119,12 +117,11 @@ class WeatherPlugin(Plugin):
         return await self._get_weather(chat_id)
 
     def handle_callback(self, callback_data: str, chat_id: int) -> dict:
-        """callback_data 처리."""
         import asyncio
 
         parts = callback_data.split(":")
         if len(parts) < 2:
-            return {"text": "❌ 잘못된 요청", "edit": True}
+            return {"text": "❌ Invalid request.", "edit": True}
 
         action = parts[1]
 
@@ -138,13 +135,12 @@ class WeatherPlugin(Plugin):
         elif action == "select":
             return self._handle_city_select(chat_id)
         else:
-            return {"text": "❌ 알 수 없는 명령", "edit": True}
+            return {"text": "❌ Unknown command.", "edit": True}
 
     async def handle_callback_async(self, callback_data: str, chat_id: int) -> dict:
-        """비동기 callback_data 처리."""
         parts = callback_data.split(":")
         if len(parts) < 2:
-            return {"text": "❌ 잘못된 요청", "edit": True}
+            return {"text": "❌ Invalid request.", "edit": True}
 
         action = parts[1]
 
@@ -156,10 +152,9 @@ class WeatherPlugin(Plugin):
         elif action == "select":
             return self._handle_city_select(chat_id)
         else:
-            return {"text": "❌ 알 수 없는 명령", "edit": True}
+            return {"text": "❌ Unknown command.", "edit": True}
 
     def _handle_city_select(self, chat_id: int) -> dict:
-        """도시 선택 화면."""
         buttons = []
         row = []
         for city in self.QUICK_CITIES:
@@ -171,20 +166,19 @@ class WeatherPlugin(Plugin):
             buttons.append(row)
 
         return {
-            "text": "🌤️ <b>도시 선택</b>\n\n날씨를 확인할 도시를 선택하세요:",
+            "text": "🌤️ <b>Select City</b>\n\nChoose a city to check weather:",
             "reply_markup": InlineKeyboardMarkup(buttons),
             "edit": True,
         }
 
     async def _handle_city_weather(self, chat_id: int, city: str) -> dict:
-        """특정 도시 날씨 조회."""
         geo = await self._geocode(city)
         if not geo:
-            return {"text": f"❌ '{city}'을(를) 찾을 수 없습니다.", "edit": True}
+            return {"text": f"❌ City '{city}' not found.", "edit": True}
 
         weather = await self._fetch_weather(geo["lat"], geo["lon"])
         if not weather:
-            return {"text": "❌ 날씨 정보를 가져올 수 없습니다.", "edit": True}
+            return {"text": "❌ Unable to fetch weather data.", "edit": True}
 
         text = self._format_weather(geo, weather)
 
@@ -192,8 +186,8 @@ class WeatherPlugin(Plugin):
             [InlineKeyboardButton(c, callback_data=f"weather:city:{c}") for c in self.QUICK_CITIES[:4]],
             [InlineKeyboardButton(c, callback_data=f"weather:city:{c}") for c in self.QUICK_CITIES[4:]],
             [
-                InlineKeyboardButton("🔄 새로고침", callback_data=f"weather:city:{city}"),
-                InlineKeyboardButton("📍 다른 도시", callback_data="weather:select"),
+                InlineKeyboardButton("🔄 Refresh", callback_data=f"weather:city:{city}"),
+                InlineKeyboardButton("📍 Other city", callback_data="weather:select"),
             ]
         ]
 
@@ -204,14 +198,13 @@ class WeatherPlugin(Plugin):
         }
 
     async def _handle_refresh(self, chat_id: int) -> dict:
-        """현재 위치 날씨 새로고침."""
         location = self._load_location(chat_id)
         if not location:
             return self._handle_city_select(chat_id)
 
         weather = await self._fetch_weather(location["lat"], location["lon"])
         if not weather:
-            return {"text": "❌ 날씨 정보를 가져올 수 없습니다.", "edit": True}
+            return {"text": "❌ Unable to fetch weather data.", "edit": True}
 
         text = self._format_weather(location, weather)
 
@@ -219,8 +212,8 @@ class WeatherPlugin(Plugin):
             [InlineKeyboardButton(c, callback_data=f"weather:city:{c}") for c in self.QUICK_CITIES[:4]],
             [InlineKeyboardButton(c, callback_data=f"weather:city:{c}") for c in self.QUICK_CITIES[4:]],
             [
-                InlineKeyboardButton("🔄 새로고침", callback_data="weather:refresh"),
-                InlineKeyboardButton("📍 다른 도시", callback_data="weather:select"),
+                InlineKeyboardButton("🔄 Refresh", callback_data="weather:refresh"),
+                InlineKeyboardButton("📍 Other city", callback_data="weather:select"),
             ]
         ]
 
@@ -231,13 +224,12 @@ class WeatherPlugin(Plugin):
         }
 
     def _format_weather(self, location: dict, weather: dict) -> str:
-        """날씨 데이터 포맷팅."""
         current = weather.get("current", {})
         temp = current.get("temperature_2m", "?")
         humidity = current.get("relative_humidity_2m", "?")
         wind = current.get("wind_speed_10m", "?")
         code = current.get("weather_code", 0)
-        emoji, desc = self.WEATHER_CODES.get(code, ("🌡️", "알 수 없음"))
+        emoji, desc = self.WEATHER_CODES.get(code, ("🌡️", "Unknown"))
 
         daily = weather.get("daily", {})
         dates = daily.get("time", [])
@@ -255,18 +247,17 @@ class WeatherPlugin(Plugin):
         forecast_text = "\n".join(forecast_lines)
 
         return (
-            f"{emoji} <b>{location['name']} 날씨</b>\n\n"
-            f"<b>현재</b>\n"
-            f"• 날씨: {desc}\n"
-            f"• 기온: {temp}°C\n"
-            f"• 습도: {humidity}%\n"
-            f"• 풍속: {wind} km/h\n\n"
-            f"<b>3일 예보</b>\n"
+            f"{emoji} <b>{location['name']} Weather</b>\n\n"
+            f"<b>Current</b>\n"
+            f"• Weather: {desc}\n"
+            f"• Temp: {temp}°C\n"
+            f"• Humidity: {humidity}%\n"
+            f"• Wind: {wind} km/h\n\n"
+            f"<b>3-Day Forecast</b>\n"
             f"<code>{forecast_text}</code>"
         )
 
     def _load_location(self, chat_id: int) -> Optional[dict]:
-        """저장된 위치 로드."""
         loc = self.repository.get_weather_location(chat_id)
         if loc:
             return {
@@ -278,7 +269,6 @@ class WeatherPlugin(Plugin):
         return None
 
     def _save_location(self, chat_id: int, location: dict) -> None:
-        """위치 저장."""
         self.repository.set_weather_location(
             chat_id=chat_id,
             name=location.get("name", "Unknown"),
@@ -288,7 +278,6 @@ class WeatherPlugin(Plugin):
         )
 
     async def _geocode(self, query: str) -> Optional[dict]:
-        """지명 → 좌표 변환."""
         try:
             search_query = self.KOREAN_TO_ENGLISH.get(query, query)
 
@@ -312,7 +301,6 @@ class WeatherPlugin(Plugin):
             return None
 
     async def _fetch_weather(self, lat: float, lon: float) -> Optional[dict]:
-        """날씨 데이터 조회."""
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 params = {
@@ -331,44 +319,42 @@ class WeatherPlugin(Plugin):
             return None
 
     async def _set_location(self, chat_id: int, location_name: str) -> PluginResult:
-        """위치 설정."""
         geo = await self._geocode(location_name)
         if not geo:
             return PluginResult(
                 handled=True,
-                response=f"❌ '{location_name}'을(를) 찾을 수 없습니다.\n다른 지명으로 시도해주세요."
+                response=f"❌ '{location_name}' not found.\nTry a different location."
             )
 
         self._save_location(chat_id, geo)
 
         keyboard = [[
-            InlineKeyboardButton("🌤️ 날씨 보기", callback_data="weather:refresh"),
+            InlineKeyboardButton("🌤️ Check weather", callback_data="weather:refresh"),
         ]]
 
         return PluginResult(
             handled=True,
             response=(
-                f"📍 위치 설정 완료!\n\n"
+                f"📍 Location set!\n\n"
                 f"<b>{geo['name']}</b> ({geo['country']})\n"
-                f"위도: {geo['lat']:.4f}, 경도: {geo['lon']:.4f}"
+                f"Lat: {geo['lat']:.4f}, Lon: {geo['lon']:.4f}"
             ),
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
     async def _get_city_weather(self, chat_id: int, city: str) -> PluginResult:
-        """특정 도시 날씨 조회 (PluginResult 반환)."""
         geo = await self._geocode(city)
         if not geo:
             return PluginResult(
                 handled=True,
-                response=f"❌ '{city}'을(를) 찾을 수 없습니다."
+                response=f"❌ City '{city}' not found."
             )
 
         weather = await self._fetch_weather(geo["lat"], geo["lon"])
         if not weather:
             return PluginResult(
                 handled=True,
-                response="❌ 날씨 정보를 가져올 수 없습니다."
+                response="❌ Unable to fetch weather data."
             )
 
         text = self._format_weather(geo, weather)
@@ -377,7 +363,7 @@ class WeatherPlugin(Plugin):
             [InlineKeyboardButton(c, callback_data=f"weather:city:{c}") for c in self.QUICK_CITIES[:4]],
             [InlineKeyboardButton(c, callback_data=f"weather:city:{c}") for c in self.QUICK_CITIES[4:]],
             [
-                InlineKeyboardButton("🔄 새로고침", callback_data=f"weather:city:{city}"),
+                InlineKeyboardButton("🔄 Refresh", callback_data=f"weather:city:{city}"),
             ]
         ]
 
@@ -388,7 +374,6 @@ class WeatherPlugin(Plugin):
         )
 
     async def _get_weather(self, chat_id: int) -> PluginResult:
-        """날씨 조회 - 저장된 위치 또는 도시 선택."""
         location = self._load_location(chat_id)
 
         if not location:
@@ -404,7 +389,7 @@ class WeatherPlugin(Plugin):
 
             return PluginResult(
                 handled=True,
-                response="🌤️ <b>날씨 조회</b>\n\n도시를 선택하세요:",
+                response="🌤️ <b>Weather</b>\n\nSelect a city:",
                 reply_markup=InlineKeyboardMarkup(buttons)
             )
 
@@ -412,7 +397,7 @@ class WeatherPlugin(Plugin):
         if not weather:
             return PluginResult(
                 handled=True,
-                response="❌ 날씨 정보를 가져올 수 없습니다. 잠시 후 다시 시도해주세요."
+                response="❌ Unable to fetch weather data. Please try again later."
             )
 
         text = self._format_weather(location, weather)
@@ -421,8 +406,8 @@ class WeatherPlugin(Plugin):
             [InlineKeyboardButton(c, callback_data=f"weather:city:{c}") for c in self.QUICK_CITIES[:4]],
             [InlineKeyboardButton(c, callback_data=f"weather:city:{c}") for c in self.QUICK_CITIES[4:]],
             [
-                InlineKeyboardButton("🔄 새로고침", callback_data="weather:refresh"),
-                InlineKeyboardButton("📍 다른 도시", callback_data="weather:select"),
+                InlineKeyboardButton("🔄 Refresh", callback_data="weather:refresh"),
+                InlineKeyboardButton("📍 Other city", callback_data="weather:select"),
             ]
         ]
 

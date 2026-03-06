@@ -78,7 +78,7 @@ class TestSchedulerManager:
         assert "repeating_job" in self.manager._jobs
         job_info = self.manager._jobs["repeating_job"]
         assert job_info.schedule_type == "repeating"
-        assert "1시간" in job_info.schedule_info
+        assert "1h" in job_info.schedule_info
 
     def test_register_once(self):
         """일회성 작업 등록 테스트."""
@@ -99,7 +99,7 @@ class TestSchedulerManager:
         assert "once_job" in self.manager._jobs
         job_info = self.manager._jobs["once_job"]
         assert job_info.schedule_type == "once"
-        assert "60초" in job_info.schedule_info
+        assert "60s" in job_info.schedule_info
 
     def test_unregister(self):
         """작업 등록 해제 테스트."""
@@ -180,7 +180,7 @@ class TestSchedulerManager:
     def test_get_status_text_empty(self):
         """작업 없을 때 상태 텍스트."""
         text = self.manager.get_status_text()
-        assert "등록된 스케줄 작업 없음" in text
+        assert "No scheduled jobs" in text
 
     def test_get_status_text_with_jobs(self):
         """작업 있을 때 상태 텍스트."""
@@ -192,7 +192,7 @@ class TestSchedulerManager:
         self.manager.register_daily("test_job", callback, time(10, 0), "TestOwner")
 
         text = self.manager.get_status_text()
-        assert "스케줄 작업" in text
+        assert "Scheduled Jobs" in text
         assert "TestOwner" in text
         assert "test_job" in text
 

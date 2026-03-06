@@ -33,7 +33,7 @@ class Plugin(ABC):
 
     name: str = "base"
     description: str = "Base plugin"
-    usage: str = "사용법이 정의되지 않았습니다."
+    usage: str = "Usage not defined."
 
     # Repository 인스턴스 (PluginLoader가 주입)
     _repository: Optional["Repository"] = None

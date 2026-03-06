@@ -145,7 +145,7 @@ class TestTodoPlugin:
         result = await plugin.handle("할일", 123)
 
         assert result.handled is True
-        assert "할일" in result.response
+        assert "Todos" in result.response
 
     def test_callback_list_empty(self, repo_and_plugin):
         """콜백: 빈 리스트."""
@@ -153,7 +153,7 @@ class TestTodoPlugin:
 
         result = plugin.handle_callback("td:list", 123)
 
-        assert "등록된 할일이 없어요" in result["text"]
+        assert "No todos yet" in result["text"]
 
     def test_callback_add_force_reply(self, repo_and_plugin):
         """콜백: 추가 버튼 → ForceReply."""
@@ -162,7 +162,7 @@ class TestTodoPlugin:
         result = plugin.handle_callback("td:add", 123)
 
         assert "force_reply" in result
-        assert "할일 입력" in result["text"]
+        assert "Add Todo" in result["text"]
 
     def test_force_reply_add_todos(self, repo_and_plugin):
         """ForceReply로 할일 추가."""
@@ -170,7 +170,7 @@ class TestTodoPlugin:
 
         result = plugin.handle_force_reply("회의하기\n이메일 확인", 123)
 
-        assert "2개 추가됨" in result["text"]
+        assert "2 added" in result["text"]
 
         today = date.today().isoformat()
         todos = repo.list_todos_by_date(123, today)
@@ -184,7 +184,7 @@ class TestTodoPlugin:
         todo = repo.add_todo(123, today, "회의")
         result = plugin.handle_callback(f"td:done:{todo.id}", 123)
 
-        assert "완료 처리됨" in result["text"]
+        assert "Marked as done" in result["text"]
         updated = repo.get_todo(todo.id)
         assert updated.done is True
 
@@ -196,7 +196,7 @@ class TestTodoPlugin:
         todo = repo.add_todo(123, today, "회의")
         result = plugin.handle_callback(f"td:del:{todo.id}", 123)
 
-        assert "삭제됨" in result["text"]
+        assert "Deleted" in result["text"]
         assert repo.get_todo(todo.id) is None
 
     def test_callback_tomorrow(self, repo_and_plugin):
@@ -207,7 +207,7 @@ class TestTodoPlugin:
         todo = repo.add_todo(123, today, "회의")
         result = plugin.handle_callback(f"td:tomorrow:{todo.id}", 123)
 
-        assert "내일로 이동" in result["text"]
+        assert "Moved to tomorrow" in result["text"]
 
         updated = repo.get_todo(todo.id)
         assert updated.date != today
@@ -222,15 +222,15 @@ class TestTodoPlugin:
 
         # 멀티 선택 모드 진입
         result = plugin.handle_callback("td:multi", 123)
-        assert "멀티 선택" in result["text"]
+        assert "Multi-select" in result["text"]
 
         # 항목 선택
         result = plugin.handle_callback(f"td:multi_toggle:{todo1.id}", 123)
-        assert "1개 선택됨" in result["text"]
+        assert "1 selected" in result["text"]
 
         # 선택 항목 완료
         result = plugin.handle_callback("td:multi_done", 123)
-        assert "1개 완료" in result["text"]
+        assert "1 marked as done" in result["text"]
 
         # todo1만 완료됨
         assert repo.get_todo(todo1.id).done is True
@@ -250,7 +250,7 @@ class TestTodoPlugin:
 
         result = plugin.handle_callback("td:week:2099-12-31", 123)
 
-        assert "주간 할일" in result["text"]
+        assert "Weekly Todos" in result["text"]
 
     def test_yesterday_carry_flow(self, repo_and_plugin):
         """어제 할일 이전 플로우."""
@@ -262,16 +262,16 @@ class TestTodoPlugin:
 
         # 어제 미완료 항목 보기
         result = plugin.handle_callback("td:yday", 123)
-        assert "미완료 항목" in result["text"]
+        assert "Incomplete" in result["text"]
         assert "어제 할일1" in result["text"]
 
         # 항목 선택
         result = plugin.handle_callback(f"td:yday_toggle:{todo1.id}", 123)
-        assert "1개 선택됨" in result["text"]
+        assert "1 selected" in result["text"]
 
         # 선택한 항목 오늘로 이전
         result = plugin.handle_callback("td:yday_carry", 123)
-        assert "1개 오늘로 이전" in result["text"]
+        assert "1 carried over to today" in result["text"]
 
         # todo1은 오늘로 이동, todo2는 어제 그대로
         updated1 = repo.get_todo(todo1.id)
@@ -289,7 +289,7 @@ class TestTodoPlugin:
 
         # 전체 이전
         result = plugin.handle_callback("td:yday_all", 123)
-        assert "2개 오늘로 이전" in result["text"]
+        assert "2 carried over to today" in result["text"]
 
         # 모두 오늘로 이동
         today_todos = repo.list_todos_by_date(123, date.today().isoformat())
@@ -300,7 +300,7 @@ class TestTodoPlugin:
         _, plugin = repo_and_plugin
 
         result = plugin.handle_callback("td:yday", 123)
-        assert "미완료 항목이 없어요" in result["text"]
+        assert "No incomplete items from yesterday" in result["text"]
 
     @pytest.mark.asyncio
     async def test_scheduled_yesterday_report(self, repo_and_plugin):
@@ -312,7 +312,7 @@ class TestTodoPlugin:
 
         result = await plugin.execute_scheduled_action("yesterday_report", 123)
 
-        assert "리포트" in result
+        assert "Yesterday" in result
         assert "어제 할일" in result
 
     @pytest.mark.asyncio
@@ -336,9 +336,8 @@ class TestTodoPlugin:
 
         result = await plugin.execute_scheduled_action("daily_wrap", 123)
 
-        assert "하루 마무리" in result
-        assert "1/2 완료" in result
-        assert "할일1" in result
+        assert "Daily Wrap-up" in result
+        assert "1/2 completed" in result
 
     @pytest.mark.asyncio
     async def test_scheduled_daily_wrap_all_done(self, repo_and_plugin):
@@ -351,7 +350,7 @@ class TestTodoPlugin:
 
         result = await plugin.execute_scheduled_action("daily_wrap", 123)
 
-        assert "모두 완료" in result
+        assert "All todos completed" in result
 
     @pytest.mark.asyncio
     async def test_scheduled_daily_wrap_empty(self, repo_and_plugin):

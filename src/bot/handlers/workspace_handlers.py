@@ -150,8 +150,8 @@ class WorkspaceHandlers(BaseHandler):
                 if s.get("workspace_path") == ws.path:
                     self.sessions.switch_session(user_id, s["full_session_id"])
                     await query.edit_message_text(
-                        f"이미 이 워크스페이스 세션이 있습니다.\n"
-                        f"기존 세션으로 전환했습니다: <b>{s.get('name', ws.name)}</b>",
+                        f"A workspace session already exists.\n"
+                        f"Switched to existing session: <b>{s.get('name', ws.name)}</b>",
                         parse_mode="HTML"
                     )
                     await query.answer("Switched to existing session")
@@ -197,7 +197,7 @@ class WorkspaceHandlers(BaseHandler):
             row = []
             for hour in AVAILABLE_HOURS:
                 row.append(InlineKeyboardButton(
-                    f"{hour:02d}시",
+                    f"{hour:02d}:00",
                     callback_data=f"ws:sched_time:{ws_id}:{hour}"
                 ))
                 if len(row) == 4:
@@ -252,7 +252,7 @@ class WorkspaceHandlers(BaseHandler):
 
             await query.edit_message_text(
                 f"<b>{ws.name}</b> - Schedule Registration\n\n"
-                f"Hour: <b>{hour:02d}시</b>\n\n"
+                f"Hour: <b>{hour:02d}:00</b>\n\n"
                 f"Select minute:",
                 reply_markup=InlineKeyboardMarkup(buttons),
                 parse_mode="HTML"
