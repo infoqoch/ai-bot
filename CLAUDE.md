@@ -170,7 +170,7 @@ telegram-claude-bot/
 ### 플러그인 클래스 구조
 
 ```python
-from src.plugins.loader import Plugin, PluginResult
+from src.plugins.loader import Plugin, PluginResult, ScheduledAction
 
 class MyPlugin(Plugin):
     name = "myplugin"                    # 필수: /myplugin 명령어로 사용
@@ -204,6 +204,20 @@ class MyPlugin(Plugin):
     async def handle(self, message: str, chat_id: int) -> PluginResult:
         # 처리 로직
         return PluginResult(handled=True, response="응답")
+
+    # --- 스케줄 API (선택) ---
+
+    def get_scheduled_actions(self) -> list[ScheduledAction]:
+        """스케줄 가능한 액션 목록. /scheduler에서 "+ Plugin"으로 등록."""
+        return [
+            ScheduledAction(name="daily_report", description="일일 리포트"),
+        ]
+
+    async def execute_scheduled_action(self, action_name: str, chat_id: int) -> str:
+        """스케줄된 액션 실행. HTML 텍스트 반환. 빈 문자열이면 메시지 안 보냄."""
+        if action_name == "daily_report":
+            return "<b>리포트</b>\n오늘 활동 요약..."
+        raise NotImplementedError(f"Action '{action_name}' not implemented")
 ```
 
 ### 처리 흐름 (AI 호출 안함 = 빠름)
@@ -247,13 +261,65 @@ PluginResult.response 즉시 반환 (Claude 호출 없음)
    - `python -m py_compile plugins/custom/my.py`
    - 검증 실패해도 기존 봇 정상 동작
 
+### 플러그인 사용 가능 API
+
+| API | 타입 | 설명 |
+|-----|------|------|
+| `self.repository` | `Repository` | SQLite 데이터 저장소 (PluginLoader가 주입) |
+| `self._base_dir` | `Path` | 프로젝트 루트 경로 |
+| `name` | `str` | 플러그인 이름 (명령어로 사용: `/name`) |
+| `description` | `str` | 플러그인 설명 (`/plugins`에 표시) |
+| `usage` | `str` | 사용법 (HTML, `/name` 실행 시 표시) |
+| `can_handle()` | `async` | 메시지 처리 가능 여부 |
+| `handle()` | `async` | 메시지 처리 → `PluginResult` |
+| `handle_callback()` | `sync` | 인라인 버튼 콜백 처리 (선택) |
+| `handle_force_reply()` | `sync` | ForceReply 응답 처리 (선택) |
+| `get_scheduled_actions()` | `sync` | 스케줄 가능 액션 목록 (선택) |
+| `execute_scheduled_action()` | `async` | 스케줄 액션 실행 (선택) |
+
+### 플러그인 라이프사이클
+
+```
+봇 시작
+  ↓
+PluginLoader.load_all()
+  ├─ builtin/ 스캔 → Plugin 인스턴스 생성
+  ├─ custom/ 스캔 → Plugin 인스턴스 생성
+  └─ _repository 주입 (각 플러그인에)
+  ↓
+핸들러 등록
+  ├─ /plugins → 전체 목록
+  ├─ /{name} → usage 표시
+  ├─ callback_data "prefix:" → handle_callback()
+  └─ /scheduler "+ Plugin" → get_scheduled_actions() 기반 등록
+  ↓
+메시지 수신
+  ├─ can_handle() → True → handle() → PluginResult
+  └─ schedule 실행 시 → execute_scheduled_action()
+```
+
+### 콜백 처리 패턴
+
+플러그인이 인라인 버튼을 사용하려면:
+
+1. `CALLBACK_PREFIX = "td:"` 정의
+2. `handle_callback(callback_data, chat_id) → dict` 구현
+3. `callback_handlers.py`에 prefix 라우팅 추가
+
+```python
+# callback_handlers.py
+if callback_data.startswith("td:"):
+    await self._handle_todo_callback(query, chat_id, callback_data)
+```
+
 ### 참고 파일 (Claude 개발 시 확인)
 
 | 파일 | 용도 |
 |------|------|
 | `src/plugins/loader.py` | Plugin 기본 클래스, PluginLoader |
-| `plugins/builtin/memo/` | 참고용 플러그인 구현체 |
-| `src/bot/handlers.py` | 플러그인 호출 위치 (process_message) |
+| `plugins/builtin/todo/` | 참고용: 콜백, ForceReply, 스케줄 구현체 |
+| `plugins/builtin/memo/` | 참고용: 간단한 플러그인 구현체 |
+| `src/bot/handlers/callback_handlers.py` | 플러그인 콜백 라우팅 |
 
 ## 메시지 처리 아키텍처
 

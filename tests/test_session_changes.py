@@ -618,7 +618,259 @@ class TestJobsCommandRemoved:
 
 
 # =============================================================================
-# 6. workspace recommend_paths 파라미터 수정 확인
+# 6. 스케줄러 멀티 스텝 인터랙션 테스트
+# =============================================================================
+
+class TestSchedulerInteractionFlow:
+    """스케줄러 콜백 멀티 스텝 인터랙션 테스트.
+
+    실제 텔레그램 버튼 클릭 순서를 시뮬레이션하여
+    여러 단계에 걸친 콜백 흐름이 정상 동작하는지 확인.
+    """
+
+    @pytest.fixture
+    def handlers(self):
+        """핸들러 + mock schedule_manager."""
+        from src.bot.handlers import BotHandlers
+
+        h = BotHandlers(
+            session_service=MagicMock(),
+            claude_client=MagicMock(),
+            auth_manager=MagicMock(),
+            require_auth=False,
+            allowed_chat_ids=[],
+        )
+
+        mock_schedule = MagicMock()
+        mock_schedule.id = "abc123"
+        mock_schedule.name = "넝담봇"
+        mock_schedule.time_str = "21:00"
+        mock_schedule.type_emoji = "💬"
+        mock_schedule.model = "opus"
+        mock_schedule.message = "재밌는 넝담 해줘~"
+        mock_schedule.workspace_path = None
+        mock_schedule.enabled = True
+        mock_schedule.run_count = 5
+        mock_schedule.hour = 21
+        mock_schedule.minute = 0
+        mock_schedule.type = "claude"
+
+        h._schedule_manager = MagicMock()
+        h._schedule_manager.get.return_value = mock_schedule
+        h._schedule_manager.get_status_text.return_value = "✅ 💬 넝담봇 - 21:00"
+        h._schedule_manager.list_by_user.return_value = [mock_schedule]
+        h._schedule_manager.toggle.return_value = False  # OFF
+        h._schedule_manager.update_time.return_value = True
+        h._schedule_manager.remove.return_value = True
+
+        return h
+
+    def _make_query(self):
+        """재사용 가능한 query mock."""
+        query = MagicMock()
+        query.answer = AsyncMock()
+        query.edit_message_text = AsyncMock()
+        return query
+
+    def _get_text(self, query):
+        """query.edit_message_text의 첫 인자 추출."""
+        call = query.edit_message_text.call_args
+        return call[0][0] if call[0] else call[1].get("text", "")
+
+    def _get_buttons(self, query):
+        """query.edit_message_text의 버튼 텍스트 목록 추출."""
+        call = query.edit_message_text.call_args
+        markup = call[1].get("reply_markup")
+        if not markup:
+            return []
+        return [btn.text for row in markup.inline_keyboard for btn in row]
+
+    def _get_callback_data(self, query):
+        """query.edit_message_text의 callback_data 목록 추출."""
+        call = query.edit_message_text.call_args
+        markup = call[1].get("reply_markup")
+        if not markup:
+            return []
+        return [btn.callback_data for row in markup.inline_keyboard for btn in row]
+
+    # --- Flow 1: 목록 → 상세 → 토글 ---
+
+    @pytest.mark.asyncio
+    async def test_flow_list_to_detail(self, handlers):
+        """목록에서 스케줄 선택 → 상세 화면."""
+        query = self._make_query()
+
+        await handlers._handle_scheduler_callback(query, 12345, "sched:detail:abc123")
+
+        text = self._get_text(query)
+        assert "넝담봇" in text
+        assert "21:00" in text
+        assert "opus" in text
+
+        buttons = self._get_buttons(query)
+        assert len(buttons) == 4  # toggle, time, delete, back
+
+    @pytest.mark.asyncio
+    async def test_flow_detail_toggle_returns_to_detail(self, handlers):
+        """상세 → 토글 → 상세 화면 복귀."""
+        query = self._make_query()
+
+        await handlers._handle_scheduler_callback(query, 12345, "sched:toggle:abc123")
+
+        # toggle 후 detail로 재호출됨
+        handlers._schedule_manager.toggle.assert_called_once_with("abc123")
+        assert query.edit_message_text.called
+
+    # --- Flow 2: 상세 → 시간 변경 (3단계) ---
+
+    @pytest.mark.asyncio
+    async def test_flow_chtime_hour_minute_apply(self, handlers):
+        """상세 → 시간변경 → 시간선택 → 분선택 → 적용 (3단계 흐름)."""
+        # Step 1: chtime → hour selection
+        q1 = self._make_query()
+        await handlers._handle_scheduler_callback(q1, 12345, "sched:chtime:abc123")
+
+        text1 = self._get_text(q1)
+        assert "Change Time" in text1
+        assert "21:00" in text1  # current time shown
+
+        callbacks1 = self._get_callback_data(q1)
+        # hour 버튼들이 있어야 함
+        hour_callbacks = [c for c in callbacks1 if "chtime_hour:" in c]
+        assert len(hour_callbacks) > 0
+
+        # Step 2: hour 14 선택 → minute selection
+        q2 = self._make_query()
+        await handlers._handle_scheduler_callback(q2, 12345, "sched:chtime_hour:abc123:14")
+
+        text2 = self._get_text(q2)
+        assert "14" in text2
+
+        callbacks2 = self._get_callback_data(q2)
+        min_callbacks = [c for c in callbacks2 if "chtime_min:" in c]
+        assert len(min_callbacks) == 12  # 00,05,10,...,55
+
+        # Step 3: minute 30 선택 → apply
+        q3 = self._make_query()
+        with patch("src.scheduler_manager.scheduler_manager") as mock_sm:
+            mock_sm.get_system_jobs_text.return_value = ""
+            await handlers._handle_scheduler_callback(q3, 12345, "sched:chtime_min:abc123:14:30")
+
+        handlers._schedule_manager.update_time.assert_called_once_with("abc123", 14, 30)
+        # answer에 새 시간 포함
+        q3.answer.assert_called()
+        answer_text = q3.answer.call_args[0][0]
+        assert "14:30" in answer_text
+
+    # --- Flow 3: 상세 → 삭제 ---
+
+    @pytest.mark.asyncio
+    async def test_flow_detail_delete(self, handlers):
+        """상세 → 삭제 → 목록 복귀."""
+        query = self._make_query()
+
+        with patch("src.scheduler_manager.scheduler_manager") as mock_sm:
+            mock_sm.get_system_jobs_text.return_value = ""
+            await handlers._handle_scheduler_callback(query, 12345, "sched:delete:abc123")
+
+        handlers._schedule_manager.remove.assert_called_once_with("abc123")
+        query.answer.assert_called()
+
+    # --- Flow 4: 새 스케줄 등록 전체 흐름 (4단계) ---
+
+    @pytest.mark.asyncio
+    async def test_flow_add_claude_full(self, handlers):
+        """새 Claude 스케줄: 시간 → 분 → 모델 → 메시지 (4단계)."""
+        # Step 1: add:claude → hour selection
+        q1 = self._make_query()
+        await handlers._handle_scheduler_callback(q1, 12345, "sched:add:claude")
+
+        callbacks1 = self._get_callback_data(q1)
+        time_callbacks = [c for c in callbacks1 if "sched:time:claude" in c]
+        assert len(time_callbacks) > 0
+
+        # Step 2: hour 10 → minute selection
+        q2 = self._make_query()
+        await handlers._handle_scheduler_callback(q2, 12345, "sched:time:claude:_:10")
+
+        text2 = self._get_text(q2)
+        assert "10" in text2
+        assert handlers._pending_schedule_input["12345"]["hour"] == 10
+
+        callbacks2 = self._get_callback_data(q2)
+        min_callbacks = [c for c in callbacks2 if "sched:minute:" in c]
+        assert len(min_callbacks) == 12  # 00~55, 5분 단위
+
+        # Step 3: minute 25 → model selection
+        q3 = self._make_query()
+        await handlers._handle_scheduler_callback(q3, 12345, "sched:minute:25")
+
+        text3 = self._get_text(q3)
+        assert "10:25" in text3
+        assert handlers._pending_schedule_input["12345"]["minute"] == 25
+
+        callbacks3 = self._get_callback_data(q3)
+        model_callbacks = [c for c in callbacks3 if "sched:model:" in c]
+        assert len(model_callbacks) == 3  # opus, sonnet, haiku
+
+        # Step 4: model sonnet → ForceReply (message input)
+        q4 = self._make_query()
+        q4.message = MagicMock()
+        q4.message.reply_text = AsyncMock()
+        await handlers._handle_scheduler_callback(q4, 12345, "sched:model:sonnet")
+
+        text4 = self._get_text(q4)
+        assert "10:25" in text4
+        assert "sonnet" in text4
+        assert handlers._pending_schedule_input["12345"]["model"] == "sonnet"
+
+        # ForceReply 전송 확인
+        q4.message.reply_text.assert_called_once()
+
+    # --- Flow 5: 상세 뷰 - 비활성 스케줄 표시 ---
+
+    @pytest.mark.asyncio
+    async def test_detail_disabled_schedule(self, handlers):
+        """비활성 스케줄의 상세 화면."""
+        mock_schedule = handlers._schedule_manager.get.return_value
+        mock_schedule.enabled = False
+
+        query = self._make_query()
+        await handlers._handle_scheduler_callback(query, 12345, "sched:detail:abc123")
+
+        text = self._get_text(query)
+        assert "OFF" in text
+
+        buttons = self._get_buttons(query)
+        # 비활성일 때 ON 버튼이 나와야 함
+        assert any("ON" in b for b in buttons)
+
+    # --- Flow 6: 목록 키보드 구조 확인 ---
+
+    def test_scheduler_keyboard_uses_detail_callback(self, handlers):
+        """스케줄러 키보드가 detail 콜백 사용."""
+        keyboard = handlers._build_scheduler_keyboard("12345")
+
+        # 스케줄 버튼의 callback_data가 sched:detail: 형식
+        schedule_buttons = [
+            btn for row in keyboard for btn in row
+            if hasattr(btn, 'callback_data') and btn.callback_data and "detail:" in btn.callback_data
+        ]
+        assert len(schedule_buttons) == 1
+        assert "sched:detail:abc123" == schedule_buttons[0].callback_data
+
+    def test_scheduler_keyboard_has_add_buttons(self, handlers):
+        """스케줄러 키보드에 추가 버튼."""
+        keyboard = handlers._build_scheduler_keyboard("12345")
+
+        all_callbacks = [btn.callback_data for row in keyboard for btn in row if hasattr(btn, 'callback_data')]
+        assert "sched:add:claude" in all_callbacks
+        assert "sched:add:workspace" in all_callbacks
+        assert "sched:refresh" in all_callbacks
+
+
+# =============================================================================
+# 7. workspace recommend_paths 파라미터 수정 확인
 # =============================================================================
 
 class TestWorkspaceRecommendPaths:

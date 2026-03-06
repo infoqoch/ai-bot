@@ -21,6 +21,13 @@ class PluginResult:
     reply_markup: Optional[any] = None  # InlineKeyboardMarkup 등
 
 
+@dataclass
+class ScheduledAction:
+    """플러그인 스케줄 가능 액션."""
+    name: str  # 액션 식별자 (e.g., "morning_check")
+    description: str  # 표시용 설명 (e.g., "오전 할일 체크")
+
+
 class Plugin(ABC):
     """플러그인 기본 클래스."""
 
@@ -45,6 +52,14 @@ class Plugin(ABC):
     async def handle(self, message: str, chat_id: int) -> PluginResult:
         """메시지 처리."""
         pass
+
+    def get_scheduled_actions(self) -> list[ScheduledAction]:
+        """스케줄 가능한 액션 목록. 오버라이드하여 사용."""
+        return []
+
+    async def execute_scheduled_action(self, action_name: str, chat_id: int) -> str:
+        """스케줄된 액션 실행. 결과 텍스트(HTML) 반환."""
+        raise NotImplementedError(f"Action '{action_name}' not implemented")
 
 
 

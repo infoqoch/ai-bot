@@ -23,6 +23,8 @@ class ScheduleData:
     type: str
     model: str
     workspace_path: Optional[str]
+    plugin_name: Optional[str]
+    action_name: Optional[str]
     enabled: bool
     created_at: str
     last_run: Optional[str]
@@ -37,7 +39,11 @@ class ScheduleData:
     @property
     def type_emoji(self) -> str:
         """Return emoji based on schedule type."""
-        return "📂" if self.type == "workspace" else "💬"
+        if self.type == "workspace":
+            return "📂"
+        elif self.type == "plugin":
+            return "🔌"
+        return "💬"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -51,6 +57,8 @@ class ScheduleData:
             "type": self.type,
             "model": self.model,
             "workspace_path": self.workspace_path,
+            "plugin_name": self.plugin_name,
+            "action_name": self.action_name,
             "enabled": self.enabled,
             "created_at": self.created_at,
             "last_run": self.last_run,
@@ -71,6 +79,8 @@ class ScheduleData:
             type=s.type,
             model=s.model,
             workspace_path=s.workspace_path,
+            plugin_name=s.plugin_name,
+            action_name=s.action_name,
             enabled=s.enabled,
             created_at=s.created_at,
             last_run=s.last_run,
@@ -118,7 +128,9 @@ class ScheduleManagerAdapter:
         name: str,
         schedule_type: str = "claude",
         model: str = "sonnet",
-        workspace_path: Optional[str] = None
+        workspace_path: Optional[str] = None,
+        plugin_name: Optional[str] = None,
+        action_name: Optional[str] = None,
     ) -> ScheduleData:
         """Add a new schedule."""
         schedule = self._repo.add_schedule(
@@ -130,7 +142,9 @@ class ScheduleManagerAdapter:
             name=name,
             schedule_type=schedule_type,
             model=model,
-            workspace_path=workspace_path
+            workspace_path=workspace_path,
+            plugin_name=plugin_name,
+            action_name=action_name,
         )
 
         result = ScheduleData.from_repo_schedule(schedule)

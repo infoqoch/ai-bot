@@ -951,6 +951,140 @@ class CallbackHandlers(BaseHandler):
             await query.answer()
             return
 
+        # Plugin schedule - show plugins with scheduled actions
+        if action == "add:plugin":
+            if not self.plugins or not self.plugins.plugins:
+                await query.edit_message_text(
+                    "<b>로드된 플러그인이 없습니다.</b>",
+                    parse_mode="HTML"
+                )
+                await query.answer()
+                return
+
+            buttons = []
+            plugin_map = {}
+            idx = 0
+            for plugin in self.plugins.plugins:
+                actions = plugin.get_scheduled_actions()
+                if actions:
+                    plugin_map[idx] = {"name": plugin.name, "actions": actions}
+                    buttons.append([
+                        InlineKeyboardButton(
+                            f"🔌 {plugin.name} ({len(actions)}개 액션)",
+                            callback_data=f"sched:plugin:{idx}"
+                        )
+                    ])
+                    idx += 1
+
+            if not buttons:
+                await query.edit_message_text(
+                    "<b>스케줄 가능한 플러그인이 없습니다.</b>\n\n"
+                    "플러그인에 <code>get_scheduled_actions()</code>를 구현하세요.",
+                    parse_mode="HTML"
+                )
+                await query.answer()
+                return
+
+            self._pending_schedule_input[user_id] = {"plugin_map": plugin_map}
+            buttons.append([
+                InlineKeyboardButton("Cancel", callback_data="sched:refresh")
+            ])
+
+            await query.edit_message_text(
+                "<b>Add Plugin Schedule</b>\n\n"
+                "Select plugin:",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML"
+            )
+            await query.answer()
+            return
+
+        # Plugin selected - show actions
+        if action.startswith("plugin:") and not action.startswith("pluginaction:"):
+            plugin_idx = int(action[7:])
+            pending = self._pending_schedule_input.get(user_id, {})
+            plugin_map = pending.get("plugin_map", {})
+            plugin_info = plugin_map.get(plugin_idx)
+
+            if not plugin_info:
+                await query.answer("Invalid plugin")
+                return
+
+            pending["selected_plugin"] = plugin_info["name"]
+            self._pending_schedule_input[user_id] = pending
+
+            buttons = []
+            for i, act in enumerate(plugin_info["actions"]):
+                buttons.append([
+                    InlineKeyboardButton(
+                        f"{act.description}",
+                        callback_data=f"sched:pluginaction:{i}"
+                    )
+                ])
+            buttons.append([
+                InlineKeyboardButton("Cancel", callback_data="sched:refresh")
+            ])
+
+            await query.edit_message_text(
+                f"<b>🔌 {plugin_info['name']}</b>\n\n"
+                f"Select action:",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML"
+            )
+            await query.answer()
+            return
+
+        # Plugin action selected - time selection
+        if action.startswith("pluginaction:"):
+            action_idx = int(action[13:])
+            pending = self._pending_schedule_input.get(user_id, {})
+            plugin_name = pending.get("selected_plugin")
+            plugin_map = pending.get("plugin_map", {})
+
+            # Find the plugin's actions
+            actions = []
+            for info in plugin_map.values():
+                if info["name"] == plugin_name:
+                    actions = info["actions"]
+                    break
+
+            if action_idx >= len(actions):
+                await query.answer("Invalid action")
+                return
+
+            selected_action = actions[action_idx]
+            pending["type"] = "plugin"
+            pending["plugin_name"] = plugin_name
+            pending["action_name"] = selected_action.name
+            pending["name"] = f"{plugin_name}:{selected_action.description}"
+            self._pending_schedule_input[user_id] = pending
+
+            buttons = []
+            row = []
+            for hour in AVAILABLE_HOURS:
+                row.append(InlineKeyboardButton(
+                    f"{hour:02d}시",
+                    callback_data=f"sched:time:plugin:_:{hour}"
+                ))
+                if len(row) == 4:
+                    buttons.append(row)
+                    row = []
+            if row:
+                buttons.append(row)
+            buttons.append([
+                InlineKeyboardButton("Cancel", callback_data="sched:refresh")
+            ])
+
+            await query.edit_message_text(
+                f"<b>Add Plugin Schedule</b>\n\n"
+                f"🔌 <b>{plugin_name}</b> - {selected_action.description}\n\n"
+                f"Select time (daily repeat):",
+                reply_markup=InlineKeyboardMarkup(buttons),
+                parse_mode="HTML"
+            )
+            await query.answer()
+            return
+
         # Workspace selected - time selection
         if action.startswith("wspath:"):
             ws_idx = int(action[7:])
@@ -1046,7 +1180,7 @@ class CallbackHandlers(BaseHandler):
             await query.answer()
             return
 
-        # Minute selected - model selection
+        # Minute selected - model selection (or direct register for plugin)
         if action.startswith("minute:"):
             minute = int(action[7:])
 
@@ -1055,6 +1189,45 @@ class CallbackHandlers(BaseHandler):
             self._pending_schedule_input[user_id] = pending
 
             hour = pending.get("hour", 9)
+            schedule_type = pending.get("type", "claude")
+
+            # Plugin type: skip model/message, register directly
+            if schedule_type == "plugin":
+                if not self._schedule_manager:
+                    await query.edit_message_text("Schedule feature disabled.")
+                    del self._pending_schedule_input[user_id]
+                    return
+
+                schedule = self._schedule_manager.add(
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    name=pending.get("name", "Plugin Schedule"),
+                    hour=hour,
+                    minute=minute,
+                    message="",  # plugin doesn't need message
+                    schedule_type="plugin",
+                    model="sonnet",  # unused for plugin
+                    plugin_name=pending.get("plugin_name"),
+                    action_name=pending.get("action_name"),
+                )
+
+                del self._pending_schedule_input[user_id]
+
+                keyboard = [[
+                    InlineKeyboardButton("Schedule List", callback_data="sched:refresh"),
+                ]]
+
+                await query.edit_message_text(
+                    f"<b>Plugin Schedule Registered!</b>\n\n"
+                    f"🔌 <b>{schedule.name}</b>\n"
+                    f"Time: <b>{schedule.time_str}</b> (daily)\n"
+                    f"Plugin: <b>{schedule.plugin_name}</b>\n"
+                    f"Action: <b>{schedule.action_name}</b>",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode="HTML"
+                )
+                logger.info(f"Plugin schedule registered: {schedule.name} @ {schedule.time_str}")
+                return
 
             buttons = [
                 [
@@ -1065,7 +1238,6 @@ class CallbackHandlers(BaseHandler):
                 [InlineKeyboardButton("Cancel", callback_data="sched:refresh")],
             ]
 
-            schedule_type = pending.get("type", "claude")
             type_label = "Workspace" if schedule_type == "workspace" else "Schedule"
             path_info = f"\nPath: <code>{pending.get('workspace_path', '')}</code>" if schedule_type == "workspace" else ""
 
