@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_last_used ON sessions(last_used DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_deleted ON sessions(deleted);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_workspace_unique
+    ON sessions(user_id, workspace_path) WHERE workspace_path IS NOT NULL AND deleted = 0;
 
 -- Session history: message history per session
 CREATE TABLE IF NOT EXISTS session_history (
