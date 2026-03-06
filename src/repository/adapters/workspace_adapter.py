@@ -1,9 +1,14 @@
 """Workspace registry adapter for backward compatibility."""
 
+import asyncio
+import json
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 from ..repository import Repository, Workspace
 
@@ -161,7 +166,7 @@ class WorkspaceRegistryAdapter:
         """Recommend workspace paths based on purpose.
 
         1. Search registered workspaces by keywords/name/description
-        2. Scan allowed_patterns directories and match by directory name
+        2. Use Claude AI to match purpose against directory names
         """
         purpose_lower = purpose.lower()
         results = []
@@ -180,39 +185,77 @@ class WorkspaceRegistryAdapter:
                 score += 1
             if score > 0:
                 seen_paths.add(w.path)
-                results.append((score + 10, {
+                results.append({
                     "path": w.path,
                     "name": w.name,
                     "description": w.description,
-                    "reason": f"등록된 워크스페이스 매칭"
-                }))
+                    "reason": "등록된 워크스페이스 매칭"
+                })
 
-        # 2. Scan allowed directories for matching folder names
+        if results:
+            return results[:3]
+
+        # 2. Use Claude AI to match purpose against directory names
+        dir_list = []
         for dir_path in allowed_patterns:
-            if dir_path in seen_paths:
-                continue
             path = Path(dir_path)
-            if not path.is_dir():
-                continue
-            dir_name = path.name.lower()
-            dir_name_parts = dir_name.replace("-", " ").replace("_", " ").split()
+            if path.is_dir() and str(path) not in seen_paths:
+                dir_list.append(str(path))
 
-            score = 0
-            for part in dir_name_parts:
-                if len(part) >= 2 and part in purpose_lower:
-                    score += 1
-            for word in purpose_lower.split():
-                if len(word) >= 2 and word in dir_name:
-                    score += 1
+        if not dir_list:
+            return []
 
-            if score > 0:
-                seen_paths.add(str(path))
-                results.append((score, {
-                    "path": str(path),
-                    "name": path.name,
-                    "description": f"디렉토리: {path.name}",
-                    "reason": f"디렉토리명 매칭"
-                }))
+        ai_results = await self._ai_recommend(purpose, dir_list)
+        return ai_results[:3]
 
-        results.sort(key=lambda x: x[0], reverse=True)
-        return [r for _, r in results[:3]]
+    async def _ai_recommend(
+        self, purpose: str, directories: list[str]
+    ) -> list[dict[str, str]]:
+        """Use Claude CLI to recommend directories matching purpose."""
+        dir_names = "\n".join(f"- {d}" for d in directories)
+        prompt = (
+            f"사용자가 '{purpose}' 목적의 워크스페이스를 찾고 있습니다.\n"
+            f"아래 디렉토리 목록에서 가장 적합한 것을 최대 3개 골라주세요.\n"
+            f"매칭되는 것이 없으면 빈 배열을 반환하세요.\n\n"
+            f"디렉토리 목록:\n{dir_names}\n\n"
+            f"JSON 배열로만 응답하세요. 다른 텍스트 없이:\n"
+            f'[{{"path": "/full/path", "name": "표시이름", "description": "설명", "reason": "선택이유"}}]'
+        )
+
+        ai_command = os.getenv("AI_COMMAND", "claude")
+        try:
+            env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+            proc = await asyncio.create_subprocess_exec(
+                ai_command, "-p", prompt, "--model", "haiku",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+            output = stdout.decode().strip()
+
+            # Extract JSON array from output
+            start = output.find("[")
+            end = output.rfind("]")
+            if start == -1 or end == -1:
+                logger.warning(f"AI recommend: no JSON array in output: {output[:100]}")
+                return []
+
+            parsed = json.loads(output[start:end + 1])
+            # Validate paths exist
+            valid = []
+            for item in parsed:
+                if Path(item["path"]).is_dir():
+                    valid.append({
+                        "path": item["path"],
+                        "name": item.get("name", Path(item["path"]).name),
+                        "description": item.get("description", ""),
+                        "reason": item.get("reason", "AI 추천"),
+                    })
+            return valid
+        except asyncio.TimeoutError:
+            logger.warning("AI recommend timed out")
+            return []
+        except Exception as e:
+            logger.warning(f"AI recommend failed: {e}")
+            return []
