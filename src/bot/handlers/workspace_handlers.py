@@ -420,10 +420,9 @@ class WorkspaceHandlers(BaseHandler):
 
             allowed_paths = self._get_allowed_workspace_paths()
             recommendations = await self._workspace_registry.recommend_paths(
-                purpose=message,
                 user_id=user_id,
-                allowed_paths=allowed_paths,
-                max_recommendations=3,
+                purpose=message,
+                allowed_patterns=allowed_paths,
             )
 
             if not recommendations:
