@@ -98,7 +98,6 @@ class TestTodoPlugin:
         repository.add_todo(
             chat_id=12345,
             date=date.today().isoformat(),
-            slot="morning",
             text="테스트 할일"
         )
 

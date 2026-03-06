@@ -104,16 +104,16 @@ def require_auth(
             # Check allowed chat IDs
             if allowed_chat_ids and chat_id not in allowed_chat_ids:
                 logger.debug(f"권한 없음 - chat_id={chat_id}")
-                await update.message.reply_text("⛔ 권한이 없습니다.")
+                await update.message.reply_text("⛔ Access denied.")
                 return
 
             # Check authentication if required
             if require_auth_setting and not auth_manager.is_authenticated(user_id):
                 logger.debug(f"인증 필요 - user_id={user_id}")
                 await update.message.reply_text(
-                    "🔒 인증이 필요합니다.\n"
-                    f"/auth <키>로 인증하세요. ({auth_manager.timeout_minutes}분간 유효)\n"
-                    "/help 도움말"
+                    "🔒 Authentication required.\n"
+                    f"Use /auth <key> to authenticate. (Valid for {auth_manager.timeout_minutes}m)\n"
+                    "/help for commands"
                 )
                 return
 
@@ -136,7 +136,7 @@ def require_allowed_chat(allowed_chat_ids: list[int]):
 
             if allowed_chat_ids and chat_id not in allowed_chat_ids:
                 logger.debug(f"권한 없음 - chat_id={chat_id}")
-                await update.message.reply_text("⛔ 권한이 없습니다.")
+                await update.message.reply_text("⛔ Access denied.")
                 return
 
             logger.trace("권한 통과 - 핸들러 실행")
@@ -155,7 +155,7 @@ def authorized_only(method: F) -> F:
 
         if not self._is_authorized(chat_id):
             logger.debug(f"권한 없음 - chat_id={chat_id}")
-            await update.message.reply_text("⛔ 권한이 없습니다.")
+            await update.message.reply_text("⛔ Access denied.")
             return
 
         logger.trace("권한 통과")
@@ -176,7 +176,7 @@ def authenticated_only(method: F) -> F:
         if not self._is_authenticated(user_id):
             logger.debug(f"인증 필요 - user_id={user_id}")
             await update.message.reply_text(
-                "🔒 먼저 인증이 필요합니다.\n/auth <키>"
+                "🔒 Authentication required first.\n/auth <key>"
             )
             return
 

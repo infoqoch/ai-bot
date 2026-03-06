@@ -91,17 +91,17 @@ class AdminHandlers(BaseHandler):
         logger.info("/plugins command received")
 
         if not self.plugins or not self.plugins.plugins:
-            logger.trace("로드된 플러그인 없음")
-            await update.message.reply_text("로드된 플러그인이 없습니다.")
+            logger.trace("No plugins loaded")
+            await update.message.reply_text("No plugins loaded.")
             clear_context()
             return
 
-        logger.trace(f"플러그인 목록 생성 - {len(self.plugins.plugins)}")
-        lines = ["<b>플러그인 목록</b>\n"]
+        logger.trace(f"Building plugin list - {len(self.plugins.plugins)}")
+        lines = ["<b>Plugin List</b>\n"]
         for plugin in self.plugins.plugins:
             lines.append(f"- <b>/{plugin.name}</b> - {plugin.description}")
-            logger.trace(f"플러그인: {plugin.name} - {plugin.description}")
-        lines.append("\n<code>/플러그인명</code> 으로 사용법 확인")
+            logger.trace(f"Plugin: {plugin.name} - {plugin.description}")
+        lines.append("\nUse <code>/plugin_name</code> for usage details")
 
         await update.message.reply_text("\n".join(lines), parse_mode="HTML")
         logger.trace("/plugins complete")
@@ -152,11 +152,11 @@ class AdminHandlers(BaseHandler):
         logger.trace(f"Auth attempt - key_length={len(key)}")
 
         if self.auth.authenticate(user_id, key):
-            logger.info("인증 성공")
-            await update.message.reply_text(f"✅ 인증 성공! {self.auth.timeout_minutes}분간 유효합니다.")
+            logger.info("Auth success")
+            await update.message.reply_text(f"✅ Authenticated! Valid for {self.auth.timeout_minutes} minutes.")
         else:
-            logger.warning("인증 실패 - 잘못된 키")
-            await update.message.reply_text("❌ 인증 실패. 키가 틀렸습니다.")
+            logger.warning("Auth failed - wrong key")
+            await update.message.reply_text("❌ Authentication failed. Wrong key.")
 
         clear_context()
 
@@ -171,11 +171,11 @@ class AdminHandlers(BaseHandler):
 
         if self.auth.is_authenticated(user_id):
             remaining = self.auth.get_remaining_minutes(user_id)
-            logger.trace(f"인증됨 - remaining={remaining}분")
-            await update.message.reply_text(f"✅ 인증됨 ({remaining}분 남음)")
+            logger.trace(f"Authenticated - remaining={remaining}m")
+            await update.message.reply_text(f"✅ Authenticated ({remaining}m remaining)")
         else:
-            logger.trace("인증 필요")
-            await update.message.reply_text("🔒 인증이 필요합니다.\n/auth <키>로 인증하세요.")
+            logger.trace("Auth required")
+            await update.message.reply_text("🔒 Authentication required.\nUse /auth <key> to authenticate.")
 
         clear_context()
 

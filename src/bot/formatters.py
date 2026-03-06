@@ -60,25 +60,25 @@ def truncate_message(text: str, max_length: int = 40) -> str:
 def format_session_list(sessions: list[dict], summaries: dict[str, str]) -> str:
     """Format session list with summaries."""
     if not sessions:
-        return "📭 저장된 세션이 없습니다."
-    
+        return "📭 No saved sessions."
+
     lines = []
     for s in sessions:
         current_mark = " ⬅️" if s.get("is_current") else ""
-        summary = summaries.get(s["full_session_id"], "(내용 없음)")
-        
+        summary = summaries.get(s["full_session_id"], "(no content)")
+
         lines.append(
-            f"<b>/s_{s['session_id']}</b> ({s['history_count']}개){current_mark}\n"
+            f"<b>/s_{s['session_id']}</b> ({s['history_count']}){current_mark}\n"
             f"{summary}"
         )
-    
-    return f"📋 <b>저장된 세션 ({len(sessions)}개)</b>\n\n" + "\n\n".join(lines)
+
+    return f"📋 <b>Saved Sessions ({len(sessions)})</b>\n\n" + "\n\n".join(lines)
 
 
 def format_session_quick_list(sessions: list[dict], histories: dict[str, list[str]]) -> str:
     """Format quick session list with last messages."""
     if not sessions:
-        return "📭 저장된 세션이 없습니다."
+        return "📭 No saved sessions."
 
     model_emoji = {"opus": "🧠", "sonnet": "⚡", "haiku": "🚀"}
 
@@ -93,9 +93,9 @@ def format_session_quick_list(sessions: list[dict], histories: dict[str, list[st
         name_display = f" <b>{name}</b>" if name else ""
 
         lines.append(
-            f"/s_{s['session_id']}{name_display} {emoji}{model} ({s['history_count']}개){current_mark}\n"
-            f"   └ 최근: {last_msg}\n"
+            f"/s_{s['session_id']}{name_display} {emoji}{model} ({s['history_count']}){current_mark}\n"
+            f"   └ Recent: {last_msg}\n"
             f"   └ /h_{s['session_id']} /r_{s['session_id']} /d_{s['session_id']}"
         )
 
-    return f"📋 <b>저장된 세션 ({len(sessions)}개)</b>\n\n" + "\n\n".join(lines)
+    return f"📋 <b>Saved Sessions ({len(sessions)})</b>\n\n" + "\n\n".join(lines)

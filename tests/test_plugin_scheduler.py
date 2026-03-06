@@ -95,9 +95,9 @@ class TestTodoPluginScheduledActions:
         todo_plugin._repository.list_todos_by_date.return_value = [mock_todo_done, mock_todo_pending]
 
         result = await todo_plugin.execute_scheduled_action("yesterday_report", 12345)
-        assert "리포트" in result
+        assert "Yesterday" in result
         assert "미완료 항목" in result
-        assert "1/2 완료" in result
+        assert "1/2 completed" in result
 
     @pytest.mark.asyncio
     async def test_yesterday_report_all_done(self, todo_plugin):
@@ -109,8 +109,8 @@ class TestTodoPluginScheduledActions:
         todo_plugin._repository.list_todos_by_date.return_value = [mock_todo]
 
         result = await todo_plugin.execute_scheduled_action("yesterday_report", 12345)
-        assert "1/1 완료" in result
-        assert "이전" not in result
+        assert "1/1 completed" in result
+        assert "carry" not in result
 
     @pytest.mark.asyncio
     async def test_yesterday_report_no_todos(self, todo_plugin):
@@ -303,7 +303,7 @@ class TestPluginScheduleCallbackFlow:
         await handlers._handle_scheduler_callback(query, 12345, "sched:add:plugin")
 
         text = get_text(query)
-        assert "No plugin" in text or "없" in text
+        assert "No schedulable plugins" in text
 
     @pytest.mark.asyncio
     async def test_claude_schedule_still_shows_model(self, handlers):

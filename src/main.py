@@ -32,7 +32,6 @@ from src.bot.middleware import AuthManager
 from src.plugins.loader import PluginLoader
 from src.scheduler_manager import scheduler_manager
 from src.repository import init_repository, get_repository, shutdown_repository
-from src.repository.migrations import migrate_all
 from src.repository.adapters import (
     ScheduleManagerAdapter,
     WorkspaceRegistryAdapter,
@@ -98,15 +97,6 @@ def create_app() -> Application:
     logger.trace("Repository 초기화 시작")
     repo = init_repository(settings.db_path)
     logger.trace(f"Repository 초기화 완료 - db: {settings.db_path}")
-
-    # Run migrations from JSON if needed
-    logger.trace("마이그레이션 확인")
-    try:
-        migration_result = migrate_all(repo, settings.data_dir)
-        if any(v > 0 for v in migration_result.values()):
-            logger.info(f"마이그레이션 완료: {migration_result}")
-    except Exception as e:
-        logger.warning(f"마이그레이션 실패 (기존 JSON 없을 수 있음): {e}")
 
     # Initialize SessionService
     logger.trace("SessionService 초기화 시작")
@@ -205,7 +195,7 @@ def create_app() -> Application:
                     model=schedule.model,
                     workspace_path=workspace_path,
                 )
-                response = text or error or "(응답 없음)"
+                response = text or error or "(no response)"
 
             # Send response to Telegram
             if app.bot and schedule.chat_id and response:
@@ -311,7 +301,7 @@ def main() -> None:
     # 싱글톤 락 획득 (다른 인스턴스 실행 방지)
     logger.trace("싱글톤 락 획득 시도")
     if not _process_lock.acquire():
-        print("❌ 봇이 이미 실행 중입니다. 기존 프로세스를 종료하세요.", file=sys.stderr)
+        print("❌ Bot is already running.", file=sys.stderr)
         print("   ./run.sh stop && ./run.sh start", file=sys.stderr)
         sys.exit(1)
     logger.trace("싱글톤 락 획득 성공")

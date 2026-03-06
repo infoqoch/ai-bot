@@ -278,7 +278,7 @@ class ScheduleManagerAdapter:
         schedules = self._repo.list_schedules_by_user(user_id)
 
         if not schedules:
-            return "예약된 작업이 없습니다."
+            return "No scheduled tasks."
 
         lines = []
         for s in schedules:

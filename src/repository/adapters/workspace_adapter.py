@@ -143,7 +143,7 @@ class WorkspaceRegistryAdapter:
         workspaces = self._repo.list_workspaces_by_user(user_id)
 
         if not workspaces:
-            return "등록된 워크스페이스가 없습니다."
+            return "No workspaces registered."
 
         lines = []
         for w in workspaces:
@@ -189,7 +189,7 @@ class WorkspaceRegistryAdapter:
                     "path": w.path,
                     "name": w.name,
                     "description": w.description,
-                    "reason": "등록된 워크스페이스 매칭"
+                    "reason": "Registered workspace match"
                 })
 
         if results:
@@ -250,7 +250,7 @@ class WorkspaceRegistryAdapter:
                         "path": item["path"],
                         "name": item.get("name", Path(item["path"]).name),
                         "description": item.get("description", ""),
-                        "reason": item.get("reason", "AI 추천"),
+                        "reason": item.get("reason", "AI recommendation"),
                     })
             return valid
         except asyncio.TimeoutError:
