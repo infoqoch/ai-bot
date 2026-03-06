@@ -21,10 +21,10 @@ class TestAuthorization:
     """권한 테스트."""
 
     @pytest.fixture
-    async def restricted_handlers(self, session_store, mock_claude, plugin_loader, queue_worker):
+    async def restricted_handlers(self, session_store, mock_claude, plugin_loader):
         """특정 채팅 ID만 허용하는 핸들러."""
         auth = AuthManager(secret_key="test", timeout_minutes=30)
-        h = BotHandlers(
+        return BotHandlers(
             session_service=session_store,
             claude_client=mock_claude,
             auth_manager=auth,
@@ -32,8 +32,6 @@ class TestAuthorization:
             allowed_chat_ids=[12345],  # 12345만 허용
             plugin_loader=plugin_loader,
         )
-        h.set_queue_worker(queue_worker)
-        return h
 
     @pytest.mark.asyncio
     async def test_authorized_user_allowed(self, restricted_handlers):
@@ -62,10 +60,10 @@ class TestAuthentication:
     """인증 테스트."""
 
     @pytest.fixture
-    async def auth_required_handlers(self, session_store, mock_claude, plugin_loader, queue_worker):
+    async def auth_required_handlers(self, session_store, mock_claude, plugin_loader):
         """인증 필수 핸들러."""
         auth = AuthManager(secret_key="testsecret123", timeout_minutes=30)
-        h = BotHandlers(
+        return BotHandlers(
             session_service=session_store,
             claude_client=mock_claude,
             auth_manager=auth,
@@ -73,8 +71,6 @@ class TestAuthentication:
             allowed_chat_ids=[],
             plugin_loader=plugin_loader,
         )
-        h.set_queue_worker(queue_worker)
-        return h
 
     @pytest.mark.asyncio
     async def test_unauthenticated_blocked(self, auth_required_handlers):
@@ -161,9 +157,9 @@ class TestEmptyAllowedChatIds:
     """빈 허용 목록 테스트."""
 
     @pytest.fixture
-    async def open_handlers(self, session_store, mock_claude, auth_manager, plugin_loader, queue_worker):
+    async def open_handlers(self, session_store, mock_claude, auth_manager, plugin_loader):
         """모두 허용하는 핸들러."""
-        h = BotHandlers(
+        return BotHandlers(
             session_service=session_store,
             claude_client=mock_claude,
             auth_manager=auth_manager,
@@ -171,8 +167,6 @@ class TestEmptyAllowedChatIds:
             allowed_chat_ids=[],  # 빈 리스트 = 모두 허용
             plugin_loader=plugin_loader,
         )
-        h.set_queue_worker(queue_worker)
-        return h
 
     @pytest.mark.asyncio
     async def test_any_user_allowed(self, open_handlers):

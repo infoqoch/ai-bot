@@ -191,17 +191,6 @@ def create_app() -> Application:
     app = Application.builder().token(settings.telegram_token).concurrent_updates(True).build()
     logger.trace("Application 빌드 완료 - concurrent_updates=True")
 
-    # QueueWorker 초기화 (Claude 호출 처리)
-    from src.bot.queue_worker import QueueWorker
-    queue_worker = QueueWorker(
-        repository=repo,
-        claude_client=claude_client,
-        session_service=session_service,
-        bot=app.bot,
-    )
-    handlers.set_queue_worker(queue_worker)
-    logger.info("QueueWorker 초기화 완료")
-
     # SchedulerManager 초기화 (단일 job_queue 관리)
     scheduler_manager.set_app(app)
     logger.info("SchedulerManager 초기화 완료")
@@ -331,18 +320,6 @@ def create_app() -> Application:
 
     app.add_error_handler(handlers.error_handler)
     logger.trace("핸들러 등록 완료")
-
-    # 앱 시작 시 워커 시작
-    async def post_init(application):
-        queue_worker.start()
-        logger.info("QueueWorker 시작됨")
-
-    async def post_shutdown(application):
-        queue_worker.stop()
-        logger.info("QueueWorker 중지됨")
-
-    app.post_init = post_init
-    app.post_shutdown = post_shutdown
 
     return app
 
