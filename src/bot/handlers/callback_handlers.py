@@ -911,22 +911,32 @@ class CallbackHandlers(BaseHandler):
 
         # Add - Workspace type (path selection)
         if action == "add:workspace":
-            paths = self._get_allowed_workspace_paths()
-            if not paths:
-                await query.answer("No allowed workspace paths.")
+            if not self._workspace_registry:
+                await query.answer("Workspace feature not initialized.")
+                return
+
+            workspaces = self._workspace_registry.list_by_user(user_id)
+            if not workspaces:
+                await query.edit_message_text(
+                    "<b>등록된 워크스페이스가 없습니다.</b>\n\n"
+                    "/workspace 에서 먼저 워크스페이스를 등록하세요.",
+                    parse_mode="HTML"
+                )
+                await query.answer()
                 return
 
             buttons = []
-            for i, path in enumerate(paths[:MAX_WORKSPACE_PATHS_DISPLAY]):
-                name = path.split("/")[-1]
+            ws_map = {}
+            for i, ws in enumerate(workspaces):
+                ws_map[i] = {"path": ws.path, "name": ws.name}
                 buttons.append([
                     InlineKeyboardButton(
-                        f"{name}",
-                        callback_data=f"sched:path:{i}"
+                        f"{ws.name}",
+                        callback_data=f"sched:wspath:{i}"
                     )
                 ])
 
-            self._pending_schedule_input[user_id] = {"paths": paths}
+            self._pending_schedule_input[user_id] = {"workspaces": ws_map}
 
             buttons.append([
                 InlineKeyboardButton("Cancel", callback_data="sched:refresh")
@@ -934,25 +944,27 @@ class CallbackHandlers(BaseHandler):
 
             await query.edit_message_text(
                 "<b>Add Workspace Schedule</b>\n\n"
-                "Select workspace path:",
+                "Select workspace:",
                 reply_markup=InlineKeyboardMarkup(buttons),
                 parse_mode="HTML"
             )
             await query.answer()
             return
 
-        # Path selected - time selection
-        if action.startswith("path:"):
-            path_idx = int(action[5:])
+        # Workspace selected - time selection
+        if action.startswith("wspath:"):
+            ws_idx = int(action[7:])
             pending = self._pending_schedule_input.get(user_id, {})
-            paths = pending.get("paths", [])
+            ws_map = pending.get("workspaces", {})
 
-            if path_idx >= len(paths):
-                await query.answer("Invalid path")
+            ws_info = ws_map.get(ws_idx)
+            if not ws_info:
+                await query.answer("Invalid workspace")
                 return
 
-            workspace_path = paths[path_idx]
-            workspace_name = workspace_path.split("/")[-1]
+            workspace_path = ws_info["path"]
+            workspace_name = ws_info["name"]
+            path_idx = ws_idx
 
             buttons = []
             row = []
@@ -995,11 +1007,12 @@ class CallbackHandlers(BaseHandler):
             pending["hour"] = hour
 
             if schedule_type == "workspace" and path_idx != "_":
-                paths = pending.get("paths", [])
+                ws_map = pending.get("workspaces", {})
                 idx = int(path_idx)
-                if idx < len(paths):
-                    pending["workspace_path"] = paths[idx]
-                    pending["name"] = paths[idx].split("/")[-1]
+                ws_info = ws_map.get(idx)
+                if ws_info:
+                    pending["workspace_path"] = ws_info["path"]
+                    pending["name"] = ws_info["name"]
 
             self._pending_schedule_input[user_id] = pending
 
