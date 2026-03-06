@@ -141,6 +141,7 @@ class SessionService:
             history = self._repo.get_session_history_entries(s.id)
             result.append({
                 "id": s.id,
+                "full_session_id": s.id,
                 "session_id": s.id[:8],
                 "created_at": s.created_at,
                 "last_used": s.last_used,
@@ -175,6 +176,7 @@ class SessionService:
                 history = self._repo.get_session_history_entries(s.id)
                 return {
                     "id": s.id,
+                    "full_session_id": s.id,
                     "session_id": s.id[:8],
                     "created_at": s.created_at[:19] if s.created_at else "",
                     "last_used": s.last_used[:19] if s.last_used else "",
