@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS schedules (
     minute INTEGER NOT NULL CHECK (minute >= 0 AND minute <= 59),
     message TEXT NOT NULL,
     name TEXT NOT NULL,
-    type TEXT NOT NULL DEFAULT 'claude' CHECK (type IN ('claude', 'workspace', 'plugin')),
+    type TEXT NOT NULL DEFAULT 'claude',
     model TEXT NOT NULL DEFAULT 'sonnet',
     workspace_path TEXT,
     plugin_name TEXT,
