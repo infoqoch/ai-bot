@@ -68,10 +68,12 @@ class TestTodoPluginScheduledActions:
         return plugin
 
     def test_get_scheduled_actions(self, todo_plugin):
-        """Todo 플러그인은 1개 액션 제공."""
+        """Todo 플러그인은 2개 액션 제공."""
         actions = todo_plugin.get_scheduled_actions()
-        assert len(actions) == 1
-        assert actions[0].name == "yesterday_report"
+        assert len(actions) == 2
+        names = [a.name for a in actions]
+        assert "yesterday_report" in names
+        assert "daily_wrap" in names
 
     def test_actions_have_descriptions(self, todo_plugin):
         """모든 액션에 설명이 있음."""

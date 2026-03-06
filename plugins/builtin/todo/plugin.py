@@ -104,12 +104,15 @@ class TodoPlugin(Plugin):
         """스케줄 가능한 액션 목록."""
         return [
             ScheduledAction(name="yesterday_report", description="어제 할일 리포트"),
+            ScheduledAction(name="daily_wrap", description="하루 마무리 리포트"),
         ]
 
     async def execute_scheduled_action(self, action_name: str, chat_id: int) -> str:
         """스케줄된 액션 실행."""
         if action_name == "yesterday_report":
             return self._generate_yesterday_report(chat_id)
+        if action_name == "daily_wrap":
+            return self._generate_daily_wrap(chat_id)
         raise NotImplementedError(f"Action '{action_name}' not implemented")
 
     def _generate_yesterday_report(self, chat_id: int) -> str:
@@ -132,6 +135,29 @@ class TodoPlugin(Plugin):
 
         if pending_count > 0:
             lines.append(f"\n미완료 {pending_count}개 항목을 오늘로 이전하려면 아래 버튼을 눌러주세요.")
+
+        return "\n".join(lines)
+
+    def _generate_daily_wrap(self, chat_id: int) -> str:
+        """하루 마무리 리포트 텍스트 생성."""
+        today = self._today()
+        stats = self.repository.get_todo_stats(chat_id, today)
+        if stats["total"] == 0:
+            return ""
+
+        lines = ["🌙 <b>하루 마무리</b>\n"]
+
+        if stats["pending"] == 0:
+            lines.append("🎉 오늘 할일을 모두 완료했어요!")
+        else:
+            lines.append(f"📊 오늘 진행률: {stats['done']}/{stats['total']} 완료\n")
+            lines.append("<b>미완료 항목:</b>")
+
+            pending = self.repository.get_pending_todos(chat_id, today)
+            for todo in pending:
+                lines.append(f"  ⬜ {todo.text}")
+
+            lines.append("\n내일로 넘길 항목이 있나요?")
 
         return "\n".join(lines)
 
