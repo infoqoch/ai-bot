@@ -42,6 +42,50 @@ def init_repository(db_path: Path) -> Repository:
 
     _repository = Repository(conn)
 
+    # schedules type CHECK 제약 제거 마이그레이션 (plugin 타입 지원)
+    if not _repository.is_migration_applied("schedules_remove_type_check_v1"):
+        try:
+            row = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE name='schedules'"
+            ).fetchone()
+            if row and "CHECK" in row[0] and "type IN" in row[0]:
+                conn.execute("ALTER TABLE schedules RENAME TO _schedules_old")
+                conn.execute("""
+                    CREATE TABLE schedules (
+                        id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        chat_id INTEGER NOT NULL,
+                        hour INTEGER NOT NULL CHECK (hour >= 0 AND hour <= 23),
+                        minute INTEGER NOT NULL CHECK (minute >= 0 AND minute <= 59),
+                        message TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        type TEXT NOT NULL DEFAULT 'claude',
+                        model TEXT NOT NULL DEFAULT 'sonnet',
+                        workspace_path TEXT,
+                        plugin_name TEXT,
+                        action_name TEXT,
+                        enabled INTEGER NOT NULL DEFAULT 1,
+                        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                        last_run TEXT,
+                        last_error TEXT,
+                        run_count INTEGER NOT NULL DEFAULT 0,
+                        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                    )
+                """)
+                conn.execute("""
+                    INSERT INTO schedules
+                    SELECT id, user_id, chat_id, hour, minute, message, name, type, model,
+                           workspace_path, plugin_name, action_name,
+                           enabled, created_at, last_run, last_error, run_count
+                    FROM _schedules_old
+                """)
+                conn.execute("DROP TABLE _schedules_old")
+                conn.commit()
+            _repository.mark_migration_applied("schedules_remove_type_check_v1")
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"schedules migration failed: {e}")
+
     return _repository
 
 
