@@ -944,8 +944,8 @@ class CallbackHandlers(BaseHandler):
             )
 
             await query.message.reply_text(
-                "Enter scheduled message:",
-                reply_markup=ForceReply(selective=True, input_field_placeholder="e.g., Summarize today's tasks")
+                "예약 메시지를 입력하세요 (schedule_input):",
+                reply_markup=ForceReply(selective=True, input_field_placeholder="예: 오늘 할 일 정리해줘")
             )
             await query.answer()
             return

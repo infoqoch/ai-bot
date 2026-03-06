@@ -237,7 +237,7 @@ def handlers(
 ) -> BotHandlers:
     """BotHandlers 인스턴스."""
     return BotHandlers(
-        session_store=session_store,
+        session_service=session_store,
         claude_client=mock_claude,
         auth_manager=auth_manager,
         require_auth=False,  # 테스트에서는 인증 비활성화

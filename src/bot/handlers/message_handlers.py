@@ -7,6 +7,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from src.logging_config import logger, set_trace_id, set_user_id, set_session_id, clear_context
+from src.repository import get_repository
 from ..constants import (
     MAX_MESSAGE_LENGTH,
     LONG_TASK_THRESHOLD_SECONDS,
@@ -92,51 +93,31 @@ class MessageHandlers(BaseHandler):
         set_session_id(session_id)
         logger.info(f"Session decided - model={model}, new={is_new_session}, workspace={workspace_path or '(none)'}")
 
-        self._ensure_watchdog()
+        # 큐에 메시지 저장
+        repo = get_repository()
+        queue_id = repo.enqueue_message(
+            chat_id=chat_id,
+            session_id=session_id,
+            request=message,
+            model=model,
+            workspace_path=workspace_path,
+        )
+        logger.info(f"Message enqueued: queue_id={queue_id}, session={session_id[:8]}")
 
-        if session_queue_manager.is_locked(session_id):
-            logger.warning(f"Session lock conflict - session={session_id[:8]}, showing UI")
-            await self._show_session_selection_ui(
-                update, user_id, message, session_id, model, is_new_session, workspace_path
-            )
-            clear_context()
-            return
+        # 큐 워커에 알림
+        if self._queue_worker:
+            await self._queue_worker.notify_new_message(chat_id)
 
-        semaphore = self._user_semaphores[user_id]
-        logger.trace(f"Semaphore status - available={semaphore._value}")
-        if semaphore._value == 0:
-            active_count = self.get_active_task_count(user_id)
-            logger.warning(f"Concurrent request limit - active tasks: {active_count}")
-            rejected_preview = message[:50] + "..." if len(message) > 50 else message
+        # 대기 중인 메시지가 있으면 알림
+        pending_count = repo.get_pending_message_count(chat_id)
+        if pending_count > 1:
             await update.message.reply_text(
-                f"<b>Message cannot be processed</b>\n\n"
-                f"Currently {active_count} requests being processed.\n\n"
-                f"<b>Rejected message:</b>\n"
-                f"<code>{rejected_preview}</code>\n\n"
-                f"Please resend after completion!",
+                f"📥 메시지 접수됨 (대기: {pending_count}개)",
                 parse_mode="HTML"
             )
-            clear_context()
-            return
 
-        # NOTE: send_chat_action("typing") 사용 금지
-        # - 텔레그램 API 지연 시 타임아웃 발생 원인
-
-        logger.trace(f"Creating background task - model={model}")
-        task = asyncio.create_task(
-            self._process_claude_request_with_semaphore(
-                bot=context.bot,
-                chat_id=chat_id,
-                user_id=user_id,
-                session_id=session_id,
-                message=message,
-                is_new_session=is_new_session,
-                trace_id=trace_id,
-                model=model,
-            )
-        )
-        self._register_task(task, user_id, session_id, trace_id, message)
-        logger.trace("/ai handler complete - processing in background")
+        clear_context()
+        logger.trace("/ai handler complete - message queued")
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle regular text messages.
@@ -193,7 +174,7 @@ class MessageHandlers(BaseHandler):
                 clear_context()
                 return
 
-            if "예약 메시지" in reply_text and user_id in self._pending_schedule_input:
+            if "schedule_input" in reply_text and user_id in self._pending_schedule_input:
                 await self._handle_schedule_force_reply(update, chat_id, message)
                 clear_context()
                 return
@@ -292,51 +273,31 @@ class MessageHandlers(BaseHandler):
 
         logger.info(f"Message accepted: model={model}, new={is_new_session}, workspace={workspace_path or '(none)'}")
 
-        self._ensure_watchdog()
+        # 큐에 메시지 저장
+        repo = get_repository()
+        queue_id = repo.enqueue_message(
+            chat_id=chat_id,
+            session_id=session_id,
+            request=message,
+            model=model,
+            workspace_path=workspace_path,
+        )
+        logger.info(f"Message enqueued: queue_id={queue_id}, session={session_id[:8]}")
 
-        if session_queue_manager.is_locked(session_id):
-            logger.warning(f"Session lock conflict - session={session_id[:8]}, showing UI")
-            await self._show_session_selection_ui(
-                update, user_id, message, session_id, model, is_new_session, workspace_path
-            )
-            clear_context()
-            return
+        # 큐 워커에 알림
+        if self._queue_worker:
+            await self._queue_worker.notify_new_message(chat_id)
 
-        semaphore = self._user_semaphores[user_id]
-        logger.trace(f"Semaphore status - available={semaphore._value}")
-        if semaphore._value == 0:
-            active_count = self.get_active_task_count(user_id)
-            logger.warning(f"Concurrent request limit - active tasks: {active_count}")
-            rejected_preview = message[:50] + "..." if len(message) > 50 else message
+        # 대기 중인 메시지가 있으면 알림
+        pending_count = repo.get_pending_message_count(chat_id)
+        if pending_count > 1:
             await update.message.reply_text(
-                f"<b>Message cannot be processed</b>\n\n"
-                f"Currently {active_count} requests being processed.\n\n"
-                f"<b>Rejected message:</b>\n"
-                f"<code>{rejected_preview}</code>\n\n"
-                f"Please resend after completion!",
+                f"📥 메시지 접수됨 (대기: {pending_count}개)",
                 parse_mode="HTML"
             )
-            clear_context()
-            return
 
-        # NOTE: send_chat_action("typing") 사용 금지
-        # - 텔레그램 API 지연 시 타임아웃 발생 원인
-
-        logger.trace(f"Creating background task - model={model}")
-        task = asyncio.create_task(
-            self._process_claude_request_with_semaphore(
-                bot=context.bot,
-                chat_id=chat_id,
-                user_id=user_id,
-                session_id=session_id,
-                message=message,
-                is_new_session=is_new_session,
-                trace_id=trace_id,
-                model=model,
-            )
-        )
-        self._register_task(task, user_id, session_id, trace_id, message)
-        logger.trace("handle_message handler complete - processing in background")
+        clear_context()
+        logger.trace("handle_message handler complete - message queued")
 
     async def _process_claude_request_with_semaphore(
         self,
