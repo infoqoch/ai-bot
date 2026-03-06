@@ -2,6 +2,7 @@
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Optional
 
 from ..repository import Repository, Workspace
@@ -159,40 +160,59 @@ class WorkspaceRegistryAdapter:
     ) -> list[dict[str, str]]:
         """Recommend workspace paths based on purpose.
 
-        This is a simplified version that returns existing workspaces.
-        The original implementation used AI to recommend paths.
+        1. Search registered workspaces by keywords/name/description
+        2. Scan allowed_patterns directories and match by directory name
         """
-        workspaces = self._repo.list_workspaces_by_user(user_id)
-
-        # Filter by keywords if any match purpose
         purpose_lower = purpose.lower()
-        recommendations = []
+        results = []
+        seen_paths = set()
 
+        # 1. Search registered workspaces
+        workspaces = self._repo.list_workspaces_by_user(user_id)
         for w in workspaces:
             score = 0
-            # Check keywords
             for keyword in w.keywords:
                 if keyword.lower() in purpose_lower:
                     score += 2
-            # Check name
             if w.name.lower() in purpose_lower:
                 score += 1
-            # Check description
             if purpose_lower in w.description.lower():
                 score += 1
+            if score > 0:
+                seen_paths.add(w.path)
+                results.append((score + 10, {
+                    "path": w.path,
+                    "name": w.name,
+                    "description": w.description,
+                    "reason": f"등록된 워크스페이스 매칭"
+                }))
+
+        # 2. Scan allowed directories for matching folder names
+        for dir_path in allowed_patterns:
+            if dir_path in seen_paths:
+                continue
+            path = Path(dir_path)
+            if not path.is_dir():
+                continue
+            dir_name = path.name.lower()
+            dir_name_parts = dir_name.replace("-", " ").replace("_", " ").split()
+
+            score = 0
+            for part in dir_name_parts:
+                if len(part) >= 2 and part in purpose_lower:
+                    score += 1
+            for word in purpose_lower.split():
+                if len(word) >= 2 and word in dir_name:
+                    score += 1
 
             if score > 0:
-                recommendations.append((score, w))
+                seen_paths.add(str(path))
+                results.append((score, {
+                    "path": str(path),
+                    "name": path.name,
+                    "description": f"디렉토리: {path.name}",
+                    "reason": f"디렉토리명 매칭"
+                }))
 
-        # Sort by score and return top 3
-        recommendations.sort(key=lambda x: x[0], reverse=True)
-
-        return [
-            {
-                "path": w.path,
-                "name": w.name,
-                "description": w.description,
-                "reason": f"키워드 매칭: {', '.join(w.keywords)}" if w.keywords else w.description
-            }
-            for _, w in recommendations[:3]
-        ]
+        results.sort(key=lambda x: x[0], reverse=True)
+        return [r for _, r in results[:3]]
