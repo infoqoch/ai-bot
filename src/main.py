@@ -244,11 +244,17 @@ def create_app() -> Application:
                 max_len = 4000
                 for i in range(0, len(response), max_len):
                     chunk = response[i:i + max_len]
-                    await app.bot.send_message(
-                        chat_id=schedule.chat_id,
-                        text=f"📅 <b>{schedule.name}</b>\n\n{chunk}",
-                        parse_mode="HTML",
-                    )
+                    try:
+                        await app.bot.send_message(
+                            chat_id=schedule.chat_id,
+                            text=f"📅 <b>{schedule.name}</b>\n\n{chunk}",
+                            parse_mode="HTML",
+                        )
+                    except Exception:
+                        await app.bot.send_message(
+                            chat_id=schedule.chat_id,
+                            text=f"📅 {schedule.name}\n\n{chunk}",
+                        )
 
             _schedule_manager.update_run(schedule.id)
             logger.info(f"Schedule {schedule.id} executed successfully")
