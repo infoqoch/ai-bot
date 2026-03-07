@@ -369,6 +369,7 @@ class BaseHandler:
             "/rename_MyName - Rename session\n"
             "/session - Current session info\n"
             "/sl - Session list\n"
+            "/back - Return to previous session\n"
             "/delete_&lt;id&gt; - Delete session\n\n"
             f"{plugin_section}\n"
             "Workspace\n"
