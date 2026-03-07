@@ -46,6 +46,7 @@ class BotHandlers(
         response_notify_seconds: int = 60,
         session_list_ai_summary: bool = False,
         plugin_loader: "PluginLoader" = None,
+        ai_registry=None,
     ):
         # Initialize base class (all mixins share same base)
         super().__init__(
@@ -57,4 +58,5 @@ class BotHandlers(
             response_notify_seconds=response_notify_seconds,
             session_list_ai_summary=session_list_ai_summary,
             plugin_loader=plugin_loader,
+            ai_registry=ai_registry,
         )

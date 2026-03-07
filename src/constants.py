@@ -1,8 +1,22 @@
-"""공유 상수 정의."""
+"""Shared constants and provider/model helpers."""
+
+from src.ai.catalog import (
+    DEFAULT_PROVIDER,
+    SUPPORTED_PROVIDERS,
+    get_default_model,
+    get_provider_profiles,
+)
 
 # 스케줄 가능 시간대 (06:00 ~ 22:00)
 AVAILABLE_HOURS = list(range(6, 23))
 
-# Claude 모델
-SUPPORTED_MODELS = ["opus", "sonnet", "haiku"]
-DEFAULT_MODEL = "sonnet"
+SUPPORTED_MODELS = [profile.key for profile in get_provider_profiles(DEFAULT_PROVIDER)]
+DEFAULT_MODEL = get_default_model(DEFAULT_PROVIDER)
+
+__all__ = [
+    "AVAILABLE_HOURS",
+    "DEFAULT_MODEL",
+    "DEFAULT_PROVIDER",
+    "SUPPORTED_MODELS",
+    "SUPPORTED_PROVIDERS",
+]

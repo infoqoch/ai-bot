@@ -158,6 +158,11 @@ src/
 ├── scheduler_manager.py       # 통합 job_queue 매니저
 ├── logging_config.py          # 로깅 설정
 │
+├── ai/
+│   ├── catalog.py             # provider/model profile 정의
+│   ├── registry.py            # provider → client 라우팅
+│   └── client_types.py        # 공통 응답 타입/프로토콜
+│
 ├── bot/
 │   ├── handlers/              # 명령어/콜백/메시지 핸들러
 │   ├── middleware.py           # 인증/권한 데코레이터
@@ -168,6 +173,8 @@ src/
 │
 ├── claude/
 │   └── client.py              # Claude CLI 래퍼
+├── codex/
+│   └── client.py              # Codex CLI 래퍼
 │
 ├── plugins/
 │   └── loader.py              # Plugin 기본 클래스 + PluginLoader
@@ -182,14 +189,14 @@ src/
 │
 └── services/
     ├── session_service.py     # 세션 생명주기
-    ├── job_service.py         # detached Claude job 실행 + Telegram 응답
+    ├── job_service.py         # detached provider job 실행 + Telegram 응답
     ├── message_service.py     # 메시지 처리
     └── schedule_service.py    # 스케줄 CRUD + 실행
 ```
 
 **기본 호출 흐름:** Handler → Service → Repository → SQLite
 
-**Claude 대화 흐름:** Handler → Repository(job 생성) → `src.worker_job` → `JobService` → Claude CLI / Telegram
+**AI 대화 흐름:** Handler → Repository(job 생성) → `src.worker_job` → `JobService` → provider CLI / Telegram
 
 ### 네이밍
 - 파일: `snake_case.py`
@@ -251,7 +258,7 @@ src/
 
 ### Detached Worker 아키텍처 (CRITICAL)
 
-자가 개발 중 Claude가 `./run.sh restart`를 직접 실행할 수 있음을 전제로 설계한다.
+자가 개발 중 AI agent가 `./run.sh restart`를 직접 실행할 수 있음을 전제로 설계한다.
 
 ```
 supervisor
@@ -263,15 +270,33 @@ supervisor
 |---------|------|
 | `src.supervisor` | `src.main` 감시/재기동 |
 | `src.main` | 텔레그램 요청 수신, 세션 결정, job 생성, worker spawn |
-| `src.worker_job` | Claude CLI 실행 owner, Telegram 직접 응답, queue drain |
+| `src.worker_job` | provider CLI 실행 owner, Telegram 직접 응답, queue drain |
 
 **규칙:**
-- 일반 채팅과 `/ai`의 Claude 요청 owner는 `src.main`이 아니라 `src.worker_job`
-- `src.main`은 Claude 응답을 기다리지 않고 `message_log` job 생성 후 즉시 반환
+- 일반 채팅과 `/ai`의 AI 요청 owner는 `src.main`이 아니라 `src.worker_job`
+- `src.main`은 AI 응답을 기다리지 않고 `message_log` job 생성 후 즉시 반환
 - 처리 중 여부의 source of truth는 메모리가 아니라 `message_log`, `queued_messages`, `session_locks`
 - `./run.sh restart`는 `src.supervisor`/`src.main`만 재기동하고 in-flight `src.worker_job`는 유지
 - `./run.sh stop`은 `src.worker_job`까지 종료
-- "봇 재부팅 후 Claude에게 다시 물어보기" 방식은 주 복구 전략으로 사용하지 않음
+- "봇 재부팅 후 AI에게 다시 물어보기" 방식은 주 복구 전략으로 사용하지 않음
+
+### Multi-Provider 세션 규칙 (CRITICAL)
+
+`Claude`와 `Codex`를 동시에 지원한다. 세션과 모델은 Claude 전용 개념으로 설계하지 않는다.
+
+| 개념 | 의미 |
+|------|------|
+| `sessions.id` | 봇 내부 세션 ID |
+| `sessions.ai_provider` | `claude` 또는 `codex` |
+| `sessions.provider_session_id` | Claude conversation ID / Codex thread ID |
+| `sessions.model` | raw CLI 모델명이 아니라 provider별 profile key |
+
+**규칙:**
+- provider 외부 세션 ID를 DB primary key로 가정하지 않음
+- current/previous session은 provider별로 분리 관리
+- `/sl`, `/session`, `/model`, `/new`는 현재 선택된 provider 기준으로 동작
+- 모델 버튼/표시는 catalog에서 관리하고, CLI 플래그는 client가 해석
+- 비지원 provider 흔적(`gemini` 등)은 코드와 운영 DB에서 제거
 
 ## 보호 메커니즘
 

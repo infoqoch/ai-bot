@@ -7,6 +7,7 @@ import time
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
+from src.ai import get_default_model, get_provider_label
 from src.logging_config import logger, set_trace_id, set_user_id, set_session_id, clear_context
 from ..constants import (
     MAX_MESSAGE_LENGTH,
@@ -25,19 +26,21 @@ class MessageHandlers(BaseHandler):
     @authorized_only
     @authenticated_only
     async def ai_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /ai command - force Claude conversation (bypass plugins)."""
+        """Handle /ai command - force current AI conversation (bypass plugins)."""
         chat_id = update.effective_chat.id
         trace_id = self._setup_request_context(chat_id)
         logger.info("/ai command received")
 
         user_id = str(chat_id)
+        provider = self._get_selected_ai_provider(user_id)
+        provider_label = get_provider_label(provider)
 
         if not context.args:
             logger.trace("/ai no args - show usage")
             await update.message.reply_text(
                 "<b>/ai Usage</b>\n\n"
                 "<code>/ai question</code>\n\n"
-                "Bypass plugins and ask Claude directly.",
+                f"Bypass plugins and ask <b>{provider_label}</b> directly.",
                 parse_mode="HTML"
             )
             clear_context()
@@ -69,23 +72,16 @@ class MessageHandlers(BaseHandler):
             logger.trace(f"Current session: {session_id[:8] if session_id else 'None'}")
 
             if not session_id:
-                logger.info("Creating new Claude session...")
-                self._creating_sessions.add(user_id)
-                try:
-                    session_id = await self.claude.create_session()
+                default_model = get_default_model(provider)
+                logger.info(f"Creating new {provider} session envelope...")
+                session_id = self.sessions.create_session(
+                    user_id=user_id,
+                    ai_provider=provider,
+                    model=default_model,
+                    first_message="(new session)",
+                )
 
-                    if not session_id:
-                        logger.error("Claude session creation failed")
-                        await update.message.reply_text("❌ Failed to create Claude session. Please try again.")
-                        clear_context()
-                        return
-
-                    logger.trace(f"Saving session - session_id={session_id[:8]}")
-                    self.sessions.create_session(user_id, session_id)
-                finally:
-                    self._creating_sessions.discard(user_id)
-
-            model = self.sessions.get_session_model(session_id) or "sonnet"
+            model = self.sessions.get_session_model(session_id) or get_default_model(provider)
             workspace_path = self.sessions.get_workspace_path(session_id)
 
             if self._is_session_locked(session_id):
@@ -137,7 +133,7 @@ class MessageHandlers(BaseHandler):
         Fire-and-Forget pattern:
         1. Auth/authorization check
         2. Session decision (Lock protected)
-        3. Spawn detached worker for Claude call + Telegram response
+        3. Spawn detached worker for provider CLI call + Telegram response
         4. Handler returns immediately
         """
         chat_id = update.effective_chat.id
@@ -264,22 +260,18 @@ class MessageHandlers(BaseHandler):
             logger.trace(f"Current session: {session_id[:8] if session_id else 'None'}")
 
             if not session_id:
-                logger.info("Creating new Claude session...")
-                self._creating_sessions.add(user_id)
-                try:
-                    session_id = await self.claude.create_session()
+                provider = self._get_selected_ai_provider(user_id)
+                default_model = get_default_model(provider)
+                logger.info(f"Creating new {provider} session envelope...")
+                session_id = self.sessions.create_session(
+                    user_id=user_id,
+                    ai_provider=provider,
+                    model=default_model,
+                    first_message="(new session)",
+                )
 
-                    if not session_id:
-                        logger.error("Claude session creation failed")
-                        await update.message.reply_text("❌ Failed to create Claude session. Please try again.")
-                        clear_context()
-                        return
-
-                    logger.trace(f"Saving session - session_id={session_id[:8]}")
-                    self.sessions.create_session(user_id, session_id)
-                finally:
-                    self._creating_sessions.discard(user_id)
-            model = self.sessions.get_session_model(session_id) or "sonnet"
+            session_provider = self.sessions.get_session_ai_provider(session_id) or self._get_selected_ai_provider(user_id)
+            model = self.sessions.get_session_model(session_id) or get_default_model(session_provider)
             workspace_path = self.sessions.get_workspace_path(session_id)
 
             if self._is_session_locked(session_id):
@@ -557,7 +549,7 @@ class MessageHandlers(BaseHandler):
         Options:
         1. Wait in this session (recommended) - auto process after current completes
         2. Select other session - list of available sessions
-        3. Create new session
+        3. Create new session for the same AI
         4. Cancel
 
         Args:
@@ -571,8 +563,10 @@ class MessageHandlers(BaseHandler):
 
         repo = self._repository
         queue_size = len(repo.get_queued_messages_by_session(current_session_id)) if repo else 0
+        provider = self.sessions.get_session_ai_provider(current_session_id) or self._get_selected_ai_provider(user_id)
+        provider_label = get_provider_label(provider)
 
-        all_sessions = self.sessions.list_sessions(user_id)
+        all_sessions = self.sessions.list_sessions(user_id, ai_provider=provider)
         available_sessions = []
 
         for s in all_sessions:
@@ -589,6 +583,8 @@ class MessageHandlers(BaseHandler):
 
         lines = [
             f"<b>Current session is processing</b>",
+            f"",
+            f"AI: <b>{provider_label}</b>",
             f"",
             f"<code>{message_preview}</code>",
             f"",
@@ -643,12 +639,8 @@ class MessageHandlers(BaseHandler):
                 ])
 
         lines.append(f"")
-        lines.append(f"<b>Create new session:</b>")
-        buttons.append([
-            InlineKeyboardButton("Opus", callback_data=f"sq:new:{pending_key}:opus"),
-            InlineKeyboardButton("Sonnet", callback_data=f"sq:new:{pending_key}:sonnet"),
-            InlineKeyboardButton("Haiku", callback_data=f"sq:new:{pending_key}:haiku"),
-        ])
+        lines.append(f"<b>Create new {provider_label} session:</b>")
+        buttons.append(self._build_model_buttons(provider, f"sq:new:{pending_key}:"))
 
         buttons.append([
             InlineKeyboardButton("Cancel", callback_data=f"sq:cancel:{pending_key}"),

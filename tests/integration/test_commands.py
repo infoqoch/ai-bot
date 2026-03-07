@@ -132,6 +132,32 @@ class TestNewSessionCommands:
         assert reply or mock_claude.create_session.called
 
 
+class TestProviderSelection:
+    """AI provider selection tests."""
+
+    @pytest.mark.asyncio
+    async def test_select_ai_command_shows_selector(self, handlers):
+        """`/select_ai` should show provider selector UI."""
+        update, context = create_command_update("select_ai")
+
+        await handlers.select_ai_command(update, context)
+
+        reply = await get_reply_text(update)
+        assert "Current AI" in reply
+        assert "Claude" in reply
+
+    @pytest.mark.asyncio
+    async def test_select_ai_command_switches_provider(self, handlers, session_store):
+        """`/select_ai codex` should persist provider selection."""
+        update, context = create_command_update("select_ai", args=["codex"])
+
+        await handlers.select_ai_command(update, context)
+
+        assert session_store.get_selected_ai_provider("12345") == "codex"
+        reply = await get_reply_text(update)
+        assert "Codex" in reply
+
+
 class TestSessionManagement:
     """세션 관리 테스트."""
 
@@ -167,6 +193,22 @@ class TestSessionManagement:
         reply = await get_reply_text(update)
         # 세션 정보가 포함되어야 함
         assert reply
+
+    @pytest.mark.asyncio
+    async def test_session_list_filters_by_selected_provider(self, handlers, session_store):
+        """`/sl` should show only sessions for the selected provider."""
+        session_store.create_session("12345", "claude-session", ai_provider="claude", model="sonnet", name="Claude 세션")
+        session_store.create_session("12345", "codex-session", ai_provider="codex", model="gpt54_high", name="Codex 세션")
+        session_store.select_ai_provider("12345", "codex")
+
+        update, context = create_command_update("sl")
+
+        await handlers.session_list_command(update, context)
+
+        reply = await get_reply_text(update)
+        assert "Current AI: <b>Codex</b>" in reply
+        assert "Codex 세션" in reply
+        assert "Claude 세션" not in reply
 
     @pytest.mark.asyncio
     async def test_switch_session(self, handlers, session_store):

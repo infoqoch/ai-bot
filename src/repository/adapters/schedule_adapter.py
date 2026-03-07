@@ -21,6 +21,7 @@ class ScheduleData:
     message: str
     name: str
     type: str
+    ai_provider: str
     model: str
     workspace_path: Optional[str]
     plugin_name: Optional[str]
@@ -55,6 +56,7 @@ class ScheduleData:
             "message": self.message,
             "name": self.name,
             "type": self.type,
+            "ai_provider": self.ai_provider,
             "model": self.model,
             "workspace_path": self.workspace_path,
             "plugin_name": self.plugin_name,
@@ -77,6 +79,7 @@ class ScheduleData:
             message=s.message,
             name=s.name,
             type=s.schedule_type,
+            ai_provider=s.ai_provider,
             model=s.model,
             workspace_path=s.workspace_path,
             plugin_name=s.plugin_name,
@@ -127,6 +130,7 @@ class ScheduleManagerAdapter:
         message: str,
         name: str,
         schedule_type: str = "claude",
+        ai_provider: str = "claude",
         model: str = "sonnet",
         workspace_path: Optional[str] = None,
         plugin_name: Optional[str] = None,
@@ -141,6 +145,7 @@ class ScheduleManagerAdapter:
             message=message,
             name=name,
             schedule_type=schedule_type,
+            ai_provider=ai_provider,
             model=model,
             workspace_path=workspace_path,
             plugin_name=plugin_name,

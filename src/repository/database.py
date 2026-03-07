@@ -5,6 +5,8 @@ import threading
 from pathlib import Path
 from typing import Optional
 
+from src.ai import DEFAULT_PROVIDER, SUPPORTED_PROVIDERS, infer_provider_from_model
+
 _connection: Optional[sqlite3.Connection] = None
 _lock = threading.Lock()
 
@@ -68,8 +70,178 @@ def init_schema(conn: sqlite3.Connection, schema_path: Path) -> None:
         schema_path: Path to schema.sql file
     """
     schema_sql = schema_path.read_text(encoding="utf-8")
+    _preflight_existing_schema(conn)
     conn.executescript(schema_sql)
+    _migrate_schema(conn)
     conn.commit()
+
+
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    """Return whether a table already exists."""
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table,),
+    ).fetchone()
+    return row is not None
+
+
+def _preflight_existing_schema(conn: sqlite3.Connection) -> None:
+    """Add critical columns before executescript creates provider-aware indexes."""
+    if _table_exists(conn, "users"):
+        _ensure_column(conn, "users", "selected_ai_provider", "TEXT NOT NULL DEFAULT 'claude'")
+    if _table_exists(conn, "sessions"):
+        _ensure_column(conn, "sessions", "ai_provider", "TEXT NOT NULL DEFAULT 'claude'")
+        _ensure_column(conn, "sessions", "provider_session_id", "TEXT")
+    if _table_exists(conn, "schedules"):
+        _ensure_column(conn, "schedules", "ai_provider", "TEXT NOT NULL DEFAULT 'claude'")
+
+
+def _migrate_schema(conn: sqlite3.Connection) -> None:
+    """Apply lightweight in-place schema upgrades for existing local DBs."""
+    _ensure_column(conn, "users", "selected_ai_provider", "TEXT NOT NULL DEFAULT 'claude'")
+    _ensure_column(conn, "sessions", "ai_provider", "TEXT NOT NULL DEFAULT 'claude'")
+    _ensure_column(conn, "sessions", "provider_session_id", "TEXT")
+    _ensure_column(conn, "schedules", "ai_provider", "TEXT NOT NULL DEFAULT 'claude'")
+
+    # Workspace uniqueness must be provider-aware.
+    conn.execute("DROP INDEX IF EXISTS idx_sessions_workspace_unique")
+    conn.execute(
+        """CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_workspace_unique
+           ON sessions(user_id, ai_provider, workspace_path)
+           WHERE workspace_path IS NOT NULL AND deleted = 0"""
+    )
+
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS user_provider_state (
+               user_id TEXT NOT NULL,
+               ai_provider TEXT NOT NULL,
+               current_session_id TEXT,
+               previous_session_id TEXT,
+               updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+               PRIMARY KEY (user_id, ai_provider)
+           )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_user_provider_state_provider ON user_provider_state(ai_provider)"
+    )
+
+    _backfill_session_provider_data(conn)
+    _cleanup_unsupported_provider_rows(conn)
+    _initialize_provider_state(conn)
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    """Add one column if it does not exist."""
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    existing = {row[1] for row in rows}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+
+def _backfill_session_provider_data(conn: sqlite3.Connection) -> None:
+    """Infer provider/provider_session_id for legacy rows."""
+    rows = conn.execute("SELECT id, model FROM sessions").fetchall()
+    for session_id, model in rows:
+        provider = infer_provider_from_model(model)
+        conn.execute(
+            """UPDATE sessions
+               SET ai_provider = ?, provider_session_id = COALESCE(provider_session_id, id)
+               WHERE id = ?""",
+            (provider, session_id),
+        )
+
+    schedule_rows = conn.execute("SELECT id, model FROM schedules").fetchall()
+    for schedule_id, model in schedule_rows:
+        provider = infer_provider_from_model(model)
+        if provider not in SUPPORTED_PROVIDERS:
+            provider = DEFAULT_PROVIDER
+        conn.execute(
+            "UPDATE schedules SET ai_provider = ? WHERE id = ?",
+            (provider, schedule_id),
+        )
+
+    conn.execute(
+        """UPDATE users
+           SET selected_ai_provider = ?
+           WHERE selected_ai_provider IS NULL OR selected_ai_provider = ''""",
+        (DEFAULT_PROVIDER,),
+    )
+
+
+def _cleanup_unsupported_provider_rows(conn: sqlite3.Connection) -> None:
+    """Soft-delete sessions for unsupported providers such as legacy Gemini rows."""
+    placeholders = ",".join("?" for _ in SUPPORTED_PROVIDERS)
+    unsupported = conn.execute(
+        f"SELECT id FROM sessions WHERE ai_provider NOT IN ({placeholders}) AND deleted = 0",
+        tuple(SUPPORTED_PROVIDERS),
+    ).fetchall()
+    if not unsupported:
+        return
+
+    ids = [row[0] for row in unsupported]
+    id_placeholders = ",".join("?" for _ in ids)
+    conn.execute(
+        f"UPDATE sessions SET deleted = 1 WHERE id IN ({id_placeholders})",
+        ids,
+    )
+    conn.execute(
+        f"UPDATE users SET current_session_id = NULL WHERE current_session_id IN ({id_placeholders})",
+        ids,
+    )
+    conn.execute(
+        f"UPDATE users SET previous_session_id = NULL WHERE previous_session_id IN ({id_placeholders})",
+        ids,
+    )
+    conn.execute(
+        f"""UPDATE user_provider_state
+            SET current_session_id = NULL
+            WHERE current_session_id IN ({id_placeholders})""",
+        ids,
+    )
+    conn.execute(
+        f"""UPDATE user_provider_state
+            SET previous_session_id = NULL
+            WHERE previous_session_id IN ({id_placeholders})""",
+        ids,
+    )
+
+
+def _initialize_provider_state(conn: sqlite3.Connection) -> None:
+    """Initialize provider-specific current/previous session rows from legacy user state."""
+    users = conn.execute("SELECT id, current_session_id, previous_session_id FROM users").fetchall()
+    for user_id, current_session_id, previous_session_id in users:
+        provider = DEFAULT_PROVIDER
+        if current_session_id:
+            row = conn.execute(
+                "SELECT ai_provider, deleted FROM sessions WHERE id = ?",
+                (current_session_id,),
+            ).fetchone()
+            if row and not row[1] and row[0] in SUPPORTED_PROVIDERS:
+                provider = row[0]
+            else:
+                current_session_id = None
+
+        if previous_session_id:
+            row = conn.execute(
+                "SELECT ai_provider, deleted FROM sessions WHERE id = ?",
+                (previous_session_id,),
+            ).fetchone()
+            if not row or row[1] or row[0] != provider:
+                previous_session_id = None
+
+        conn.execute(
+            "INSERT OR IGNORE INTO user_provider_state (user_id, ai_provider) VALUES (?, ?)",
+            (user_id, DEFAULT_PROVIDER),
+        )
+        conn.execute(
+            """INSERT INTO user_provider_state (user_id, ai_provider, current_session_id, previous_session_id, updated_at)
+               VALUES (?, ?, ?, ?, datetime('now'))
+               ON CONFLICT(user_id, ai_provider) DO UPDATE SET
+                   current_session_id = COALESCE(user_provider_state.current_session_id, excluded.current_session_id),
+                   previous_session_id = COALESCE(user_provider_state.previous_session_id, excluded.previous_session_id),
+                   updated_at = datetime('now')""",
+            (user_id, provider, current_session_id, previous_session_id),
+        )
 
 
 def reset_connection() -> None:

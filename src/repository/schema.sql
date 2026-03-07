@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     current_session_id TEXT,
     previous_session_id TEXT,
+    selected_ai_provider TEXT NOT NULL DEFAULT 'claude',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -18,6 +19,8 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
+    ai_provider TEXT NOT NULL DEFAULT 'claude',
+    provider_session_id TEXT,
     model TEXT NOT NULL DEFAULT 'sonnet',
     name TEXT,
     workspace_path TEXT,
@@ -28,10 +31,24 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_ai_provider ON sessions(ai_provider);
 CREATE INDEX IF NOT EXISTS idx_sessions_last_used ON sessions(last_used DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_deleted ON sessions(deleted);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_workspace_unique
-    ON sessions(user_id, workspace_path) WHERE workspace_path IS NOT NULL AND deleted = 0;
+    ON sessions(user_id, ai_provider, workspace_path) WHERE workspace_path IS NOT NULL AND deleted = 0;
+
+-- user_provider_state: provider별 current/previous session 분리 관리
+CREATE TABLE IF NOT EXISTS user_provider_state (
+    user_id TEXT NOT NULL,
+    ai_provider TEXT NOT NULL,
+    current_session_id TEXT,
+    previous_session_id TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, ai_provider),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_provider_state_provider ON user_provider_state(ai_provider);
 
 -- Session history: message history per session
 CREATE TABLE IF NOT EXISTS session_history (
@@ -57,6 +74,7 @@ CREATE TABLE IF NOT EXISTS schedules (
     message TEXT NOT NULL,
     name TEXT NOT NULL,
     schedule_type TEXT NOT NULL DEFAULT 'claude',
+    ai_provider TEXT NOT NULL DEFAULT 'claude',
     model TEXT NOT NULL DEFAULT 'sonnet',
     workspace_path TEXT,
     plugin_name TEXT,
@@ -72,6 +90,7 @@ CREATE TABLE IF NOT EXISTS schedules (
 CREATE INDEX IF NOT EXISTS idx_schedules_user_id ON schedules(user_id);
 CREATE INDEX IF NOT EXISTS idx_schedules_chat_id ON schedules(chat_id);
 CREATE INDEX IF NOT EXISTS idx_schedules_enabled ON schedules(enabled);
+CREATE INDEX IF NOT EXISTS idx_schedules_ai_provider ON schedules(ai_provider);
 
 -- Workspaces table: registered project directories
 CREATE TABLE IF NOT EXISTS workspaces (

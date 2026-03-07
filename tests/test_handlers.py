@@ -430,7 +430,7 @@ class TestHandleMessage:
     async def test_handle_message_new_session_creation(
         self, handlers, mock_session_service, mock_claude_client
     ):
-        """세션이 없을 때 새 세션 생성."""
+        """세션이 없을 때 내부 세션 envelope 생성."""
         update = MagicMock()
         update.effective_chat.id = 12345
         update.message.text = "첫 질문"
@@ -441,16 +441,22 @@ class TestHandleMessage:
 
         # 세션 없음
         mock_session_service.get_current_session_id.return_value = None
-        mock_claude_client.create_session = AsyncMock(return_value="new-session-123")
+        mock_session_service.create_session.return_value = "new-session-123"
+        mock_session_service.get_session_model.return_value = "sonnet"
+        mock_session_service.get_workspace_path.return_value = None
 
         with patch.object(handlers, "_is_session_locked", return_value=False), patch.object(
             handlers, "_start_detached_job", return_value=(1, None)
         ):
             await handlers.handle_message(update, context)
 
-            # 새 세션 생성 확인
-            mock_claude_client.create_session.assert_called_once()
-            mock_session_service.create_session.assert_called_once_with("12345", "new-session-123")
+            mock_claude_client.create_session.assert_not_called()
+            mock_session_service.create_session.assert_called_once_with(
+                user_id="12345",
+                ai_provider="claude",
+                model="sonnet",
+                first_message="(new session)",
+            )
 
     @pytest.mark.asyncio
     async def test_handle_message_uses_existing_session(
@@ -484,7 +490,7 @@ class TestUserLock:
     async def test_user_lock_prevents_race_condition(
         self, handlers, mock_session_service, mock_claude_client
     ):
-        """세션 생성 중 두 번째 메시지는 블로킹됨."""
+        """동시 메시지에서도 세션 envelope는 한 번만 생성됨."""
         update1 = MagicMock()
         update1.effective_chat.id = 12345
         update1.message.text = "첫 번째 메시지"
@@ -501,36 +507,33 @@ class TestUserLock:
         context2 = MagicMock()
         context2.bot.send_message = AsyncMock()
 
-        # 세션 없음 (새 세션 생성 케이스)
-        mock_session_service.get_current_session_id.return_value = None
-        mock_claude_client.create_session = AsyncMock(return_value="new-session-123")
+        state = {"current": None}
+
+        def get_current_session_id(*_args, **_kwargs):
+            return state["current"]
 
         call_order = []
 
-        async def track_create_session():
-            call_order.append("create_session_start")
-            await asyncio.sleep(0.01)  # 시뮬레이션
-            call_order.append("create_session_end")
+        def track_create_session(**_kwargs):
+            call_order.append("create_session")
+            state["current"] = "new-session-123"
             return "new-session-123"
 
-        mock_claude_client.create_session = track_create_session
+        mock_session_service.get_current_session_id.side_effect = get_current_session_id
+        mock_session_service.create_session.side_effect = track_create_session
+        mock_session_service.get_session_model.return_value = "sonnet"
+        mock_session_service.get_workspace_path.return_value = None
 
         with patch.object(handlers, "_is_session_locked", return_value=False), patch.object(
             handlers, "_start_detached_job", return_value=(1, None)
-        ):
+        ) as mock_start_job:
             # 동시에 두 메시지 처리
             await asyncio.gather(
                 handlers.handle_message(update1, context1),
                 handlers.handle_message(update2, context2),
             )
 
-        # 세션 생성 중 블로킹으로 인해 create_session은 한 번만 호출됨
-        # 두 번째 메시지는 "세션 준비 중" 메시지로 블로킹됨
-        assert call_order == [
-            "create_session_start",
-            "create_session_end",
-        ]
-        # 두 번째 메시지에 블로킹 응답이 전송됨
-        assert update2.message.reply_text.called
-        reply_call = update2.message.reply_text.call_args
-        assert "Session initializing" in reply_call[0][0]
+        assert call_order == ["create_session"]
+        assert mock_start_job.call_count == 2
+        mock_claude_client.create_session.assert_not_called()
+        assert not update2.message.reply_text.called
