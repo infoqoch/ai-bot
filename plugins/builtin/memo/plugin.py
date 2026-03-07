@@ -22,6 +22,17 @@ class MemoPlugin(Plugin):
     FORCE_REPLY_MARKER = "memo_add"
     MAX_MEMOS = 30
 
+    def get_schema(self) -> str:
+        return """
+CREATE TABLE IF NOT EXISTS memos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_memos_chat_id ON memos(chat_id);
+"""
+
     TRIGGER_KEYWORDS = ["메모", "memo"]
 
     EXCLUDE_PATTERNS = [

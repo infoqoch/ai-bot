@@ -205,6 +205,9 @@ class TestMemoPluginPatterns:
             plugin = MemoPlugin()
             plugin._base_dir = Path(tmpdir)
             plugin._repository = repo
+            # 플러그인 스키마 초기화
+            repo._conn.executescript(plugin.get_schema())
+            repo._conn.commit()
 
             yield plugin
 

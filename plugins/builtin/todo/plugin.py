@@ -36,6 +36,28 @@ class TodoPlugin(Plugin):
     CALLBACK_PREFIX = "td:"
     FORCE_REPLY_MARKER = "td:add"
 
+    def get_schema(self) -> str:
+        return """
+CREATE TABLE IF NOT EXISTS todos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    slot TEXT NOT NULL DEFAULT 'default',
+    text TEXT NOT NULL,
+    done INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_todos_chat_id ON todos(chat_id);
+CREATE INDEX IF NOT EXISTS idx_todos_date ON todos(date);
+CREATE INDEX IF NOT EXISTS idx_todos_chat_date ON todos(chat_id, date);
+CREATE TRIGGER IF NOT EXISTS update_todos_timestamp
+AFTER UPDATE ON todos
+BEGIN
+    UPDATE todos SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
+"""
+
     def __init__(self):
         super().__init__()
         self._multi_selections: dict[int, set[int]] = {}

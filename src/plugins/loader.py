@@ -46,6 +46,10 @@ class Plugin(ABC):
         """Repository 인스턴스 반환."""
         return self._repository
 
+    def get_schema(self) -> str:
+        """플러그인 전용 DDL을 반환. 오버라이드하여 사용."""
+        return ""
+
     @abstractmethod
     async def can_handle(self, message: str, chat_id: int) -> bool:
         """이 플러그인이 메시지를 처리할 수 있는지 확인."""
@@ -180,7 +184,28 @@ class PluginLoader:
 
         logger.info(f"플러그인 로드 완료: {len(loaded)}개")
         logger.trace(f"로드된 플러그인: {loaded}")
+
+        # 플러그인 스키마 초기화
+        self._init_plugin_schemas()
+
         return loaded
+
+    def _init_plugin_schemas(self) -> None:
+        """로드된 플러그인의 DDL을 실행하여 테이블 생성."""
+        if not self._repository or not hasattr(self._repository, '_conn'):
+            logger.trace("Repository 없음 - 플러그인 스키마 초기화 스킵")
+            return
+
+        conn = self._repository._conn
+        for plugin in self.plugins:
+            schema = plugin.get_schema()
+            if schema:
+                try:
+                    conn.executescript(schema)
+                    conn.commit()
+                    logger.trace(f"플러그인 스키마 초기화: {plugin.name}")
+                except Exception as e:
+                    logger.error(f"플러그인 스키마 실패 ({plugin.name}): {e}")
 
     def _load_plugin_from_package(self, package_path: Path) -> Optional[Plugin]:
         """디렉토리 기반 플러그인 로드.
