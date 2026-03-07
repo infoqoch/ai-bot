@@ -1,4 +1,4 @@
-"""Main entry point for Telegram Claude Bot."""
+"""Main entry point for the Telegram CLI AI bot."""
 
 import atexit
 import os
@@ -26,7 +26,7 @@ _process_lock = ProcessLock(Path("/tmp/telegram-bot.lock"))
 
 from src.config import get_settings
 from src.logging_config import logger, setup_logging
-from src.claude.client import ClaudeClient
+from src.ai import build_default_registry
 from src.bot.handlers import BotHandlers
 from src.bot.middleware import AuthManager
 from src.plugins.loader import PluginLoader
@@ -60,7 +60,7 @@ def create_app() -> Application:
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
 
     logger.info("=" * 60)
-    logger.info("Telegram Claude Bot 초기화 시작")
+    logger.info("Telegram CLI AI Bot 초기화 시작")
     logger.info(f"  LOG_LEVEL: {log_level}")
     logger.info(f"  base_dir: {settings.base_dir}")
     logger.info(f"  working_dir: {settings.effective_working_dir}")
@@ -81,13 +81,10 @@ def create_app() -> Application:
     )
     logger.trace("SessionService 초기화 완료")
 
-    logger.trace("ClaudeClient 초기화 시작")
-    claude_client = ClaudeClient(
-        command=settings.ai_command,
-        system_prompt_file=settings.telegram_prompt_file,
-        timeout=300,
-    )
-    logger.trace(f"ClaudeClient 초기화 완료 - command: {settings.ai_command}")
+    logger.trace("AIRegistry 초기화 시작")
+    ai_registry = build_default_registry(settings)
+    claude_client = ai_registry.get_client("claude")
+    logger.trace("AIRegistry 초기화 완료")
 
     logger.trace("AuthManager 초기화 시작")
     auth_manager = AuthManager(
@@ -112,6 +109,7 @@ def create_app() -> Application:
     handlers = BotHandlers(
         session_service=session_service,
         claude_client=claude_client,
+        ai_registry=ai_registry,
         auth_manager=auth_manager,
         require_auth=settings.require_auth,
         allowed_chat_ids=settings.allowed_chat_ids,
@@ -156,7 +154,7 @@ def create_app() -> Application:
     workspace_registry = WorkspaceRegistryAdapter(repo=repo)
     logger.info("워크스페이스 레지스트리 어댑터 초기화 완료")
 
-    # Schedule executor 설정 (Claude 호출 / 플러그인 실행)
+    # Schedule executor 설정 (provider CLI 호출 / 플러그인 실행)
     async def schedule_executor(schedule):
         """Execute scheduled task."""
         from src.repository.repository import Schedule
@@ -171,12 +169,13 @@ def create_app() -> Application:
                     schedule.action_name, schedule.chat_id
                 )
             else:
-                # Claude/Workspace type: call Claude CLI
+                # AI/Workspace type: call provider CLI
                 workspace_path = None
                 if schedule.type == "workspace" and schedule.workspace_path:
                     workspace_path = schedule.workspace_path
 
-                text, error, _ = await claude_client.chat(
+                client = ai_registry.get_client(schedule.ai_provider or "claude")
+                text, error, _ = await client.chat(
                     message=schedule.message,
                     session_id=None,
                     model=schedule.model,
@@ -223,6 +222,7 @@ def create_app() -> Application:
     app.add_handler(CommandHandler("help", handlers.help_command))
     app.add_handler(CommandHandler("auth", handlers.auth_command))
     app.add_handler(CommandHandler("status", handlers.status_command))
+    app.add_handler(CommandHandler("select_ai", handlers.select_ai_command))
     app.add_handler(CommandHandler("new", handlers.new_session))
     app.add_handler(CommandHandler("new_opus", handlers.new_session_opus))
     app.add_handler(CommandHandler("new_sonnet", handlers.new_session_sonnet))
@@ -314,7 +314,7 @@ def main() -> None:
         logger.error("TELEGRAM_TOKEN is not set")
         sys.exit(1)
 
-    logger.info("Starting Telegram Claude Bot...")
+    logger.info("Starting Telegram CLI AI Bot...")
 
     app = create_app()
 

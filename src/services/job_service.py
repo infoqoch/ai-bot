@@ -1,4 +1,4 @@
-"""Detached Claude job execution service."""
+"""Detached provider job execution service."""
 
 import asyncio
 import os
@@ -7,27 +7,32 @@ from typing import Optional
 
 from telegram import Bot
 
+from src.ai import AIRegistry, get_profile_label, get_provider_label
 from src.bot.constants import LONG_TASK_THRESHOLD_SECONDS
 from src.bot.formatters import truncate_message
-from src.claude.client import ClaudeClient
 from src.logging_config import clear_context, logger, set_session_id, set_trace_id, set_user_id
 from src.repository import Repository
 from src.services.session_service import SessionService
 
 
 class JobService:
-    """Run detached Claude jobs and deliver responses directly to Telegram."""
+    """Run detached provider jobs and deliver responses directly to Telegram."""
 
     def __init__(
         self,
         repo: Repository,
         session_service: SessionService,
-        claude_client: ClaudeClient,
         telegram_token: str,
+        ai_registry: Optional[AIRegistry] = None,
+        claude_client=None,
     ):
         self._repo = repo
         self._sessions = session_service
-        self._claude = claude_client
+        if ai_registry is None:
+            if claude_client is None:
+                raise ValueError("Either ai_registry or claude_client must be provided")
+            ai_registry = AIRegistry({"claude": claude_client})
+        self._ai_registry = ai_registry
         self._telegram_token = telegram_token
 
     async def run_job(self, job_id: int) -> bool:
@@ -97,13 +102,19 @@ class JobService:
         return self._repo.attach_worker_to_session_lock(session_id, job_id, worker_pid)
 
     async def _execute_job(self, bot: Bot, job: dict) -> None:
-        """Execute one Claude job and send the final response to Telegram."""
+        """Execute one provider job and send the final response to Telegram."""
         job_id = job["id"]
         chat_id = job["chat_id"]
         session_id = job["session_id"]
         message = job["request"]
-        model = job["model"]
-        workspace_path = job.get("workspace_path") or self._sessions.get_workspace_path(session_id)
+        session = self._sessions.get_session(session_id) or {}
+        provider = session.get("ai_provider") or "claude"
+        provider_session_id = session.get("provider_session_id")
+        model = session.get("model") or job["model"]
+        workspace_path = job.get("workspace_path") or session.get("workspace_path")
+        client = self._ai_registry.get_client(provider)
+        provider_label = get_provider_label(provider)
+        model_label = get_profile_label(provider, model)
 
         trace_id = set_trace_id()
         set_user_id(str(chat_id))
@@ -114,7 +125,8 @@ class JobService:
         long_task_notified = False
 
         logger.info(
-            f"Detached Claude job start - job_id={job_id}, session={session_id[:8]}, model={model}"
+            f"Detached provider job start - job_id={job_id}, session={session_id[:8]}, "
+            f"provider={provider}, model={model}"
         )
 
         async def notify_long_task() -> None:
@@ -132,12 +144,15 @@ class JobService:
 
         try:
             try:
-                response, error, _ = await self._claude.chat(
+                chat_response = await client.chat(
                     message,
-                    session_id,
+                    provider_session_id,
                     model=model,
                     workspace_path=workspace_path or None,
                 )
+                response, error, next_provider_session_id = chat_response
+                if next_provider_session_id and next_provider_session_id != provider_session_id:
+                    self._sessions.update_session_provider_session_id(session_id, next_provider_session_id)
             finally:
                 notify_task.cancel()
                 try:
@@ -147,11 +162,11 @@ class JobService:
 
             elapsed = time.time() - start_time
             logger.info(
-                f"Detached Claude job complete - job_id={job_id}, session={session_id[:8]}, "
+                f"Detached provider job complete - job_id={job_id}, session={session_id[:8]}, "
                 f"elapsed={elapsed:.1f}s, error={error or '-'}"
             )
 
-            self._sessions.add_message(session_id, message, processor="claude")
+            self._sessions.add_message(session_id, message, processor=provider)
 
             if error == "TIMEOUT":
                 response = "⏱️ Response timed out. Please try again."
@@ -166,7 +181,7 @@ class JobService:
             session_short_id = session_id[:8]
 
             full_response = (
-                f"<b>[{session_info}|#{history_count}]</b>\n"
+                f"<b>[{provider_label} · {model_label} · {session_info}|#{history_count}]</b>\n"
                 f"<code>{question_preview}</code>\n\n"
                 f"{response}\n\n"
                 f"/s_{session_short_id} switch\n"
@@ -186,7 +201,7 @@ class JobService:
             self._repo.complete_message(job_id, response=response)
 
         except Exception as e:
-            logger.exception(f"Detached Claude job failed: job_id={job_id}, trace={trace_id}, error={e}")
+            logger.exception(f"Detached provider job failed: job_id={job_id}, trace={trace_id}, error={e}")
             self._repo.complete_message(job_id, error=str(e))
             try:
                 await bot.send_message(

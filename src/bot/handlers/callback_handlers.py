@@ -5,6 +5,14 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceRe
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
+from src.ai import (
+    get_default_model,
+    get_profile_label,
+    get_profile_short_label,
+    get_provider_label,
+    get_provider_profiles,
+    is_supported_model,
+)
 from src.logging_config import logger, clear_context
 from src.constants import AVAILABLE_HOURS
 from ..constants import MAX_WORKSPACE_PATHS_DISPLAY, get_model_emoji, get_model_badge
@@ -37,6 +45,10 @@ class CallbackHandlers(BaseHandler):
             if plugin:
                 await self._handle_plugin_callback(query, chat_id, callback_data, plugin)
                 return
+
+        if callback_data.startswith("ai:"):
+            await self._handle_ai_callback(query, chat_id, callback_data)
+            return
 
         # Session callback
         if callback_data.startswith("sess:"):
@@ -95,16 +107,18 @@ class CallbackHandlers(BaseHandler):
         logger.info(f"Session creation ForceReply processing: model={model}, name={name}")
 
         user_id = str(chat_id)
-        model_name = model if model in ["opus", "sonnet", "haiku"] else "sonnet"
-
-        session_id = await self.claude.create_session()
-        if not session_id:
-            await update.message.reply_text("❌ Session creation failed.")
-            return
+        provider = self._get_selected_ai_provider(user_id)
+        model_name = model if is_supported_model(provider, model) else get_default_model(provider)
 
         session_name = name.strip()[:50] if name.strip() else ""
 
-        self.sessions.create_session(user_id, session_id, model=model_name, name=session_name, first_message="(new session)")
+        session_id = self.sessions.create_session(
+            user_id=user_id,
+            ai_provider=provider,
+            model=model_name,
+            name=session_name,
+            first_message="(new session)",
+        )
         short_id = session_id[:8]
 
         model_emoji = get_model_emoji(model_name)
@@ -116,7 +130,8 @@ class CallbackHandlers(BaseHandler):
 
         await update.message.reply_text(
             text=f"New session created!\n\n"
-                 f"{model_emoji} <b>Model:</b> {model_name}\n"
+                 f"<b>AI:</b> {get_provider_label(provider)}\n"
+                 f"{model_emoji} <b>Model:</b> {get_profile_label(provider, model_name)}\n"
                  f"<b>ID:</b> <code>{short_id}</code>{name_line}",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="HTML"
@@ -184,6 +199,7 @@ class CallbackHandlers(BaseHandler):
         workspace_path = pending.get("workspace_path") if schedule_type == "workspace" else None
         name = pending.get("name", "Schedule")
         model = pending.get("model", "sonnet")
+        ai_provider = pending.get("ai_provider", self._get_selected_ai_provider(user_id))
 
         if schedule_type == "claude" and name == "Schedule":
             name = message[:15].strip() + ("..." if len(message) > 15 else "")
@@ -196,6 +212,7 @@ class CallbackHandlers(BaseHandler):
             minute=pending.get("minute", 0),
             message=message,
             schedule_type=schedule_type,
+            ai_provider=ai_provider,
             model=model,
             workspace_path=workspace_path,
         )
@@ -213,7 +230,8 @@ class CallbackHandlers(BaseHandler):
             f"<b>Schedule Registered!</b>\n\n"
             f"{schedule.type_emoji} <b>{schedule.name}</b> ({type_label})\n"
             f"Time: <b>{schedule.time_str}</b> (daily)\n"
-            f"Model: <b>{model}</b>{path_info}\n"
+            f"AI: <b>{get_provider_label(ai_provider)}</b>\n"
+            f"Model: <b>{get_profile_label(ai_provider, model)}</b>{path_info}\n"
             f"Message: <i>{message[:50]}{'...' if len(message) > 50 else ''}</i>",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="HTML"
@@ -268,6 +286,55 @@ class CallbackHandlers(BaseHandler):
             except:
                 pass
 
+    async def _handle_ai_callback(self, query, chat_id: int, callback_data: str) -> None:
+        """Handle provider selection callbacks."""
+        user_id = str(chat_id)
+        parts = callback_data.split(":")
+        action = parts[1] if len(parts) > 1 else ""
+
+        if action == "cancel":
+            await query.edit_message_text("Provider selection cancelled.")
+            return
+
+        if action == "open":
+            provider = self._get_selected_ai_provider(user_id)
+            keyboard = self._build_ai_selector_keyboard(provider)
+            keyboard.append([
+                InlineKeyboardButton("📋 Session List", callback_data="sess:list"),
+                InlineKeyboardButton("🆕 New Session", callback_data="sess:new"),
+            ])
+            await query.edit_message_text(
+                f"<b>Select AI</b>\n\n"
+                f"Current AI: <b>{get_provider_label(provider)}</b>\n\n"
+                f"Choose which provider `/new`, `/sl`, `/session`, `/model`, `/ai`, and normal chat should use.",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="HTML",
+            )
+            return
+
+        if action == "select" and len(parts) > 2:
+            provider = parts[2]
+            self._set_selected_ai_provider(user_id, provider)
+            current_session_id = self.sessions.get_current_session_id(user_id, provider)
+            current_line = (
+                f"Current session: <code>{current_session_id[:8]}</code>"
+                if current_session_id else
+                "Current session: none"
+            )
+            keyboard = [
+                [InlineKeyboardButton("📋 Session List", callback_data="sess:list")],
+                [InlineKeyboardButton("🆕 New Session", callback_data="sess:new")],
+            ]
+            await query.edit_message_text(
+                f"✅ Current AI switched to <b>{get_provider_label(provider)}</b>.\n\n"
+                f"{current_line}",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="HTML",
+            )
+            return
+
+        await query.edit_message_text("Unknown AI selection request.")
+
     async def _handle_session_callback(self, query, chat_id: int, callback_data: str) -> None:
         """Handle session callbacks."""
         try:
@@ -277,13 +344,15 @@ class CallbackHandlers(BaseHandler):
                 return
 
             action = parts[1]
+            user_id = str(chat_id)
+            selected_provider = self._get_selected_ai_provider(user_id)
 
             if action == "new":
-                model = parts[2] if len(parts) > 2 else "sonnet"
+                model = parts[2] if len(parts) > 2 else get_default_model(selected_provider)
                 await self._handle_new_session_name_prompt(query, chat_id, model)
 
             elif action == "new_confirm":
-                model = parts[2] if len(parts) > 2 else "sonnet"
+                model = parts[2] if len(parts) > 2 else get_default_model(selected_provider)
                 await self._handle_new_session_callback(query, chat_id, model, "")
 
             elif action == "switch":
@@ -337,15 +406,19 @@ class CallbackHandlers(BaseHandler):
 
     async def _handle_new_session_name_prompt(self, query, chat_id: int, model: str) -> None:
         """Prompt for new session name."""
-        model_emoji = get_model_emoji(model)
+        provider = self._get_selected_ai_provider(str(chat_id))
+        normalized_model = model if is_supported_model(provider, model) else get_default_model(provider)
+        model_emoji = get_model_emoji(normalized_model)
 
         await query.edit_message_text(
-            text=f"{model_emoji} <b>{model.upper()}</b> session creation\n\nEnter session name:",
+            text=f"{model_emoji} <b>{get_profile_label(provider, normalized_model)}</b> session creation\n\n"
+                 f"Current AI: <b>{get_provider_label(provider)}</b>\n\n"
+                 f"Enter session name:",
             parse_mode="HTML"
         )
 
         await query.message.reply_text(
-            text=f"Enter session name (sess_name:{model})",
+            text=f"Enter session name (sess_name:{normalized_model})",
             reply_markup=ForceReply(selective=True, input_field_placeholder="Session name...")
         )
 
@@ -368,17 +441,17 @@ class CallbackHandlers(BaseHandler):
 
     async def _handle_new_session_callback(self, query, chat_id: int, model: str, name: str = "") -> None:
         """Handle new session creation callback."""
-        model_map = {"opus": "opus", "sonnet": "sonnet", "haiku": "haiku"}
-        model_name = model_map.get(model, "sonnet")
-
         user_id = str(chat_id)
+        provider = self._get_selected_ai_provider(user_id)
+        model_name = model if is_supported_model(provider, model) else get_default_model(provider)
 
-        session_id = await self.claude.create_session()
-        if not session_id:
-            await query.edit_message_text("❌ Session creation failed.")
-            return
-
-        self.sessions.create_session(user_id, session_id, model=model_name, name=name, first_message="(new session)")
+        session_id = self.sessions.create_session(
+            user_id=user_id,
+            ai_provider=provider,
+            model=model_name,
+            name=name,
+            first_message="(new session)",
+        )
         short_id = session_id[:8]
 
         model_emoji = get_model_emoji(model_name)
@@ -391,7 +464,8 @@ class CallbackHandlers(BaseHandler):
 
         await query.edit_message_text(
             text=f"New session created!\n\n"
-                 f"{model_emoji} <b>Model:</b> {model_name}\n"
+                 f"<b>AI:</b> {get_provider_label(provider)}\n"
+                 f"{model_emoji} <b>Model:</b> {get_profile_label(provider, model_name)}\n"
                  f"<b>ID:</b> <code>{short_id}</code>",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="HTML"
@@ -406,10 +480,11 @@ class CallbackHandlers(BaseHandler):
             return
 
         full_session_id = session.get("full_session_id", session_id)
-        self.sessions.set_current(user_id, full_session_id)
+        self.sessions.switch_session(user_id, full_session_id)
         short_id = full_session_id[:8]
         session_name = session.get("name") or ""
         model = session.get("model", "sonnet")
+        provider = session.get("ai_provider", self._get_selected_ai_provider(user_id))
         model_emoji = get_model_emoji(model)
 
         history_entries = self.sessions.get_session_history_entries(full_session_id)
@@ -429,12 +504,12 @@ class CallbackHandlers(BaseHandler):
         history_text = "\n".join(history_lines) if history_lines else "(empty)"
         name_line = f"- Name: {session_name}\n" if session_name else ""
 
+        model_buttons = [
+            InlineKeyboardButton(profile.button_label, callback_data=f"sess:model:{profile.key}:{full_session_id}")
+            for profile in get_provider_profiles(provider)
+        ]
         keyboard = [
-            [
-                InlineKeyboardButton("Opus", callback_data=f"sess:model:opus:{full_session_id}"),
-                InlineKeyboardButton("Sonnet", callback_data=f"sess:model:sonnet:{full_session_id}"),
-                InlineKeyboardButton("Haiku", callback_data=f"sess:model:haiku:{full_session_id}"),
-            ],
+            model_buttons,
             [
                 InlineKeyboardButton("✏️ Rename", callback_data=f"sess:rename:{full_session_id}"),
                 InlineKeyboardButton("📜 History", callback_data=f"sess:history:{full_session_id}"),
@@ -442,14 +517,16 @@ class CallbackHandlers(BaseHandler):
             ],
             [
                 InlineKeyboardButton("📋 Session List", callback_data="sess:list"),
+                InlineKeyboardButton("Switch AI", callback_data="ai:open"),
             ]
         ]
 
         await query.edit_message_text(
             text=f"✅ <b>Session switched!</b>\n\n"
+                 f"- AI: {get_provider_label(provider)}\n"
                  f"- ID: <code>{short_id}</code>\n"
                  f"{name_line}"
-                 f"- Model: {model_emoji} {model}\n"
+                 f"- Model: {model_emoji} {get_profile_label(provider, model)}\n"
                  f"- Messages: {count}\n\n"
                  f"<b>History</b> (last 10)\n{history_text}",
             reply_markup=InlineKeyboardMarkup(keyboard),
@@ -564,11 +641,13 @@ class CallbackHandlers(BaseHandler):
     async def _handle_session_list_callback(self, query, chat_id: int, prefix: str = "") -> None:
         """Handle session list callback."""
         user_id = str(chat_id)
-        sessions = self.sessions.list_sessions(user_id)
-        current_session_id = self.sessions.get_current_session_id(user_id)
+        provider = self._get_selected_ai_provider(user_id)
+        provider_label = get_provider_label(provider)
+        sessions = self.sessions.list_sessions(user_id, ai_provider=provider)
+        current_session_id = self.sessions.get_current_session_id(user_id, provider)
 
         timestamp = datetime.now().strftime("%H:%M:%S")
-        lines = [f"{prefix}<b>Session List</b> <i>({timestamp})</i>\n"]
+        lines = [f"{prefix}<b>Session List - {provider_label}</b> <i>({timestamp})</i>\n"]
         buttons = []
 
         if not sessions:
@@ -580,11 +659,15 @@ class CallbackHandlers(BaseHandler):
                 name = session.get("name") or f"Session {short_id}"
                 model = session.get("model", "sonnet")
                 model_badge = get_model_badge(model)
+                model_label = get_profile_short_label(provider, model)
 
                 is_current = "> " if sid == current_session_id else ""
                 is_locked = self._is_session_locked(sid)
                 lock_indicator = " 🔒" if is_locked else ""
-                lines.append(f"{is_current}{model_badge} <b>{name}</b> (<code>{short_id}</code>){lock_indicator}")
+                lines.append(
+                    f"{is_current}{model_badge} <b>{name}</b> "
+                    f"({model_label}, <code>{short_id}</code>){lock_indicator}"
+                )
 
                 buttons.append([
                     InlineKeyboardButton(f"{name[:10]}", callback_data=f"sess:switch:{sid}"),
@@ -592,14 +675,13 @@ class CallbackHandlers(BaseHandler):
                     InlineKeyboardButton("Del", callback_data=f"sess:delete:{sid}"),
                 ])
 
-        buttons.append([
-            InlineKeyboardButton("+Opus", callback_data="sess:new:opus"),
-            InlineKeyboardButton("+Sonnet", callback_data="sess:new:sonnet"),
-            InlineKeyboardButton("+Haiku", callback_data="sess:new:haiku"),
-        ])
+        buttons.append(self._build_model_buttons(provider, "sess:new:"))
         buttons.append([
             InlineKeyboardButton("Refresh", callback_data="sess:list"),
             InlineKeyboardButton("Tasks", callback_data="tasks:refresh"),
+        ])
+        buttons.append([
+            InlineKeyboardButton("Switch AI", callback_data="ai:open"),
         ])
 
         await query.edit_message_text(
@@ -617,6 +699,10 @@ class CallbackHandlers(BaseHandler):
             return
 
         full_session_id = session.get("full_session_id", session_id)
+        provider = session.get("ai_provider", self._get_selected_ai_provider(user_id))
+        if not is_supported_model(provider, model):
+            await query.edit_message_text("❌ Unsupported model for this AI.")
+            return
 
         self.sessions.update_session_model(full_session_id, model)
 
@@ -624,12 +710,12 @@ class CallbackHandlers(BaseHandler):
         name = session.get("name") or f"Session {short_id}"
         model_emoji = get_model_emoji(model)
 
+        model_buttons = [
+            InlineKeyboardButton(profile.button_label, callback_data=f"sess:model:{profile.key}:{full_session_id}")
+            for profile in get_provider_profiles(provider)
+        ]
         keyboard = [
-            [
-                InlineKeyboardButton("Opus", callback_data=f"sess:model:opus:{full_session_id}"),
-                InlineKeyboardButton("Sonnet", callback_data=f"sess:model:sonnet:{full_session_id}"),
-                InlineKeyboardButton("Haiku", callback_data=f"sess:model:haiku:{full_session_id}"),
-            ],
+            model_buttons,
             [
                 InlineKeyboardButton("Session List", callback_data="sess:list"),
             ]
@@ -638,7 +724,8 @@ class CallbackHandlers(BaseHandler):
         await query.edit_message_text(
             text=f"Model changed!\n\n"
                  f"<b>{name}</b>\n"
-                 f"{model_emoji} Model: <b>{model}</b>\n"
+                 f"AI: <b>{get_provider_label(provider)}</b>\n"
+                 f"{model_emoji} Model: <b>{get_profile_label(provider, model)}</b>\n"
                  f"ID: <code>{short_id}</code>",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="HTML"
@@ -668,7 +755,12 @@ class CallbackHandlers(BaseHandler):
         if action == "refresh":
             from src.scheduler_manager import scheduler_manager
 
-            text = self._schedule_manager.get_status_text(user_id)
+            provider = self._get_selected_ai_provider(user_id)
+            text = (
+                f"<b>Scheduler</b>\n"
+                f"Current AI: <b>{get_provider_label(provider)}</b>\n\n"
+                f"{self._schedule_manager.get_status_text(user_id)}"
+            )
             text += scheduler_manager.get_system_jobs_text()
             keyboard = self._build_scheduler_keyboard(user_id)
             await query.edit_message_text(
@@ -701,7 +793,12 @@ class CallbackHandlers(BaseHandler):
             schedule_id = action[7:]
             if self._schedule_manager.remove(schedule_id):
                 await query.answer("Deleted")
-                text = self._schedule_manager.get_status_text(user_id)
+                provider = self._get_selected_ai_provider(user_id)
+                text = (
+                    f"<b>Scheduler</b>\n"
+                    f"Current AI: <b>{get_provider_label(provider)}</b>\n\n"
+                    f"{self._schedule_manager.get_status_text(user_id)}"
+                )
                 text += scheduler_manager.get_system_jobs_text()
                 keyboard = self._build_scheduler_keyboard(user_id)
                 await query.edit_message_text(
@@ -736,7 +833,9 @@ class CallbackHandlers(BaseHandler):
                 f"{schedule.type_emoji} <b>{schedule.name}</b>\n\n"
                 f"Status: <b>{status_text}</b>\n"
                 f"Time: <b>{schedule.time_str}</b> (daily)\n"
-                f"Model: <b>{schedule.model}</b>{path_info}\n"
+                f"AI: <b>{get_provider_label(schedule.ai_provider)}</b>\n"
+                f"Model: <b>{get_profile_label(schedule.ai_provider, schedule.model)}</b> "
+                f"(<code>{schedule.model}</code>){path_info}\n"
                 f"Message: <i>{schedule.message[:80]}{'...' if len(schedule.message) > 80 else ''}</i>\n"
                 f"Runs: {schedule.run_count}",
                 reply_markup=InlineKeyboardMarkup(buttons),
@@ -824,7 +923,12 @@ class CallbackHandlers(BaseHandler):
             else:
                 await query.answer("Update failed")
 
-            text = self._schedule_manager.get_status_text(user_id)
+            provider = self._get_selected_ai_provider(user_id)
+            text = (
+                f"<b>Scheduler</b>\n"
+                f"Current AI: <b>{get_provider_label(provider)}</b>\n\n"
+                f"{self._schedule_manager.get_status_text(user_id)}"
+            )
             text += scheduler_manager.get_system_jobs_text()
             keyboard = self._build_scheduler_keyboard(user_id)
             await query.edit_message_text(
@@ -834,8 +938,9 @@ class CallbackHandlers(BaseHandler):
             )
             return
 
-        # Add - Claude type (time selection)
-        if action == "add:claude":
+        # Add - current AI type (time selection)
+        if action in ("add:ai", "add:claude"):
+            provider = self._get_selected_ai_provider(user_id)
             buttons = []
             row = []
             for hour in AVAILABLE_HOURS:
@@ -852,9 +957,14 @@ class CallbackHandlers(BaseHandler):
                 InlineKeyboardButton("Cancel", callback_data="sched:refresh")
             ])
 
+            self._sched_pending[user_id] = {
+                "type": "claude",
+                "ai_provider": provider,
+            }
+
             await query.edit_message_text(
-                "<b>Add Claude Schedule</b>\n\n"
-                "Regular Claude conversation (new session)\n\n"
+                f"<b>Add {get_provider_label(provider)} Schedule</b>\n\n"
+                f"Regular {get_provider_label(provider)} conversation (new session)\n\n"
                 "Select time (daily repeat):",
                 reply_markup=InlineKeyboardMarkup(buttons),
                 parse_mode="HTML"
@@ -889,7 +999,10 @@ class CallbackHandlers(BaseHandler):
                     )
                 ])
 
-            self._sched_pending[user_id] = {"workspaces": ws_map}
+            self._sched_pending[user_id] = {
+                "workspaces": ws_map,
+                "ai_provider": self._get_selected_ai_provider(user_id),
+            }
 
             buttons.append([
                 InlineKeyboardButton("Cancel", callback_data="sched:refresh")
@@ -1092,6 +1205,7 @@ class CallbackHandlers(BaseHandler):
             pending = self._sched_pending.get(user_id, {})
             pending["type"] = schedule_type
             pending["hour"] = hour
+            pending.setdefault("ai_provider", self._get_selected_ai_provider(user_id))
 
             if schedule_type == "workspace" and path_idx != "_":
                 ws_map = pending.get("workspaces", {})
@@ -1120,7 +1234,7 @@ class CallbackHandlers(BaseHandler):
                 InlineKeyboardButton("Cancel", callback_data="sched:refresh")
             ])
 
-            type_label = "Workspace" if schedule_type == "workspace" else "Schedule"
+            type_label = "Workspace" if schedule_type == "workspace" else f"{get_provider_label(pending['ai_provider'])} Schedule"
             path_info = f"\nPath: <code>{pending.get('workspace_path', '')}</code>" if schedule_type == "workspace" else ""
 
             await query.edit_message_text(
@@ -1143,6 +1257,7 @@ class CallbackHandlers(BaseHandler):
 
             hour = pending.get("hour", 9)
             schedule_type = pending.get("type", "claude")
+            ai_provider = pending.get("ai_provider", self._get_selected_ai_provider(user_id))
 
             # Plugin type: skip model/message, register directly
             if schedule_type == "plugin":
@@ -1159,6 +1274,7 @@ class CallbackHandlers(BaseHandler):
                     minute=minute,
                     message="",  # plugin doesn't need message
                     schedule_type="plugin",
+                    ai_provider=ai_provider,
                     model="sonnet",  # unused for plugin
                     plugin_name=pending.get("plugin_name"),
                     action_name=pending.get("action_name"),
@@ -1183,15 +1299,11 @@ class CallbackHandlers(BaseHandler):
                 return
 
             buttons = [
-                [
-                    InlineKeyboardButton("Opus", callback_data="sched:model:opus"),
-                    InlineKeyboardButton("Sonnet", callback_data="sched:model:sonnet"),
-                    InlineKeyboardButton("Haiku", callback_data="sched:model:haiku"),
-                ],
+                self._build_model_buttons(ai_provider, "sched:model:"),
                 [InlineKeyboardButton("Cancel", callback_data="sched:refresh")],
             ]
 
-            type_label = "Workspace" if schedule_type == "workspace" else "Schedule"
+            type_label = "Workspace" if schedule_type == "workspace" else f"{get_provider_label(ai_provider)} Schedule"
             path_info = f"\nPath: <code>{pending.get('workspace_path', '')}</code>" if schedule_type == "workspace" else ""
 
             await query.edit_message_text(
@@ -1208,19 +1320,24 @@ class CallbackHandlers(BaseHandler):
         if action.startswith("model:"):
             model = action[6:]
             pending = self._sched_pending.get(user_id, {})
+            ai_provider = pending.get("ai_provider", self._get_selected_ai_provider(user_id))
+            if not is_supported_model(ai_provider, model):
+                await query.edit_message_text("❌ Unsupported model for the selected AI.")
+                return
             pending["model"] = model
             self._sched_pending[user_id] = pending
 
             schedule_type = pending.get("type", "claude")
             hour = pending.get("hour", 9)
             minute = pending.get("minute", 0)
-            type_label = "Workspace" if schedule_type == "workspace" else "Schedule"
+            type_label = "Workspace" if schedule_type == "workspace" else f"{get_provider_label(ai_provider)} Schedule"
             path_info = f"\nPath: <code>{pending.get('workspace_path', '')}</code>" if schedule_type == "workspace" else ""
 
             await query.edit_message_text(
                 f"<b>Add {type_label} Schedule</b>\n\n"
                 f"Time: <b>{hour:02d}:{minute:02d}</b>\n"
-                f"Model: <b>{model}</b>{path_info}\n\n"
+                f"AI: <b>{get_provider_label(ai_provider)}</b>\n"
+                f"Model: <b>{get_profile_label(ai_provider, model)}</b> (<code>{model}</code>){path_info}\n\n"
                 f"Enter scheduled message below:",
                 parse_mode="HTML"
             )
@@ -1291,7 +1408,7 @@ class CallbackHandlers(BaseHandler):
                 parse_mode="HTML"
             )
 
-            self.sessions.set_current(user_id, full_session_id)
+            self.sessions.switch_session(user_id, full_session_id)
             try:
                 _, start_error = self._start_detached_job(
                     chat_id=chat_id,
@@ -1308,21 +1425,22 @@ class CallbackHandlers(BaseHandler):
                 await query.message.reply_text("❌ Selected session is busy now. Please resend the message.")
 
         elif action == "n":
-            model = target
+            provider = self._get_selected_ai_provider(user_id)
+            model = target if is_supported_model(provider, target) else get_default_model(provider)
 
             await query.edit_message_text(
-                f"Creating new <b>{model.upper()}</b> session...\n\n"
+                f"Creating new <b>{get_profile_label(provider, model)}</b> session...\n\n"
                 f"<code>{message_preview}</code>",
                 parse_mode="HTML"
             )
 
-            logger.info(f"Alternative session - creating new {model} session")
-            new_session_id = await self.claude.create_session()
-            if not new_session_id:
-                await query.message.reply_text("❌ Session creation failed.. Please try again.")
-                return
-
-            self.sessions.create_session(user_id, new_session_id, model=model)
+            logger.info(f"Alternative session - creating new {provider}:{model} session")
+            new_session_id = self.sessions.create_session(
+                user_id=user_id,
+                ai_provider=provider,
+                model=model,
+                first_message="(new session)",
+            )
             logger.info(f"New session created: {new_session_id[:8]}, model={model}")
 
             try:
@@ -1472,7 +1590,7 @@ class CallbackHandlers(BaseHandler):
                 await query.edit_message_text("Selected session became busy. Check the new prompt below.")
                 return
 
-            self.sessions.set_current(user_id, target_session_id)
+            self.sessions.switch_session(user_id, target_session_id)
 
             self._delete_temp_pending(pending_key)
             try:
@@ -1500,21 +1618,24 @@ class CallbackHandlers(BaseHandler):
             return
 
         if action == "new":
-            new_model = parts[3] if len(parts) > 3 else "sonnet"
+            provider = self.sessions.get_session_ai_provider(current_session_id) or self._get_selected_ai_provider(user_id)
+            new_model = parts[3] if len(parts) > 3 else get_default_model(provider)
+            if not is_supported_model(provider, new_model):
+                new_model = get_default_model(provider)
 
             self._delete_temp_pending(pending_key)
             await query.edit_message_text(
-                f"<b>Creating new {new_model} session...</b>\n\n"
+                f"<b>Creating new {get_profile_label(provider, new_model)} session...</b>\n\n"
                 f"<code>{truncate_message(message, 40)}</code>",
                 parse_mode="HTML"
             )
 
-            new_session_id = await self.claude.create_session()
-            if not new_session_id:
-                await query.message.reply_text("❌ Session creation failed.. Please try again.")
-                return
-
-            self.sessions.create_session(user_id, new_session_id, model=new_model)
+            new_session_id = self.sessions.create_session(
+                user_id=user_id,
+                ai_provider=provider,
+                model=new_model,
+                first_message="(new session)",
+            )
 
             try:
                 _, start_error = self._start_detached_job(

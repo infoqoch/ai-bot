@@ -11,9 +11,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-from telegram import Update
+from telegram import Update, InlineKeyboardButton
 from telegram.ext import ContextTypes
 
+from src.ai import (
+    AIRegistry,
+    DEFAULT_PROVIDER,
+    get_default_model,
+    get_profile_label,
+    get_provider_button,
+    get_provider_label,
+    get_provider_profiles,
+    is_supported_provider,
+    normalize_model,
+)
 from src.logging_config import logger, set_trace_id, set_user_id, clear_context
 from ..session_queue import session_queue_manager
 from ..constants import (
@@ -63,10 +74,12 @@ class BaseHandler:
         response_notify_seconds: int = 60,
         session_list_ai_summary: bool = False,
         plugin_loader: "PluginLoader" = None,
+        ai_registry: Optional[AIRegistry] = None,
     ):
         logger.trace("BaseHandler.__init__() start")
         self.sessions = session_service
-        self.claude = claude_client
+        self.ai = ai_registry or AIRegistry({"claude": claude_client})
+        self.claude = self.ai.get_client("claude") if "claude" in self.ai.supported_providers() else claude_client
         self.auth = auth_manager
         self.require_auth = require_auth
         self.allowed_chat_ids = allowed_chat_ids
@@ -96,6 +109,62 @@ class BaseHandler:
     def _repository(self) -> Optional["Repository"]:
         """Access repository via SessionService."""
         return getattr(self.sessions, '_repo', None)
+
+    def _get_selected_ai_provider(self, user_id: str) -> str:
+        """Return the currently selected provider for a user."""
+        provider = self.sessions.get_selected_ai_provider(user_id)
+        return provider if is_supported_provider(provider) else DEFAULT_PROVIDER
+
+    def _set_selected_ai_provider(self, user_id: str, provider: str) -> None:
+        """Switch the selected provider."""
+        if not is_supported_provider(provider):
+            raise ValueError(f"Unsupported provider: {provider}")
+        self.sessions.select_ai_provider(user_id, provider)
+
+    def _get_ai_client(self, provider: str):
+        """Return a provider-specific client."""
+        return self.ai.get_client(provider)
+
+    def _get_selected_ai_client(self, user_id: str):
+        """Return the active provider client for a user."""
+        return self._get_ai_client(self._get_selected_ai_provider(user_id))
+
+    def _get_session_provider(self, session_id: str) -> str:
+        """Return provider owning the session."""
+        provider = self.sessions.get_session_ai_provider(session_id)
+        return provider if is_supported_provider(provider) else DEFAULT_PROVIDER
+
+    def _normalize_model(self, provider: str, model: Optional[str]) -> str:
+        """Normalize one provider model/profile key."""
+        return normalize_model(provider, model or get_default_model(provider))
+
+    def _get_model_label(self, provider: str, model: Optional[str]) -> str:
+        """Return display label for one provider model/profile."""
+        return get_profile_label(provider, model)
+
+    def _get_provider_label(self, provider: str) -> str:
+        """Return display label for a provider."""
+        return get_provider_label(provider)
+
+    def _build_model_buttons(self, provider: str, callback_prefix: str) -> list[InlineKeyboardButton]:
+        """Build one row of model/profile buttons for a provider."""
+        return [
+            InlineKeyboardButton(profile.button_label, callback_data=f"{callback_prefix}{profile.key}")
+            for profile in get_provider_profiles(provider)
+        ]
+
+    def _build_ai_selector_keyboard(self, current_provider: str) -> list[list[InlineKeyboardButton]]:
+        """Build provider switch buttons."""
+        buttons = []
+        row = []
+        for provider in ("claude", "codex"):
+            label = get_provider_button(provider)
+            if provider == current_provider:
+                label = f"• {label}"
+            row.append(InlineKeyboardButton(label, callback_data=f"ai:select:{provider}"))
+        buttons.append(row)
+        buttons.append([InlineKeyboardButton("Cancel", callback_data="ai:cancel")])
+        return buttons
 
     def _save_temp_pending(self, key: str, data: dict) -> None:
         """Save pending data to memory and DB."""
@@ -609,6 +678,7 @@ class BaseHandler:
             return
 
         user_id = str(chat_id)
+        provider = self._get_selected_ai_provider(user_id)
         logger.trace("Getting current session")
         session_id = self.sessions.get_current_session_id(user_id)
         session_info = self.sessions.get_session_info(session_id)
@@ -626,8 +696,9 @@ class BaseHandler:
 
         logger.trace("Sending response")
         await update.message.reply_text(
-            f"🤖 <b>Claude Code Bot</b>\n\n"
+            f"🤖 <b>CLI AI Bot</b>\n\n"
             f"{auth_line}"
+            f"Current AI: <b>{get_provider_label(provider)}</b>\n"
             f"Session: [{session_info}] ({history_count} messages)\n\n"
             f"/help for commands",
             parse_mode="HTML"
@@ -655,7 +726,7 @@ class BaseHandler:
             plugin_section = (
                 "\nPlugins\n"
                 "/plugins - Plugin list\n"
-                "/ai &lt;question&gt; - Ask Claude directly (bypass plugins)\n"
+                "/ai &lt;question&gt; - Ask current AI directly (bypass plugins)\n"
             )
             logger.trace(f"Plugin count: {len(self.plugins.plugins)}")
 
@@ -664,10 +735,11 @@ class BaseHandler:
             "<b>Commands</b>\n\n"
             f"{auth_section}"
             "Sessions\n"
+            "/select_ai - Choose Claude or Codex\n"
             "/new [model] [name] - New session\n"
             "/nw path [model] [name] - Workspace session\n"
-            "/new_haiku_speedy - Speedy\n"
-            "/new_opus_smarty - Smarty\n"
+            "/new_haiku_speedy - Claude shortcut\n"
+            "/new_opus_smarty - Claude shortcut\n"
             "/rename_MyName - Rename session\n"
             "/session - Current session info\n"
             "/sl - Session list\n"

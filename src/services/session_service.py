@@ -2,7 +2,9 @@
 
 from datetime import datetime, timedelta
 from typing import Optional
+from uuid import uuid4
 
+from src.ai import DEFAULT_PROVIDER, SUPPORTED_PROVIDERS, get_default_model, get_profile_badge, infer_provider_from_model, normalize_model
 from src.logging_config import logger
 from src.repository import Repository
 
@@ -34,9 +36,10 @@ class SessionService:
         except (ValueError, TypeError):
             return False
 
-    def get_current_session_id(self, user_id: str) -> Optional[str]:
+    def get_current_session_id(self, user_id: str, ai_provider: Optional[str] = None) -> Optional[str]:
         """Get current session ID with expiration check."""
-        session_id = self._repo.get_current_session_id(user_id)
+        provider = ai_provider or self.get_selected_ai_provider(user_id)
+        session_id = self._repo.get_current_session_id(user_id, provider)
         if not session_id:
             return None
 
@@ -49,39 +52,102 @@ class SessionService:
 
         return session_id
 
-    def get_previous_session_id(self, user_id: str) -> Optional[str]:
+    def get_previous_session_id(self, user_id: str, ai_provider: Optional[str] = None) -> Optional[str]:
         """Get previous session ID."""
-        return self._repo.get_previous_session_id(user_id)
+        provider = ai_provider or self.get_selected_ai_provider(user_id)
+        return self._repo.get_previous_session_id(user_id, provider)
+
+    def get_selected_ai_provider(self, user_id: str) -> str:
+        """Get currently selected AI provider."""
+        return self._repo.get_selected_ai_provider(user_id)
+
+    def select_ai_provider(self, user_id: str, ai_provider: str) -> None:
+        """Switch the active AI provider without touching sessions."""
+        self._repo.set_selected_ai_provider(user_id, ai_provider)
+
+    def _normalize_create_args(
+        self,
+        session_id: Optional[str],
+        ai_provider: Optional[str],
+        provider_session_id: Optional[str],
+        model: Optional[str],
+        name: Optional[str],
+        workspace_path: Optional[str],
+    ) -> tuple[str, Optional[str], str, Optional[str], Optional[str]]:
+        """Support legacy positional create_session calls."""
+        if ai_provider in SUPPORTED_PROVIDERS or ai_provider is None:
+            return (
+                session_id or uuid4().hex,
+                provider_session_id,
+                ai_provider or DEFAULT_PROVIDER,
+                model or get_default_model(ai_provider or DEFAULT_PROVIDER),
+                name,
+                workspace_path,
+            )
+
+        legacy_session_id = session_id or uuid4().hex
+        legacy_model = ai_provider or model or "sonnet"
+        legacy_name = provider_session_id if provider_session_id is not None else name
+        legacy_workspace_path = workspace_path
+
+        if legacy_workspace_path is None and name is not None:
+            legacy_workspace_path = name
+        elif legacy_workspace_path is None and model not in (None, "sonnet", "opus", "haiku"):
+            legacy_workspace_path = model
+
+        return (
+            legacy_session_id,
+            legacy_session_id,
+            infer_provider_from_model(legacy_model),
+            legacy_model,
+            legacy_name,
+            legacy_workspace_path,
+        )
 
     def create_session(
         self,
         user_id: str,
-        session_id: str,
-        model: str = "sonnet",
+        session_id: Optional[str] = None,
+        ai_provider: Optional[str] = None,
+        provider_session_id: Optional[str] = None,
+        model: Optional[str] = None,
         name: Optional[str] = None,
         workspace_path: Optional[str] = None,
         first_message: str = "",
-    ) -> None:
+    ) -> str:
         """Create new session and switch to it."""
+        session_id, provider_session_id, provider, model, name, workspace_path = self._normalize_create_args(
+            session_id=session_id,
+            ai_provider=ai_provider or self.get_selected_ai_provider(user_id) or DEFAULT_PROVIDER,
+            provider_session_id=provider_session_id,
+            model=model,
+            name=name,
+            workspace_path=workspace_path,
+        )
+        model = normalize_model(provider, model or get_default_model(provider))
         self._repo.create_session(
             user_id=user_id,
             session_id=session_id,
+            ai_provider=provider,
+            provider_session_id=provider_session_id,
             model=model,
             name=name,
             workspace_path=workspace_path,
             switch_to=True
         )
         if first_message:
-            self._repo.add_message(session_id, first_message, processed=True, processor="claude")
+            self._repo.add_message(session_id, first_message, processed=True, processor=provider)
+        return session_id
 
     def delete_session(self, user_id: str, session_id: str) -> bool:
         """Soft delete session."""
+        provider = self.get_session_ai_provider(session_id) or self.get_selected_ai_provider(user_id)
         result = self._repo.soft_delete_session(session_id)
         if result:
-            current = self._repo.get_current_session_id(user_id)
+            current = self._repo.get_current_session_id(user_id, provider)
             if current == session_id:
-                previous = self._repo.get_previous_session_id(user_id)
-                self._repo.update_user_current_session(user_id, previous, None)
+                previous = self._repo.get_previous_session_id(user_id, provider)
+                self._repo.update_user_current_session(user_id, previous, None, ai_provider=provider)
         return result
 
     def switch_session(self, user_id: str, session_id: str) -> bool:
@@ -106,6 +172,18 @@ class SessionService:
         """Get session model."""
         return self._repo.get_session_model(session_id)
 
+    def get_session_ai_provider(self, session_id: str) -> Optional[str]:
+        """Get session provider."""
+        return self._repo.get_session_ai_provider(session_id)
+
+    def get_session_provider_session_id(self, session_id: str) -> Optional[str]:
+        """Get provider-native conversation/thread ID."""
+        return self._repo.get_session_provider_session_id(session_id)
+
+    def update_session_provider_session_id(self, session_id: str, provider_session_id: Optional[str]) -> bool:
+        """Persist provider-native conversation/thread ID."""
+        return self._repo.update_session_provider_session_id(session_id, provider_session_id)
+
     def update_session_model(self, session_id: str, model: str) -> bool:
         """Update session model."""
         return self._repo.update_session_model(session_id, model)
@@ -129,12 +207,14 @@ class SessionService:
     def list_sessions(
         self,
         user_id: str,
+        ai_provider: Optional[str] = None,
         include_deleted: bool = False,
         limit: Optional[int] = None
     ) -> list[dict]:
         """List sessions for user."""
-        sessions = self._repo.list_sessions(user_id, include_deleted, limit)
-        current_id = self._repo.get_current_session_id(user_id)
+        provider = ai_provider or self.get_selected_ai_provider(user_id)
+        sessions = self._repo.list_sessions(user_id, ai_provider=provider, include_deleted=include_deleted, limit=limit)
+        current_id = self._repo.get_current_session_id(user_id, provider)
 
         result = []
         for s in sessions:
@@ -147,6 +227,7 @@ class SessionService:
                 "last_used": s.last_used,
                 "history_count": len(history),
                 "model": s.model,
+                "ai_provider": s.ai_provider,
                 "name": s.name,
                 "workspace_path": s.workspace_path,
                 "deleted": s.deleted,
@@ -170,7 +251,7 @@ class SessionService:
 
     def get_session_by_prefix(self, user_id: str, prefix: str) -> Optional[dict]:
         """Find session by ID prefix."""
-        sessions = self._repo.list_sessions(user_id, include_deleted=False)
+        sessions = self._repo.list_sessions(user_id, ai_provider=None, include_deleted=False)
         for s in sessions:
             if s.id.startswith(prefix):
                 history = self._repo.get_session_history_entries(s.id)
@@ -183,6 +264,7 @@ class SessionService:
                     "history_count": len(history),
                     "name": s.name or "",
                     "model": s.model or "sonnet",
+                    "ai_provider": s.ai_provider,
                     "workspace_path": s.workspace_path or "",
                 }
         return None
@@ -200,8 +282,9 @@ class SessionService:
 
     def get_all_sessions_summary(self, user_id: str) -> str:
         """Get all sessions summary for display."""
-        sessions = self._repo.list_sessions(user_id, include_deleted=False)
-        current_id = self._repo.get_current_session_id(user_id)
+        provider = self.get_selected_ai_provider(user_id)
+        sessions = self._repo.list_sessions(user_id, ai_provider=provider, include_deleted=False)
+        current_id = self._repo.get_current_session_id(user_id, provider)
 
         if not sessions:
             return "세션이 없습니다."
@@ -213,7 +296,7 @@ class SessionService:
                 emoji = "📂" if s.id == current_id else "🗂"
 
             display_name = s.name or s.id[:8]
-            model_badge = {"opus": "🟣", "sonnet": "🔵", "haiku": "🟢"}.get(s.model, "⚪")
+            model_badge = get_profile_badge(s.ai_provider, s.model)
 
             history = self._repo.get_session_history_entries(s.id)
             msg_count = len(history)
@@ -254,13 +337,17 @@ class SessionService:
 
     def set_current(self, user_id: str, session_id: Optional[str]) -> None:
         """Set current session ID."""
-        previous = self._repo.get_current_session_id(user_id)
-        self._repo.update_user_current_session(user_id, session_id, previous)
+        provider = self.get_selected_ai_provider(user_id)
+        if session_id:
+            provider = self.get_session_ai_provider(session_id) or provider
+        previous = self._repo.get_current_session_id(user_id, provider)
+        self._repo.update_user_current_session(user_id, session_id, previous, ai_provider=provider)
 
     def set_previous_session_id(self, user_id: str, session_id: Optional[str]) -> None:
         """Store previous session ID for /back command."""
-        current = self._repo.get_current_session_id(user_id)
-        self._repo.update_user_current_session(user_id, current, session_id)
+        provider = self.get_selected_ai_provider(user_id)
+        current = self._repo.get_current_session_id(user_id, provider)
+        self._repo.update_user_current_session(user_id, current, session_id, ai_provider=provider)
 
     def get_session(self, session_id: str) -> Optional[dict]:
         """Get session data as dict."""

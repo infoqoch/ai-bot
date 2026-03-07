@@ -3,34 +3,12 @@
 import asyncio
 import json
 import shlex
-from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 from typing import Optional
 
+from src.ai.catalog import get_profile
+from src.ai.client_types import ChatError, ChatResponse
 from src.logging_config import logger
-
-
-class ChatError(Enum):
-    """Claude CLI 에러 타입."""
-
-    TIMEOUT = "TIMEOUT"
-    SESSION_NOT_FOUND = "SESSION_NOT_FOUND"
-    CLI_ERROR = "CLI_ERROR"
-
-
-@dataclass
-class ChatResponse:
-    """Claude CLI 응답."""
-
-    text: str
-    error: Optional[ChatError] = None
-    session_id: Optional[str] = None
-
-    def __iter__(self):
-        """하위 호환성을 위한 tuple 언패킹 지원."""
-        error_str = self.error.value if self.error else None
-        return iter((self.text, error_str, self.session_id))
 
 
 class ClaudeClient:
@@ -148,7 +126,8 @@ class ClaudeClient:
         logger.trace(f"chat() 시작 - msg='{short_msg}'")
         logger.trace(f"session_id={session_id[:8] if session_id else 'None'}, model={model}, workspace={workspace_path or '(없음)'}")
 
-        cmd = self._build_command(message, session_id, model, workspace_path)
+        normalized_model = get_profile("claude", model).key if model else None
+        cmd = self._build_command(message, session_id, normalized_model, workspace_path)
         logger.trace(f"명령어 생성됨 - {len(cmd)} parts")
 
         try:

@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.claude.client import ClaudeClient
+from src.ai import build_default_registry
 from src.config import get_settings
 from src.logging_config import logger, setup_logging
 from src.repository import init_repository, shutdown_repository
@@ -30,15 +30,11 @@ async def _run(job_id: int) -> int:
         repo=repo,
         session_timeout_hours=settings.session_timeout_hours,
     )
-    claude_client = ClaudeClient(
-        command=settings.ai_command,
-        system_prompt_file=settings.telegram_prompt_file,
-        timeout=300,
-    )
+    ai_registry = build_default_registry(settings)
     job_service = JobService(
         repo=repo,
         session_service=session_service,
-        claude_client=claude_client,
+        ai_registry=ai_registry,
         telegram_token=settings.telegram_token,
     )
 

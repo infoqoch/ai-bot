@@ -6,6 +6,7 @@ from pathlib import Path
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
 from telegram.ext import ContextTypes
 
+from src.ai import get_profile_label, get_provider_label
 from src.logging_config import logger, clear_context
 from src.constants import AVAILABLE_HOURS
 from ..constants import MAX_WORKSPACE_PATHS_DISPLAY, get_model_emoji
@@ -116,18 +117,17 @@ class WorkspaceHandlers(BaseHandler):
                 await query.answer("Workspace not found")
                 return
 
+            provider = self._get_selected_ai_provider(user_id)
+
             buttons = [
-                [
-                    InlineKeyboardButton("Opus", callback_data=f"ws:sess_model:{ws_id}:opus"),
-                    InlineKeyboardButton("Sonnet", callback_data=f"ws:sess_model:{ws_id}:sonnet"),
-                    InlineKeyboardButton("Haiku", callback_data=f"ws:sess_model:{ws_id}:haiku"),
-                ],
+                self._build_model_buttons(provider, f"ws:sess_model:{ws_id}:"),
                 [InlineKeyboardButton("Back", callback_data=f"ws:select:{ws_id}")],
             ]
 
             await query.edit_message_text(
                 f"<b>{ws.name}</b> - Start Session\n\n"
                 f"<code>{ws.short_path}</code>\n\n"
+                f"Current AI: <b>{get_provider_label(provider)}</b>\n"
                 f"Select model:",
                 reply_markup=InlineKeyboardMarkup(buttons),
                 parse_mode="HTML"
@@ -158,16 +158,12 @@ class WorkspaceHandlers(BaseHandler):
                     return
 
             self._workspace_registry.mark_used(ws_id)
-
-            session_id = await self.claude.create_session(workspace_path=ws.path)
-            if not session_id:
-                await query.edit_message_text("Session creation failed")
-                return
+            provider = self._get_selected_ai_provider(user_id)
 
             session_name = f"{ws.name} ({model})"
-            self.sessions.create_session(
-                user_id,
-                session_id,
+            session_id = self.sessions.create_session(
+                user_id=user_id,
+                ai_provider=provider,
                 model=model,
                 name=session_name,
                 workspace_path=ws.path,
@@ -178,7 +174,9 @@ class WorkspaceHandlers(BaseHandler):
                 f"<b>Workspace Session Created!</b>\n\n"
                 f"<b>{ws.name}</b>\n"
                 f"<code>{ws.short_path}</code>\n"
-                f"{model_emoji} Model: <b>{model}</b>\n\n"
+                f"AI: <b>{get_provider_label(provider)}</b>\n"
+                f"{model_emoji} Model: <b>{get_profile_label(provider, model)}</b> (<code>{model}</code>)\n"
+                f"Session: <code>{session_id[:8]}</code>\n\n"
                 f"Messages will now use this workspace context.",
                 parse_mode="HTML"
             )
@@ -271,22 +269,21 @@ class WorkspaceHandlers(BaseHandler):
 
             pending = self._ws_pending.get(user_id, {})
             pending["minute"] = minute
+            pending["ai_provider"] = self._get_selected_ai_provider(user_id)
             self._ws_pending[user_id] = pending
 
             hour = pending.get("hour", 9)
+            provider = pending["ai_provider"]
 
             buttons = [
-                [
-                    InlineKeyboardButton("Opus", callback_data=f"ws:sched_model:{ws_id}:opus"),
-                    InlineKeyboardButton("Sonnet", callback_data=f"ws:sched_model:{ws_id}:sonnet"),
-                    InlineKeyboardButton("Haiku", callback_data=f"ws:sched_model:{ws_id}:haiku"),
-                ],
+                self._build_model_buttons(provider, f"ws:sched_model:{ws_id}:"),
                 [InlineKeyboardButton("Back", callback_data=f"ws:schedule:{ws_id}")],
             ]
 
             await query.edit_message_text(
                 f"<b>{ws.name}</b> - Schedule Registration\n\n"
                 f"Time: <b>{hour:02d}:{minute:02d}</b>\n\n"
+                f"Current AI: <b>{get_provider_label(provider)}</b>\n"
                 f"Select model:",
                 reply_markup=InlineKeyboardMarkup(buttons),
                 parse_mode="HTML"
@@ -309,11 +306,13 @@ class WorkspaceHandlers(BaseHandler):
 
             hour = pending.get("hour", 9)
             minute = pending.get("minute", 0)
+            provider = pending.get("ai_provider", self._get_selected_ai_provider(user_id))
 
             await query.edit_message_text(
                 f"<b>{ws.name}</b> - Schedule Registration\n\n"
                 f"Time: <b>{hour:02d}:{minute:02d}</b>\n"
-                f"Model: <b>{model}</b>\n\n"
+                f"AI: <b>{get_provider_label(provider)}</b>\n"
+                f"Model: <b>{get_profile_label(provider, model)}</b> (<code>{model}</code>)\n\n"
                 f"Enter scheduled message below:",
                 parse_mode="HTML"
             )
@@ -602,6 +601,7 @@ class WorkspaceHandlers(BaseHandler):
                 minute=pending.get("minute", 0),
                 message=message,
                 schedule_type="workspace",
+                ai_provider=pending.get("ai_provider", self._get_selected_ai_provider(user_id)),
                 model=pending["model"],
                 workspace_path=ws.path,
             )
@@ -619,8 +619,10 @@ class WorkspaceHandlers(BaseHandler):
                 f"<b>Workspace Schedule Registered!</b>\n\n"
                 f"<b>{ws.name}</b>\n"
                 f"<code>{ws.short_path}</code>\n"
+                f"AI: <b>{get_provider_label(schedule.ai_provider)}</b>\n"
                 f"Time: <b>{schedule.time_str}</b> (daily)\n"
-                f"Model: <b>{pending['model']}</b>\n"
+                f"Model: <b>{get_profile_label(schedule.ai_provider, pending['model'])}</b> "
+                f"(<code>{pending['model']}</code>)\n"
                 f"Message: <i>{message[:50]}{'...' if len(message) > 50 else ''}</i>",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="HTML"

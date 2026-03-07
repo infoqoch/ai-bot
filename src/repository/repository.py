@@ -7,6 +7,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import uuid4
 
+from src.ai import DEFAULT_PROVIDER, SUPPORTED_PROVIDERS, infer_provider_from_model
+
 
 @dataclass
 class HistoryEntry:
@@ -48,6 +50,8 @@ class SessionData:
     """Session data."""
     id: str
     user_id: str
+    ai_provider: str
+    provider_session_id: Optional[str]
     model: str
     name: Optional[str]
     workspace_path: Optional[str]
@@ -59,6 +63,8 @@ class SessionData:
         return {
             "id": self.id,
             "user_id": self.user_id,
+            "ai_provider": self.ai_provider,
+            "provider_session_id": self.provider_session_id,
             "model": self.model,
             "name": self.name,
             "workspace_path": self.workspace_path,
@@ -79,6 +85,7 @@ class Schedule:
     message: str
     name: str
     schedule_type: str
+    ai_provider: str
     model: str
     workspace_path: Optional[str]
     plugin_name: Optional[str]
@@ -113,6 +120,7 @@ class Schedule:
             "message": self.message,
             "name": self.name,
             "type": self.schedule_type,
+            "ai_provider": self.ai_provider,
             "model": self.model,
             "workspace_path": self.workspace_path,
             "plugin_name": self.plugin_name,
@@ -218,7 +226,12 @@ class Repository:
             "INSERT INTO users (id) VALUES (?)", (user_id,)
         )
         self._conn.commit()
-        return {"id": user_id, "current_session_id": None, "previous_session_id": None}
+        return {
+            "id": user_id,
+            "current_session_id": None,
+            "previous_session_id": None,
+            "selected_ai_provider": DEFAULT_PROVIDER,
+        }
 
     def get_user(self, user_id: str) -> Optional[dict[str, Any]]:
         """Get user by ID."""
@@ -228,67 +241,164 @@ class Repository:
         row = cursor.fetchone()
         return dict(row) if row else None
 
-    def update_user_current_session(
-        self, user_id: str, session_id: Optional[str], previous_session_id: Optional[str] = None
-    ) -> None:
-        """Update user's current session."""
+    def get_selected_ai_provider(self, user_id: str) -> str:
+        """Get currently selected AI provider for a user."""
+        user = self.get_or_create_user(user_id)
+        provider = user.get("selected_ai_provider") or DEFAULT_PROVIDER
+        return provider if provider in SUPPORTED_PROVIDERS else DEFAULT_PROVIDER
+
+    def set_selected_ai_provider(self, user_id: str, ai_provider: str) -> None:
+        """Update the active provider selector for a user."""
         self.get_or_create_user(user_id)
-        if previous_session_id is not None:
-            self._conn.execute(
-                "UPDATE users SET current_session_id = ?, previous_session_id = ? WHERE id = ?",
-                (session_id, previous_session_id, user_id)
-            )
-        else:
-            self._conn.execute(
-                "UPDATE users SET current_session_id = ? WHERE id = ?",
-                (session_id, user_id)
-            )
+        self._conn.execute(
+            "UPDATE users SET selected_ai_provider = ? WHERE id = ?",
+            (ai_provider, user_id),
+        )
+        self._conn.commit()
+
+    def _ensure_provider_state(self, user_id: str, ai_provider: str) -> None:
+        """Ensure one provider-state row exists."""
+        self.get_or_create_user(user_id)
+        self._conn.execute(
+            """INSERT OR IGNORE INTO user_provider_state
+               (user_id, ai_provider, updated_at)
+               VALUES (?, ?, ?)""",
+            (user_id, ai_provider, self._now()),
+        )
+
+    def update_user_current_session(
+        self,
+        user_id: str,
+        session_id: Optional[str],
+        previous_session_id: Optional[str] = None,
+        ai_provider: Optional[str] = None,
+    ) -> None:
+        """Update current/previous session for one provider."""
+        provider = ai_provider or self.get_selected_ai_provider(user_id)
+        self._ensure_provider_state(user_id, provider)
+
+        if previous_session_id is None:
+            row = self._conn.execute(
+                """SELECT previous_session_id
+                   FROM user_provider_state
+                   WHERE user_id = ? AND ai_provider = ?""",
+                (user_id, provider),
+            ).fetchone()
+            previous_session_id = row["previous_session_id"] if row else None
+
+        self._conn.execute(
+            """INSERT INTO user_provider_state
+               (user_id, ai_provider, current_session_id, previous_session_id, updated_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(user_id, ai_provider) DO UPDATE SET
+                   current_session_id = excluded.current_session_id,
+                   previous_session_id = excluded.previous_session_id,
+                   updated_at = excluded.updated_at""",
+            (user_id, provider, session_id, previous_session_id, self._now()),
+        )
+        self._conn.execute(
+            "UPDATE users SET current_session_id = ?, previous_session_id = ? WHERE id = ?",
+            (session_id, previous_session_id, user_id),
+        )
         self._conn.commit()
 
     # ========== Session Operations ==========
 
-    def get_current_session_id(self, user_id: str) -> Optional[str]:
-        """Get current session ID for user."""
-        user = self.get_user(user_id)
-        if not user:
-            return None
-        return user.get("current_session_id")
+    def get_current_session_id(self, user_id: str, ai_provider: Optional[str] = None) -> Optional[str]:
+        """Get current session ID for one provider."""
+        provider = ai_provider or self.get_selected_ai_provider(user_id)
+        self._ensure_provider_state(user_id, provider)
+        row = self._conn.execute(
+            """SELECT current_session_id
+               FROM user_provider_state
+               WHERE user_id = ? AND ai_provider = ?""",
+            (user_id, provider),
+        ).fetchone()
+        return row["current_session_id"] if row else None
 
-    def get_previous_session_id(self, user_id: str) -> Optional[str]:
-        """Get previous session ID for user."""
-        user = self.get_user(user_id)
-        if not user:
-            return None
-        return user.get("previous_session_id")
+    def get_previous_session_id(self, user_id: str, ai_provider: Optional[str] = None) -> Optional[str]:
+        """Get previous session ID for one provider."""
+        provider = ai_provider or self.get_selected_ai_provider(user_id)
+        self._ensure_provider_state(user_id, provider)
+        row = self._conn.execute(
+            """SELECT previous_session_id
+               FROM user_provider_state
+               WHERE user_id = ? AND ai_provider = ?""",
+            (user_id, provider),
+        ).fetchone()
+        return row["previous_session_id"] if row else None
+
+    def _normalize_session_create_args(
+        self,
+        session_id: str,
+        ai_provider: str,
+        provider_session_id: Optional[str],
+        model: str,
+        name: Optional[str],
+        workspace_path: Optional[str],
+    ) -> tuple[str, Optional[str], str, Optional[str], Optional[str]]:
+        """Support legacy create_session positional calls.
+
+        Legacy signature:
+            create_session(user_id, session_id, model="sonnet", name=None, workspace_path=None, ...)
+        """
+        if ai_provider in SUPPORTED_PROVIDERS:
+            return ai_provider, provider_session_id, model, name, workspace_path
+
+        legacy_model = ai_provider or model or "sonnet"
+        legacy_name = provider_session_id if provider_session_id is not None else name
+        legacy_workspace_path = workspace_path
+
+        if legacy_workspace_path is None and name is not None:
+            legacy_workspace_path = name
+        elif legacy_workspace_path is None and model not in ("sonnet", "opus", "haiku"):
+            legacy_workspace_path = model
+
+        normalized_provider = infer_provider_from_model(legacy_model)
+        return normalized_provider, session_id, legacy_model, legacy_name, legacy_workspace_path
 
     def create_session(
         self,
         user_id: str,
         session_id: str,
+        ai_provider: str = DEFAULT_PROVIDER,
+        provider_session_id: Optional[str] = None,
         model: str = "sonnet",
         name: Optional[str] = None,
         workspace_path: Optional[str] = None,
         switch_to: bool = True
     ) -> SessionData:
         """Create a new session."""
+        ai_provider, provider_session_id, model, name, workspace_path = self._normalize_session_create_args(
+            session_id=session_id,
+            ai_provider=ai_provider,
+            provider_session_id=provider_session_id,
+            model=model,
+            name=name,
+            workspace_path=workspace_path,
+        )
         now = self._now()
         self.get_or_create_user(user_id)
 
         self._conn.execute(
-            """INSERT INTO sessions (id, user_id, model, name, workspace_path, created_at, last_used)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (session_id, user_id, model, name, workspace_path, now, now)
+            """INSERT INTO sessions
+               (id, user_id, ai_provider, provider_session_id, model, name, workspace_path, created_at, last_used)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (session_id, user_id, ai_provider, provider_session_id, model, name, workspace_path, now, now)
         )
 
         if switch_to:
-            current = self.get_current_session_id(user_id)
-            self.update_user_current_session(user_id, session_id, current)
+            self.set_selected_ai_provider(user_id, ai_provider)
+            current = self.get_current_session_id(user_id, ai_provider)
+            self.update_user_current_session(user_id, session_id, current, ai_provider=ai_provider)
 
         self._conn.commit()
 
         return SessionData(
             id=session_id,
             user_id=user_id,
+            ai_provider=ai_provider,
+            provider_session_id=provider_session_id,
             model=model,
             name=name,
             workspace_path=workspace_path,
@@ -301,13 +411,22 @@ class Repository:
         self,
         user_id: str,
         session_id: str,
+        ai_provider: str = DEFAULT_PROVIDER,
+        provider_session_id: Optional[str] = None,
         model: str = "sonnet",
         name: Optional[str] = None,
         workspace_path: Optional[str] = None
     ) -> SessionData:
         """Create session without switching to it."""
         return self.create_session(
-            user_id, session_id, model, name, workspace_path, switch_to=False
+            user_id=user_id,
+            session_id=session_id,
+            ai_provider=ai_provider,
+            provider_session_id=provider_session_id,
+            model=model,
+            name=name,
+            workspace_path=workspace_path,
+            switch_to=False,
         )
 
     def get_session(self, session_id: str) -> Optional[SessionData]:
@@ -321,6 +440,8 @@ class Repository:
         return SessionData(
             id=row["id"],
             user_id=row["user_id"],
+            ai_provider=row["ai_provider"],
+            provider_session_id=row["provider_session_id"],
             model=row["model"],
             name=row["name"],
             workspace_path=row["workspace_path"],
@@ -333,6 +454,16 @@ class Repository:
         """Get model for session."""
         session = self.get_session(session_id)
         return session.model if session else None
+
+    def get_session_ai_provider(self, session_id: str) -> Optional[str]:
+        """Get provider for session."""
+        session = self.get_session(session_id)
+        return session.ai_provider if session else None
+
+    def get_session_provider_session_id(self, session_id: str) -> Optional[str]:
+        """Get provider-native session/thread ID."""
+        session = self.get_session(session_id)
+        return session.provider_session_id if session else None
 
     def update_session_last_used(self, session_id: str) -> None:
         """Update session last_used timestamp."""
@@ -360,12 +491,30 @@ class Repository:
         self._conn.commit()
         return cursor.rowcount > 0
 
+    def update_session_provider_session_id(self, session_id: str, provider_session_id: Optional[str]) -> bool:
+        """Persist provider-native session/thread ID."""
+        cursor = self._conn.execute(
+            "UPDATE sessions SET provider_session_id = ? WHERE id = ?",
+            (provider_session_id, session_id),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
     def soft_delete_session(self, session_id: str) -> bool:
         """Soft delete session (mark as deleted)."""
+        session = self.get_session(session_id)
         cursor = self._conn.execute(
             "UPDATE sessions SET deleted = 1 WHERE id = ?",
             (session_id,)
         )
+        if cursor.rowcount > 0 and session:
+            self._conn.execute(
+                """UPDATE user_provider_state
+                   SET current_session_id = CASE WHEN current_session_id = ? THEN NULL ELSE current_session_id END,
+                       previous_session_id = CASE WHEN previous_session_id = ? THEN NULL ELSE previous_session_id END
+                   WHERE ai_provider = ?""",
+                (session_id, session_id, session.ai_provider),
+            )
         self._conn.commit()
         return cursor.rowcount > 0
 
@@ -390,12 +539,17 @@ class Repository:
     def list_sessions(
         self,
         user_id: str,
+        ai_provider: Optional[str] = None,
         include_deleted: bool = False,
         limit: Optional[int] = None
     ) -> list[SessionData]:
         """List sessions for user."""
         query = "SELECT * FROM sessions WHERE user_id = ?"
         params: list[Any] = [user_id]
+
+        if ai_provider:
+            query += " AND ai_provider = ?"
+            params.append(ai_provider)
 
         if not include_deleted:
             query += " AND deleted = 0"
@@ -411,6 +565,8 @@ class Repository:
             SessionData(
                 id=row["id"],
                 user_id=row["user_id"],
+                ai_provider=row["ai_provider"],
+                provider_session_id=row["provider_session_id"],
                 model=row["model"],
                 name=row["name"],
                 workspace_path=row["workspace_path"],
@@ -424,11 +580,17 @@ class Repository:
     def switch_session(self, user_id: str, session_id: str) -> bool:
         """Switch to a different session."""
         session = self.get_session(session_id)
-        if not session or session.user_id != user_id:
+        if not session or session.user_id != user_id or session.deleted:
             return False
 
-        current = self.get_current_session_id(user_id)
-        self.update_user_current_session(user_id, session_id, current)
+        self.set_selected_ai_provider(user_id, session.ai_provider)
+        current = self.get_current_session_id(user_id, session.ai_provider)
+        self.update_user_current_session(
+            user_id,
+            session_id,
+            current,
+            ai_provider=session.ai_provider,
+        )
         self.update_session_last_used(session_id)
         return True
 
@@ -529,6 +691,7 @@ class Repository:
         message: str,
         name: str,
         schedule_type: str = "claude",
+        ai_provider: str = DEFAULT_PROVIDER,
         model: str = "sonnet",
         workspace_path: Optional[str] = None,
         plugin_name: Optional[str] = None,
@@ -541,11 +704,11 @@ class Repository:
 
         self._conn.execute(
             """INSERT INTO schedules
-               (id, user_id, chat_id, hour, minute, message, name, schedule_type, model,
+               (id, user_id, chat_id, hour, minute, message, name, schedule_type, ai_provider, model,
                 workspace_path, plugin_name, action_name, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (schedule_id, user_id, chat_id, hour, minute, message, name,
-             schedule_type, model, workspace_path, plugin_name, action_name, now)
+             schedule_type, ai_provider, model, workspace_path, plugin_name, action_name, now)
         )
         self._conn.commit()
 
@@ -558,6 +721,7 @@ class Repository:
             message=message,
             name=name,
             schedule_type=schedule_type,
+            ai_provider=ai_provider,
             model=model,
             workspace_path=workspace_path,
             plugin_name=plugin_name,
@@ -590,6 +754,7 @@ class Repository:
             message=row["message"],
             name=row["name"],
             schedule_type=row["schedule_type"],
+            ai_provider=row["ai_provider"],
             model=row["model"],
             workspace_path=row["workspace_path"],
             plugin_name=row["plugin_name"],

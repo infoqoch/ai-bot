@@ -1,8 +1,8 @@
-# Telegram Claude Bot
+# Telegram CLI AI Bot
 
-**Claude Code를 텔레그램에서. API 키 없이.**
+**Claude/Codex CLI를 텔레그램에서. API 키 없이.**
 
-터미널 없이 스마트폰으로 Claude Code와 대화하세요.
+터미널 없이 스마트폰으로 Claude 또는 Codex와 대화하세요.
 
 ---
 
@@ -10,11 +10,11 @@
 
 | | |
 |---|---|
-| **API 키 불필요** | Claude CLI만 설치되어 있으면 바로 동작 - 추가 비용 없음 |
+| **API 키 불필요** | Claude CLI / Codex CLI 로그인만 되어 있으면 바로 동작 |
 | **어디서든** | 출퇴근길, 카페, 침대에서 텔레그램으로 코딩 대화 |
-| **멀티 세션** | 프로젝트별 독립 대화, 모델 선택(Opus/Sonnet/Haiku) |
+| **멀티 세션** | 프로젝트별 독립 대화, AI/provider별 세션 분리 |
 | **AI 매니저** | 자연어로 세션 관리 - "주식돌이 오푸스로 만들어줘" |
-| **플러그인** | Claude 호출 없이 빠른 응답 - 메모, 날씨 등 확장 가능 |
+| **플러그인** | AI 호출 없이 빠른 응답 - 메모, 날씨 등 확장 가능 |
 | **보안** | 허용된 ID만 접근 + 선택적 인증 |
 
 ---
@@ -23,7 +23,7 @@
 
 ### 2-Track 응답 시스템
 
-AI 응답은 느립니다(수십 초~수 분). 모든 요청을 Claude에 보내면 사용자 경험이 나빠집니다.
+AI 응답은 느립니다(수십 초~수 분). 모든 요청을 CLI agent에 보내면 사용자 경험이 나빠집니다.
 
 ```
 사용자 메시지
@@ -32,11 +32,11 @@ AI 응답은 느립니다(수십 초~수 분). 모든 요청을 Claude에 보내
     │       "메모해줘: 장보기"  → 저장 완료
     │       "서울 날씨"        → Open-Meteo API
     │
-    └─▶ [Track 2] Claude CLI  → detached worker 처리 (수십 초)
+    └─▶ [Track 2] Claude/Codex CLI → detached worker 처리 (수십 초)
             "코드 리뷰해줘"    → bot은 즉시 반환, worker가 끝까지 실행
 ```
 
-플러그인이 처리 가능하면 Claude를 호출하지 않아 빠르고, 처리 불가하면 Claude로 넘깁니다.
+플러그인이 처리 가능하면 AI를 호출하지 않아 빠르고, 처리 불가하면 현재 선택된 provider로 넘깁니다.
 
 ### 세션별 커스터마이징
 
@@ -45,7 +45,8 @@ AI 응답은 느립니다(수십 초~수 분). 모든 요청을 Claude에 보내
 | 기능 | 설명 |
 |------|------|
 | **이름 지정** | `/new opus 코딩도우미` - 세션에 이름 부여 |
-| **모델 선택** | opus/sonnet/haiku 중 선택 |
+| **AI 선택** | `/select_ai`로 Claude/Codex 전환 |
+| **모델 선택** | provider별 profile 선택 |
 | **모델 변경** | `/model sonnet` - 기존 세션 모델 변경 |
 | **세션 전환** | `/s_abc123` - 다른 세션으로 전환 |
 
@@ -61,12 +62,12 @@ AI 응답은 느립니다(수십 초~수 분). 모든 요청을 Claude에 보내
     │     - 즉시 반환
     │
     └─▶ detached worker (`src.worker_job`)
-          - Claude CLI 실행 owner
+          - provider CLI 실행 owner
           - Telegram 직접 응답
           - 세션 queue drain
 ```
 
-이 구조 덕분에 Claude가 작업 중 `./run.sh restart`를 실행해도, in-flight worker는 살아남아 응답을 끝까지 전송할 수 있습니다.
+이 구조 덕분에 Claude나 Codex가 작업 중 `./run.sh restart`를 실행해도, in-flight worker는 살아남아 응답을 끝까지 전송할 수 있습니다.
 
 ### ACTION 패턴 시스템
 
@@ -94,9 +95,10 @@ AI 응답은 느립니다(수십 초~수 분). 모든 요청을 Claude에 보내
 ### 1. 사전 준비
 
 - **Python 3.11+**
-- **Claude CLI** 설치 및 로그인
+- **Claude CLI** 또는 **Codex CLI** 설치 및 로그인
   ```bash
-  claude --version  # 설치 확인
+  claude --version  # Claude 설치 확인
+  codex --version   # Codex 설치 확인
   ```
 
 ### 2. 텔레그램 봇 생성
@@ -128,12 +130,13 @@ cp .env.example .env
 
 ### 기본 대화
 
-메시지를 보내면 Claude가 응답합니다.
+메시지를 보내면 현재 선택된 AI가 응답합니다.
 
 ### 세션 관리
 
 | 명령어 | 설명 |
 |--------|------|
+| `/select_ai` | Claude / Codex 선택 |
 | `/new opus 프로젝트명` | 새 Opus 세션 (이름 지정) |
 | `/session` | 현재 세션 정보 |
 | `/session_list` | 전체 세션 목록 |
@@ -152,7 +155,7 @@ cp .env.example .env
 
 ### 플러그인
 
-Claude 호출 없이 즉시 응답:
+AI 호출 없이 즉시 응답:
 
 ```
 메모해줘: 장보기 목록    → 저장 (즉시)

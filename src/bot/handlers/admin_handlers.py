@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
+from src.ai import get_provider_button, get_provider_label
 from src.logging_config import logger, clear_context
 from ..constants import MAX_LOCK_STATUS_PREVIEW
 from ..middleware import authorized_only
@@ -45,7 +46,12 @@ class AdminHandlers(BaseHandler):
 
         from src.scheduler_manager import scheduler_manager
 
-        text = self._schedule_manager.get_status_text(user_id)
+        provider = self._get_selected_ai_provider(user_id)
+        text = (
+            f"<b>Scheduler</b>\n"
+            f"Current AI: <b>{get_provider_label(provider)}</b>\n\n"
+            f"{self._schedule_manager.get_status_text(user_id)}"
+        )
         text += scheduler_manager.get_system_jobs_text()
         keyboard = self._build_scheduler_keyboard(user_id)
 
@@ -279,6 +285,7 @@ class AdminHandlers(BaseHandler):
     def _build_scheduler_keyboard(self, user_id: str) -> list:
         """Build scheduler UI keyboard - schedule list."""
         buttons = []
+        provider = self._get_selected_ai_provider(user_id)
 
         if self._schedule_manager:
             schedules = self._schedule_manager.list_by_user(user_id)
@@ -293,7 +300,7 @@ class AdminHandlers(BaseHandler):
                 ])
 
         buttons.append([
-            InlineKeyboardButton("+ Claude", callback_data="sched:add:claude"),
+            InlineKeyboardButton(f"+ {get_provider_button(provider)}", callback_data="sched:add:claude"),
             InlineKeyboardButton("+ Workspace", callback_data="sched:add:workspace"),
             InlineKeyboardButton("+ Plugin", callback_data="sched:add:plugin"),
         ])
