@@ -195,7 +195,7 @@ CREATE TABLE IF NOT EXISTS weather_locations (
             buttons.append(row)
 
         return {
-            "text": "🌤️ <b>지역 선택</b>\n\n날씨를 확인할 지역을 선택하세요:",
+            "text": "🌤️ <b>Select Region</b>\n\nChoose a region to check weather:",
             "reply_markup": InlineKeyboardMarkup(buttons),
             "edit": True,
         }
@@ -204,7 +204,7 @@ CREATE TABLE IF NOT EXISTS weather_locations (
         """2단계: 선택한 도의 시/군 목록 표시."""
         cities = self.PROVINCE_TO_CITIES.get(province, [])
         if not cities:
-            return {"text": f"❌ '{province}'에 등록된 도시가 없습니다.", "edit": True}
+            return {"text": f"❌ No cities registered for '{province}'.", "edit": True}
 
         buttons = []
         row = []
@@ -217,10 +217,10 @@ CREATE TABLE IF NOT EXISTS weather_locations (
             buttons.append(row)
 
         # 뒤로가기 버튼
-        buttons.append([InlineKeyboardButton("◀️ 뒤로", callback_data="weather:select")])
+        buttons.append([InlineKeyboardButton("◀️ Back", callback_data="weather:select")])
 
         return {
-            "text": f"🌤️ <b>{province} - 도시 선택</b>\n\n도시를 선택하세요:",
+            "text": f"🌤️ <b>{province} - Select City</b>\n\nChoose a city:",
             "reply_markup": InlineKeyboardMarkup(buttons),
             "edit": True,
         }
@@ -228,18 +228,18 @@ CREATE TABLE IF NOT EXISTS weather_locations (
     async def _handle_city_weather(self, chat_id: int, city: str) -> dict:
         geo = await self._geocode(city)
         if not geo:
-            return {"text": f"❌ '{city}' 도시를 찾을 수 없습니다.", "edit": True}
+            return {"text": f"❌ City '{city}' not found.", "edit": True}
 
         weather = await self._fetch_weather(geo["lat"], geo["lon"])
         if not weather:
-            return {"text": "❌ 날씨 데이터를 가져올 수 없습니다.", "edit": True}
+            return {"text": "❌ Unable to fetch weather data.", "edit": True}
 
         text = self._format_weather(geo, weather)
 
         buttons = [
             [
-                InlineKeyboardButton("🔄 새로고침", callback_data=f"weather:city:{city}"),
-                InlineKeyboardButton("📍 다른 도시", callback_data="weather:select"),
+                InlineKeyboardButton("🔄 Refresh", callback_data=f"weather:city:{city}"),
+                InlineKeyboardButton("📍 Other city", callback_data="weather:select"),
             ]
         ]
 
@@ -256,14 +256,14 @@ CREATE TABLE IF NOT EXISTS weather_locations (
 
         weather = await self._fetch_weather(location["lat"], location["lon"])
         if not weather:
-            return {"text": "❌ 날씨 데이터를 가져올 수 없습니다.", "edit": True}
+            return {"text": "❌ Unable to fetch weather data.", "edit": True}
 
         text = self._format_weather(location, weather)
 
         buttons = [
             [
-                InlineKeyboardButton("🔄 새로고침", callback_data="weather:refresh"),
-                InlineKeyboardButton("📍 다른 도시", callback_data="weather:select"),
+                InlineKeyboardButton("🔄 Refresh", callback_data="weather:refresh"),
+                InlineKeyboardButton("📍 Other city", callback_data="weather:select"),
             ]
         ]
 
@@ -297,13 +297,13 @@ CREATE TABLE IF NOT EXISTS weather_locations (
         forecast_text = "\n".join(forecast_lines)
 
         return (
-            f"{emoji} <b>{location['name']} 날씨</b>\n\n"
-            f"<b>현재</b>\n"
-            f"• 날씨: {desc}\n"
-            f"• 기온: {temp}°C\n"
-            f"• 습도: {humidity}%\n"
-            f"• 바람: {wind} km/h\n\n"
-            f"<b>3일 예보</b>\n"
+            f"{emoji} <b>{location['name']} Weather</b>\n\n"
+            f"<b>Current</b>\n"
+            f"• Weather: {desc}\n"
+            f"• Temp: {temp}°C\n"
+            f"• Humidity: {humidity}%\n"
+            f"• Wind: {wind} km/h\n\n"
+            f"<b>3-Day Forecast</b>\n"
             f"<code>{forecast_text}</code>"
         )
 
@@ -373,19 +373,19 @@ CREATE TABLE IF NOT EXISTS weather_locations (
         if not geo:
             return PluginResult(
                 handled=True,
-                response=f"❌ '{location_name}'을(를) 찾을 수 없습니다.\n다른 위치를 입력해 주세요."
+                response=f"❌ '{location_name}' not found.\nTry a different location."
             )
 
         self._save_location(chat_id, geo)
 
         keyboard = [[
-            InlineKeyboardButton("🌤️ 날씨 확인", callback_data="weather:refresh"),
+            InlineKeyboardButton("🌤️ Check weather", callback_data="weather:refresh"),
         ]]
 
         return PluginResult(
             handled=True,
             response=(
-                f"📍 위치 설정 완료!\n\n"
+                f"📍 Location set!\n\n"
                 f"<b>{geo['name']}</b> ({geo['country']})\n"
                 f"Lat: {geo['lat']:.4f}, Lon: {geo['lon']:.4f}"
             ),
@@ -408,15 +408,15 @@ CREATE TABLE IF NOT EXISTS weather_locations (
         if not weather:
             return PluginResult(
                 handled=True,
-                response="❌ 날씨 데이터를 가져올 수 없습니다. 잠시 후 다시 시도해 주세요."
+                response="❌ Unable to fetch weather data. Please try again later."
             )
 
         text = self._format_weather(location, weather)
 
         buttons = [
             [
-                InlineKeyboardButton("🔄 새로고침", callback_data="weather:refresh"),
-                InlineKeyboardButton("📍 다른 도시", callback_data="weather:select"),
+                InlineKeyboardButton("🔄 Refresh", callback_data="weather:refresh"),
+                InlineKeyboardButton("📍 Other city", callback_data="weather:select"),
             ]
         ]
 
