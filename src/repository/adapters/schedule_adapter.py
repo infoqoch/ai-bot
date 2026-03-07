@@ -283,7 +283,7 @@ class ScheduleManagerAdapter:
         lines = []
         for s in schedules:
             status = "✅" if s.enabled else "⏸"
-            type_icon = "📂" if s.type == "workspace" else "💬"
+            type_icon = "🔌" if s.type == "plugin" else ("📂" if s.type == "workspace" else "💬")
             lines.append(f"{status} {type_icon} <b>{s.name}</b> - {s.time_str}")
 
         return "\n".join(lines)
