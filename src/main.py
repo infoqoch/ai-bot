@@ -229,6 +229,7 @@ def create_app() -> Application:
     app.add_handler(CommandHandler("workspace", handlers.workspace_command))
     app.add_handler(CommandHandler("ws", handlers.workspace_command))  # 단축 명령어
     app.add_handler(CommandHandler("plugins", handlers.plugins_command))
+    app.add_handler(CommandHandler("reload", handlers.reload_command))
     app.add_handler(CommandHandler("ai", handlers.ai_command))
 
     # 동적 플러그인 명령어 (예: /memo)

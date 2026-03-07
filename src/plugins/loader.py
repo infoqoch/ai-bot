@@ -35,6 +35,9 @@ class Plugin(ABC):
     description: str = "Base plugin"
     usage: str = "Usage not defined."
 
+    CALLBACK_PREFIX: str = ""  # 빈 문자열이면 콜백 미지원
+    FORCE_REPLY_MARKER: str = ""  # 빈 문자열이면 ForceReply 미지원
+
     # Repository 인스턴스 (PluginLoader가 주입)
     _repository: Optional["Repository"] = None
 
@@ -52,6 +55,18 @@ class Plugin(ABC):
     async def handle(self, message: str, chat_id: int) -> PluginResult:
         """메시지 처리."""
         pass
+
+    def handle_callback(self, callback_data: str, chat_id: int) -> dict:
+        """콜백 처리. 오버라이드하여 사용."""
+        raise NotImplementedError
+
+    async def handle_callback_async(self, callback_data: str, chat_id: int) -> dict:
+        """비동기 콜백 처리. 기본적으로 sync handle_callback을 호출."""
+        return self.handle_callback(callback_data, chat_id)
+
+    def handle_force_reply(self, message: str, chat_id: int) -> dict:
+        """ForceReply 응답 처리. 오버라이드하여 사용."""
+        raise NotImplementedError
 
     def get_scheduled_actions(self) -> list[ScheduledAction]:
         """스케줄 가능한 액션 목록. 오버라이드하여 사용."""
@@ -239,7 +254,7 @@ class PluginLoader:
             return None
 
     def reload_plugin(self, name: str) -> bool:
-        """특정 플러그인 핫 리로드.
+        """특정 플러그인 핫 리로드 (파일 + 패키지 지원).
 
         Args:
             name: 플러그인 이름
@@ -255,17 +270,67 @@ class PluginLoader:
 
         # 다시 로드 시도
         for plugin_dir in ["builtin", "custom"]:
-            file_path = self.base_dir / "plugins" / plugin_dir / f"{name}.py"
+            dir_base = self.base_dir / "plugins" / plugin_dir
+
+            # 1. 디렉토리 패키지 기반 시도
+            package_path = dir_base / name
+            if package_path.is_dir():
+                self._invalidate_module_cache(name)
+                plugin = self._load_plugin_from_package(package_path)
+                if plugin:
+                    self.plugins.append(plugin)
+                    logger.info(f"플러그인 리로드됨 (패키지): {name}")
+                    return True
+
+            # 2. 단일 파일 기반 시도
+            file_path = dir_base / f"{name}.py"
             if file_path.exists():
-                logger.trace(f"플러그인 파일 발견: {file_path}")
+                self._invalidate_module_cache(name)
                 plugin = self._load_plugin_safe(file_path)
                 if plugin:
                     self.plugins.append(plugin)
-                    logger.info(f"플러그인 리로드됨: {name}")
+                    logger.info(f"플러그인 리로드됨 (파일): {name}")
                     return True
 
         logger.warning(f"플러그인 리로드 실패: {name}")
         return False
+
+    def _invalidate_module_cache(self, name: str) -> None:
+        """모듈 캐시 제거 (핫 리로드 시 이전 코드가 남는 문제 방지)."""
+        import sys
+
+        # _loaded_modules에서 제거
+        self._loaded_modules.pop(name, None)
+        self._loaded_modules.pop("plugin", None)
+
+        # sys.modules에서 관련 모듈 제거 (핫 리로드 핵심)
+        modules_to_remove = [
+            key for key in sys.modules
+            if key == name or key == "plugin" or key.startswith(f"{name}.")
+        ]
+        for mod_key in modules_to_remove:
+            del sys.modules[mod_key]
+
+        if modules_to_remove:
+            logger.trace(f"모듈 캐시 제거: {modules_to_remove}")
+
+    def reload_all(self) -> tuple[list[str], list[str]]:
+        """모든 플러그인 리로드.
+
+        Returns:
+            (성공 목록, 실패 목록)
+        """
+        plugin_names = [p.name for p in self.plugins]
+        success = []
+        failed = []
+
+        for name in plugin_names:
+            if self.reload_plugin(name):
+                success.append(name)
+            else:
+                failed.append(name)
+
+        return success, failed
 
     async def process_message(self, message: str, chat_id: int) -> Optional[PluginResult]:
         """메시지를 플러그인으로 처리 시도.
@@ -311,6 +376,13 @@ class PluginLoader:
             {"name": p.name, "description": p.description}
             for p in self.plugins
         ]
+
+    def get_plugin_for_callback(self, callback_data: str) -> Optional[Plugin]:
+        """callback_data의 prefix로 플러그인 찾기."""
+        for plugin in self.plugins:
+            if plugin.CALLBACK_PREFIX and callback_data.startswith(plugin.CALLBACK_PREFIX):
+                return plugin
+        return None
 
     def get_plugin_by_name(self, name: str) -> Optional[Plugin]:
         """이름으로 플러그인 찾기."""

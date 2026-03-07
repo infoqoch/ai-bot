@@ -359,6 +359,7 @@ class BaseHandler:
             "Other\n"
             "/tasks - Active tasks/queue\n"
             "/chatid - My chat ID\n"
+            "/reload [name] - Reload plugins\n"
             "/help - This help",
             parse_mode="HTML"
         )

@@ -107,6 +107,45 @@ class AdminHandlers(BaseHandler):
         logger.trace("/plugins complete")
         clear_context()
 
+    async def reload_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /reload command - hot reload plugins."""
+        chat_id = update.effective_chat.id
+        self._setup_request_context(chat_id)
+        logger.info("/reload command received")
+
+        if not self.plugins:
+            await update.message.reply_text("No plugin loader available.")
+            clear_context()
+            return
+
+        if context.args:
+            # 특정 플러그인 리로드: /reload memo
+            plugin_name = context.args[0]
+            success = self.plugins.reload_plugin(plugin_name)
+            if success:
+                await update.message.reply_text(
+                    f"Plugin <code>{plugin_name}</code> reloaded.",
+                    parse_mode="HTML"
+                )
+            else:
+                await update.message.reply_text(
+                    f"Failed to reload <code>{plugin_name}</code>.",
+                    parse_mode="HTML"
+                )
+        else:
+            # 전체 리로드: /reload
+            success, failed = self.plugins.reload_all()
+            lines = ["<b>Plugin Reload</b>\n"]
+            if success:
+                lines.append(f"Reloaded: {', '.join(success)}")
+            if failed:
+                lines.append(f"Failed: {', '.join(failed)}")
+            if not success and not failed:
+                lines.append("No plugins to reload.")
+            await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+        clear_context()
+
     async def plugin_help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /plugin_name command - show specific plugin usage."""
         chat_id = update.effective_chat.id
