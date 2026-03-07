@@ -89,6 +89,20 @@ class Schedule:
     last_error: Optional[str]
     run_count: int
 
+    @property
+    def time_str(self) -> str:
+        """Return formatted time string HH:MM KST."""
+        return f"{self.hour:02d}:{self.minute:02d} KST"
+
+    @property
+    def type_emoji(self) -> str:
+        """Return emoji based on schedule type."""
+        if self.type == "workspace":
+            return "📂"
+        elif self.type == "plugin":
+            return "🔌"
+        return "💬"
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,

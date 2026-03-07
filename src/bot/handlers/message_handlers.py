@@ -157,7 +157,7 @@ class MessageHandlers(BaseHandler):
                     return
 
             if "sess_rename:" in reply_text:
-                rename_match = re.search(r"sess_rename:(\S+)", reply_text)
+                rename_match = re.search(r"sess_rename:([\w-]+)", reply_text)
                 if rename_match:
                     session_id = rename_match.group(1)
                     await self._handle_rename_force_reply(update, chat_id, message, session_id)
