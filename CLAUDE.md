@@ -104,8 +104,8 @@ def process():
 ### 실행 스크립트 (run.sh)
 ```bash
 ./run.sh start    # 봇 시작
-./run.sh stop     # 봇 중지
-./run.sh restart  # 봇 재시작
+./run.sh stop     # 봇 + detached worker 중지
+./run.sh restart  # 봇 재시작 (in-flight worker 유지)
 ./run.sh status   # 상태 확인
 ./run.sh log      # 로그 보기
 ./run.sh test     # 테스트 실행
@@ -149,6 +149,7 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
 ```
 src/
 ├── main.py                    # 봇 진입점, 핸들러 등록
+├── worker_job.py              # Claude detached worker 진입점
 ├── config.py                  # 환경변수 기반 설정 (Pydantic Settings)
 ├── constants.py               # 전역 상수 (모델, 시간, 제한값)
 ├── notify.py                  # 개발 리포트 CLI
@@ -181,11 +182,14 @@ src/
 │
 └── services/
     ├── session_service.py     # 세션 생명주기
+    ├── job_service.py         # detached Claude job 실행 + Telegram 응답
     ├── message_service.py     # 메시지 처리
     └── schedule_service.py    # 스케줄 CRUD + 실행
 ```
 
-**호출 흐름:** Handler → Service → Repository → SQLite
+**기본 호출 흐름:** Handler → Service → Repository → SQLite
+
+**Claude 대화 흐름:** Handler → Repository(job 생성) → `src.worker_job` → `JobService` → Claude CLI / Telegram
 
 ### 네이밍
 - 파일: `snake_case.py`
@@ -245,6 +249,30 @@ src/
 2. **zsh에서 `kill -9 PID`가 실패할 수 있음** → 에러 무시되어 인지 못함
 3. **Supervisor가 자식 프로세스 재생성** → 중복 발생
 
+### Detached Worker 아키텍처 (CRITICAL)
+
+자가 개발 중 Claude가 `./run.sh restart`를 직접 실행할 수 있음을 전제로 설계한다.
+
+```
+supervisor
+    └─ main(bot)
+         └─ spawn → worker_job (요청별 1회성 프로세스)
+```
+
+| 프로세스 | 책임 |
+|---------|------|
+| `src.supervisor` | `src.main` 감시/재기동 |
+| `src.main` | 텔레그램 요청 수신, 세션 결정, job 생성, worker spawn |
+| `src.worker_job` | Claude CLI 실행 owner, Telegram 직접 응답, queue drain |
+
+**규칙:**
+- 일반 채팅과 `/ai`의 Claude 요청 owner는 `src.main`이 아니라 `src.worker_job`
+- `src.main`은 Claude 응답을 기다리지 않고 `message_log` job 생성 후 즉시 반환
+- 처리 중 여부의 source of truth는 메모리가 아니라 `message_log`, `queued_messages`, `session_locks`
+- `./run.sh restart`는 `src.supervisor`/`src.main`만 재기동하고 in-flight `src.worker_job`는 유지
+- `./run.sh stop`은 `src.worker_job`까지 종료
+- "봇 재부팅 후 Claude에게 다시 물어보기" 방식은 주 복구 전략으로 사용하지 않음
+
 ## 보호 메커니즘
 
 | 계층 | 위협 | 보호 |
@@ -252,9 +280,9 @@ src/
 | 접근 | 무단 사용 | `ALLOWED_CHAT_IDS` |
 | 인증 | 권한 탈취 | `AuthManager` (30분 TTL) |
 | 동시성 | Race Condition | `_user_locks` |
-| 리소스 | 요청 폭주 | `_user_semaphores` (3개) |
-| 리소스 | 좀비 태스크 | Watchdog (30분) |
-| 데이터 | 파일 손상 | Atomic Write |
+| 세션 | 동일 세션 중복 실행 | `session_locks` |
+| 재시작 | self-restart 중 응답 유실 | detached `src.worker_job` |
+| 상태 | 처리 중/대기열 유실 | `message_log`, `queued_messages`, `session_locks` |
 | DoS | 긴 메시지 | `MAX_MESSAGE_LENGTH` (4096) |
 
 ## 로깅 시스템

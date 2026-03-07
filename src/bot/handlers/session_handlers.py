@@ -378,8 +378,6 @@ class SessionHandlers(BaseHandler):
     @authenticated_only
     async def session_list_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /session_list command - button-based session list."""
-        from ..session_queue import session_queue_manager
-
         chat_id = update.effective_chat.id
         self._setup_request_context(chat_id)
         logger.info("/session_list command received")
@@ -405,7 +403,7 @@ class SessionHandlers(BaseHandler):
                 model_badge = get_model_badge(model)
 
                 is_current = "> " if sid == current_session_id else ""
-                is_locked = session_queue_manager.is_locked(sid)
+                is_locked = self._is_session_locked(sid)
                 lock_indicator = " 🔒" if is_locked else ""
                 lines.append(f"{is_current}{model_badge} <b>{name}</b> (<code>{short_id}</code>){lock_indicator}")
 

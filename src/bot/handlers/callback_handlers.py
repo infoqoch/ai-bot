@@ -1,6 +1,4 @@
 """Callback query handlers."""
-
-import asyncio
 from datetime import datetime
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
@@ -11,7 +9,6 @@ from src.logging_config import logger, clear_context
 from src.constants import AVAILABLE_HOURS
 from ..constants import MAX_WORKSPACE_PATHS_DISPLAY, get_model_emoji, get_model_badge
 from ..formatters import truncate_message
-from ..session_queue import session_queue_manager
 from .base import BaseHandler
 
 
@@ -585,7 +582,7 @@ class CallbackHandlers(BaseHandler):
                 model_badge = get_model_badge(model)
 
                 is_current = "> " if sid == current_session_id else ""
-                is_locked = session_queue_manager.is_locked(sid)
+                is_locked = self._is_session_locked(sid)
                 lock_indicator = " 🔒" if is_locked else ""
                 lines.append(f"{is_current}{model_badge} <b>{name}</b> (<code>{short_id}</code>){lock_indicator}")
 
@@ -1284,20 +1281,31 @@ class CallbackHandlers(BaseHandler):
             session_name = session_info.get("name") or session_info["session_id"]
             model = session_info.get("model", "sonnet")
 
+            if self._is_session_locked(full_session_id):
+                await query.edit_message_text("❌ Selected session is busy now. Please resend the message.")
+                return
+
             await query.edit_message_text(
                 f"Processing in <b>{session_name}</b> session...\n\n"
                 f"<code>{message_preview}</code>",
                 parse_mode="HTML"
             )
 
-            await self._process_alternative_session_request(
-                bot=query.message.get_bot(),
-                chat_id=chat_id,
-                user_id=user_id,
-                session_id=full_session_id,
-                message=message,
-                model=model,
-            )
+            self.sessions.set_current(user_id, full_session_id)
+            try:
+                _, start_error = self._start_detached_job(
+                    chat_id=chat_id,
+                    session_id=full_session_id,
+                    message=message,
+                    model=model,
+                    workspace_path=session_info.get("workspace_path"),
+                )
+            except Exception:
+                await query.message.reply_text("❌ Failed to start detached worker.")
+                return
+
+            if start_error == "session_locked":
+                await query.message.reply_text("❌ Selected session is busy now. Please resend the message.")
 
         elif action == "n":
             model = target
@@ -1314,18 +1322,23 @@ class CallbackHandlers(BaseHandler):
                 await query.message.reply_text("❌ Session creation failed.. Please try again.")
                 return
 
-            self.sessions.create_session(user_id, new_session_id, model=model, first_message=message)
+            self.sessions.create_session(user_id, new_session_id, model=model)
             logger.info(f"New session created: {new_session_id[:8]}, model={model}")
 
-            await self._process_alternative_session_request(
-                bot=query.message.get_bot(),
-                chat_id=chat_id,
-                user_id=user_id,
-                session_id=new_session_id,
-                message=message,
-                model=model,
-                is_new_session=True,
-            )
+            try:
+                _, start_error = self._start_detached_job(
+                    chat_id=chat_id,
+                    session_id=new_session_id,
+                    message=message,
+                    model=model,
+                    workspace_path=None,
+                )
+            except Exception:
+                await query.message.reply_text("❌ Failed to start detached worker.")
+                return
+
+            if start_error == "session_locked":
+                await query.message.reply_text("❌ New session became busy unexpectedly. Please resend the message.")
 
         else:
             await query.edit_message_text("Unknown action.")
@@ -1374,31 +1387,45 @@ class CallbackHandlers(BaseHandler):
                         target_session_id = s["full_session_id"]
                         break
 
-            position = await session_queue_manager.add_to_waiting(
+            repo = self._repository
+            if not repo:
+                await query.edit_message_text("Queue unavailable.")
+                return
+
+            if not self._is_session_locked(target_session_id):
+                self._delete_temp_pending(pending_key)
+                try:
+                    _, start_error = self._start_detached_job(
+                        chat_id=chat_id,
+                        session_id=target_session_id,
+                        message=message,
+                        model=model,
+                        workspace_path=workspace_path,
+                    )
+                except Exception:
+                    await query.edit_message_text("❌ Failed to start detached worker.")
+                    return
+
+                if not start_error:
+                    await query.edit_message_text(
+                        f"<b>Processing immediately</b>\n\n"
+                        f"<code>{truncate_message(message, 40)}</code>",
+                        parse_mode="HTML"
+                    )
+                    return
+
+                logger.warning(f"Session locked during wait callback fallback: session={target_session_id[:8]}")
+
+            repo.save_queued_message(
                 session_id=target_session_id,
                 user_id=user_id,
                 chat_id=chat_id,
                 message=message,
                 model=model,
                 is_new_session=is_new_session,
-                workspace_path=workspace_path,
+                workspace_path=workspace_path or "",
             )
-
-            if not session_queue_manager.is_locked(target_session_id):
-                if await session_queue_manager.try_lock(target_session_id, user_id, message):
-                    queued_msg = await session_queue_manager.unlock(target_session_id)
-                    if queued_msg:
-                        await session_queue_manager.try_lock(target_session_id, user_id, message)
-                        self._delete_temp_pending(pending_key)
-                        await query.edit_message_text(
-                            f"<b>Processing immediately</b>\n\n"
-                            f"<code>{truncate_message(message, 40)}</code>",
-                            parse_mode="HTML"
-                        )
-                        asyncio.create_task(
-                            self._process_queued_message(bot, queued_msg)
-                        )
-                        return
+            position = len(repo.get_queued_messages_by_session(target_session_id))
 
             session_info = self.sessions.get_session_info(target_session_id)
             model_badge = get_model_badge(model)
@@ -1429,26 +1456,46 @@ class CallbackHandlers(BaseHandler):
             target_session_id = target_session["full_session_id"]
             target_model = target_session.get("model", "sonnet")
 
+            if self._is_session_locked(target_session_id):
+                self._delete_temp_pending(pending_key)
+                await self._show_session_selection_ui(
+                    update=None,
+                    user_id=user_id,
+                    message=message,
+                    current_session_id=target_session_id,
+                    model=target_model,
+                    is_new_session=False,
+                    workspace_path=target_session.get("workspace_path") or "",
+                    bot=bot,
+                    chat_id=chat_id,
+                )
+                await query.edit_message_text("Selected session became busy. Check the new prompt below.")
+                return
+
             self.sessions.set_current(user_id, target_session_id)
 
             self._delete_temp_pending(pending_key)
-            await query.edit_message_text(
-                f"<b>Session switched</b>\n\n"
-                f"<code>{truncate_message(message, 40)}</code>\n\n"
-                f"Starting processing...",
-                parse_mode="HTML"
-            )
-
-            asyncio.create_task(
-                self._process_alternative_session_request(
-                    bot=bot,
+            try:
+                _, start_error = self._start_detached_job(
                     chat_id=chat_id,
-                    user_id=user_id,
                     session_id=target_session_id,
                     message=message,
                     model=target_model,
-                    is_new_session=False,
+                    workspace_path=target_session.get("workspace_path"),
                 )
+            except Exception:
+                await query.edit_message_text("❌ Failed to start detached worker.")
+                return
+
+            if start_error == "session_locked":
+                await query.edit_message_text("❌ Selected session became busy. Please retry.")
+                return
+
+            await query.edit_message_text(
+                f"<b>Session switched</b>\n\n"
+                f"<code>{truncate_message(message, 40)}</code>\n\n"
+                f"Starting detached processing...",
+                parse_mode="HTML"
             )
             return
 
@@ -1467,19 +1514,23 @@ class CallbackHandlers(BaseHandler):
                 await query.message.reply_text("❌ Session creation failed.. Please try again.")
                 return
 
-            self.sessions.create_session(user_id, new_session_id, model=new_model, first_message=message)
+            self.sessions.create_session(user_id, new_session_id, model=new_model)
 
-            asyncio.create_task(
-                self._process_alternative_session_request(
-                    bot=bot,
+            try:
+                _, start_error = self._start_detached_job(
                     chat_id=chat_id,
-                    user_id=user_id,
                     session_id=new_session_id,
                     message=message,
                     model=new_model,
-                    is_new_session=True,
+                    workspace_path=None,
                 )
-            )
+            except Exception:
+                await query.message.reply_text("❌ Failed to start detached worker.")
+                return
+
+            if start_error == "session_locked":
+                await query.message.reply_text("❌ New session became busy unexpectedly. Please resend the message.")
+
             return
 
         await query.edit_message_text("Unknown command.")

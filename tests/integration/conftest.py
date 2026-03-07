@@ -249,7 +249,7 @@ async def handlers(
     plugin_loader,
 ) -> BotHandlers:
     """BotHandlers 인스턴스."""
-    return BotHandlers(
+    handler = BotHandlers(
         session_service=session_store,
         claude_client=mock_claude,
         auth_manager=auth_manager,
@@ -257,6 +257,8 @@ async def handlers(
         allowed_chat_ids=[],  # 빈 리스트 = 모두 허용
         plugin_loader=plugin_loader,
     )
+    handler._spawn_detached_worker = MagicMock(return_value=os.getpid())
+    return handler
 
 
 @pytest.fixture

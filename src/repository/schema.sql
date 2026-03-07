@@ -153,6 +153,21 @@ CREATE TABLE IF NOT EXISTS queued_messages (
 CREATE INDEX IF NOT EXISTS idx_message_log_chat_id ON message_log(chat_id);
 CREATE INDEX IF NOT EXISTS idx_message_log_processed ON message_log(processed);
 CREATE INDEX IF NOT EXISTS idx_message_log_request_at ON message_log(request_at);
+CREATE INDEX IF NOT EXISTS idx_queued_messages_session_id ON queued_messages(session_id);
+CREATE INDEX IF NOT EXISTS idx_queued_messages_expires_at ON queued_messages(expires_at);
+
+-- session_locks: detached worker ownership for Claude processing
+CREATE TABLE IF NOT EXISTS session_locks (
+    session_id TEXT PRIMARY KEY,
+    job_id INTEGER NOT NULL,
+    worker_pid INTEGER,
+    acquired_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+    FOREIGN KEY (job_id) REFERENCES message_log(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_locks_job_id ON session_locks(job_id);
+CREATE INDEX IF NOT EXISTS idx_session_locks_worker_pid ON session_locks(worker_pid);
 
 -- Triggers for updated_at
 CREATE TRIGGER IF NOT EXISTS update_users_timestamp
@@ -160,4 +175,3 @@ AFTER UPDATE ON users
 BEGIN
     UPDATE users SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
-

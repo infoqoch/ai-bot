@@ -31,7 +31,7 @@ class TestClaudeErrors:
         await wait_for_handlers(handlers)
 
         # 에러 메시지 확인
-        assert context.bot.send_message.called or update.message.reply_text.called
+        assert handlers._spawn_detached_worker.called or update.message.reply_text.called
 
     @pytest.mark.asyncio
     async def test_cli_error_shows_message(self, handlers, session_store):
@@ -44,7 +44,7 @@ class TestClaudeErrors:
         await handlers.handle_message(update, context)
         await wait_for_handlers(handlers)
 
-        assert context.bot.send_message.called or update.message.reply_text.called
+        assert handlers._spawn_detached_worker.called or update.message.reply_text.called
 
     @pytest.mark.asyncio
     async def test_session_not_found_error(self, handlers, session_store):
@@ -58,7 +58,7 @@ class TestClaudeErrors:
         await wait_for_handlers(handlers)
 
         # 새 세션 생성 또는 에러 메시지
-        assert context.bot.send_message.called or update.message.reply_text.called
+        assert handlers._spawn_detached_worker.called or update.message.reply_text.called
 
     @pytest.mark.asyncio
     async def test_unknown_error_handled(self, handlers, session_store):
@@ -71,7 +71,7 @@ class TestClaudeErrors:
         await handlers.handle_message(update, context)
         await wait_for_handlers(handlers)
 
-        assert context.bot.send_message.called or update.message.reply_text.called
+        assert handlers._spawn_detached_worker.called or update.message.reply_text.called
 
 
 class TestExceptionHandling:
@@ -224,4 +224,4 @@ class TestRecovery:
         await wait_for_handlers(handlers)
 
         # 두 번째는 정상 처리되어야 함
-        assert context2.bot.send_message.called or update2.message.reply_text.called
+        assert handlers._spawn_detached_worker.called or update2.message.reply_text.called

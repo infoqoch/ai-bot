@@ -1106,6 +1106,14 @@ class Repository:
         self._conn.commit()
         return cursor.lastrowid or 0
 
+    def get_message_log(self, queue_id: int) -> Optional[dict[str, Any]]:
+        """Get message_log row by ID."""
+        row = self._conn.execute(
+            "SELECT * FROM message_log WHERE id = ?",
+            (queue_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
     def get_next_pending_message(self, chat_id: int) -> Optional[dict[str, Any]]:
         """Get next unprocessed message for chat. Returns None if queue empty."""
         cursor = self._conn.execute(
@@ -1130,6 +1138,16 @@ class Repository:
         self._conn.commit()
         return cursor.rowcount > 0
 
+    def claim_pending_message(self, queue_id: int) -> bool:
+        """Atomically claim a pending message (processed=0 -> 1)."""
+        cursor = self._conn.execute(
+            """UPDATE message_log SET processed = 1
+               WHERE id = ? AND processed = 0""",
+            (queue_id,),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
     def complete_message(
         self,
         queue_id: int,
@@ -1145,6 +1163,18 @@ class Repository:
         )
         self._conn.commit()
         return cursor.rowcount > 0
+
+    def list_processing_messages_by_user(self, user_id: str) -> list[dict[str, Any]]:
+        """List active processing message_log rows for a user."""
+        rows = self._conn.execute(
+            """SELECT m.*, s.name AS session_name
+               FROM message_log m
+               JOIN sessions s ON s.id = m.session_id
+               WHERE s.user_id = ? AND m.processed = 1 AND s.deleted = 0
+               ORDER BY m.request_at ASC""",
+            (user_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
 
     def get_pending_message_count(self, chat_id: int) -> int:
         """Get count of pending messages for chat."""
@@ -1344,10 +1374,40 @@ class Repository:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def list_queued_messages_by_user(self, user_id: str) -> list[dict[str, Any]]:
+        """List queued messages for a user across sessions."""
+        now = datetime.now().isoformat()
+        rows = self._conn.execute(
+            """SELECT q.*, s.name AS session_name
+               FROM queued_messages q
+               JOIN sessions s ON s.id = q.session_id
+               WHERE s.user_id = ? AND q.expires_at > ? AND s.deleted = 0
+               ORDER BY q.id ASC""",
+            (user_id, now),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
     def delete_queued_message(self, queue_id: int) -> None:
         """큐 메시지 삭제."""
         self._conn.execute("DELETE FROM queued_messages WHERE id = ?", (queue_id,))
         self._conn.commit()
+
+    def pop_next_queued_message(self, session_id: str) -> Optional[dict[str, Any]]:
+        """Pop the oldest unexpired queued message for a session."""
+        now = datetime.now().isoformat()
+        row = self._conn.execute(
+            """SELECT * FROM queued_messages
+               WHERE session_id = ? AND expires_at > ?
+               ORDER BY id ASC LIMIT 1""",
+            (session_id, now),
+        ).fetchone()
+        if not row:
+            return None
+
+        result = dict(row)
+        self._conn.execute("DELETE FROM queued_messages WHERE id = ?", (row["id"],))
+        self._conn.commit()
+        return result
 
     def clear_expired_queued_messages(self) -> int:
         """만료된 큐 메시지 정리."""
@@ -1358,3 +1418,95 @@ class Repository:
         )
         self._conn.commit()
         return cursor.rowcount
+
+    # ── session_locks ─────────────────────────────────────────
+
+    def reserve_session_lock(self, session_id: str, job_id: int) -> bool:
+        """Reserve a session lock before spawning a detached worker."""
+        try:
+            self._conn.execute(
+                """INSERT INTO session_locks (session_id, job_id, worker_pid, acquired_at)
+                   VALUES (?, ?, NULL, ?)""",
+                (session_id, job_id, self._now()),
+            )
+            self._conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+    def attach_worker_to_session_lock(self, session_id: str, job_id: int, worker_pid: int) -> bool:
+        """Attach a spawned worker PID to a reserved session lock."""
+        cursor = self._conn.execute(
+            """UPDATE session_locks
+               SET worker_pid = ?
+               WHERE session_id = ? AND job_id = ? AND worker_pid IS NULL""",
+            (worker_pid, session_id, job_id),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def get_session_lock(self, session_id: str) -> Optional[dict[str, Any]]:
+        """Get active session lock by session_id."""
+        row = self._conn.execute(
+            "SELECT * FROM session_locks WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def list_session_locks_by_user(self, user_id: str) -> list[dict[str, Any]]:
+        """List active session locks for a user."""
+        rows = self._conn.execute(
+            """SELECT l.*, s.name AS session_name, s.model AS session_model
+               FROM session_locks l
+               JOIN sessions s ON s.id = l.session_id
+               WHERE s.user_id = ? AND s.deleted = 0
+               ORDER BY l.acquired_at ASC""",
+            (user_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_all_session_locks(self) -> list[dict[str, Any]]:
+        """List all active session locks."""
+        rows = self._conn.execute(
+            """SELECT l.*, s.user_id, s.name AS session_name, s.model AS session_model
+               FROM session_locks l
+               JOIN sessions s ON s.id = l.session_id
+               WHERE s.deleted = 0
+               ORDER BY l.acquired_at ASC"""
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def release_session_lock(self, session_id: str, job_id: Optional[int] = None) -> bool:
+        """Release a session lock. If job_id is given, require it to match."""
+        if job_id is None:
+            cursor = self._conn.execute(
+                "DELETE FROM session_locks WHERE session_id = ?",
+                (session_id,),
+            )
+        else:
+            cursor = self._conn.execute(
+                "DELETE FROM session_locks WHERE session_id = ? AND job_id = ?",
+                (session_id, job_id),
+            )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def clear_unattached_session_locks(self, max_age_seconds: int = 60) -> list[dict[str, Any]]:
+        """Remove stale lock reservations that never attached to a worker."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)).isoformat()
+        rows = self._conn.execute(
+            """SELECT * FROM session_locks
+               WHERE worker_pid IS NULL AND acquired_at < ?""",
+            (cutoff,),
+        ).fetchall()
+
+        stale = [dict(row) for row in rows]
+        if stale:
+            self._conn.execute(
+                """DELETE FROM session_locks
+                   WHERE worker_pid IS NULL AND acquired_at < ?""",
+                (cutoff,),
+            )
+            self._conn.commit()
+
+        return stale

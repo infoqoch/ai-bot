@@ -1,6 +1,6 @@
 """Admin command handlers."""
 
-import time
+from datetime import datetime, timezone
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -8,7 +8,6 @@ from telegram.ext import ContextTypes
 from src.logging_config import logger, clear_context
 from ..constants import MAX_LOCK_STATUS_PREVIEW
 from ..middleware import authorized_only
-from ..session_queue import session_queue_manager
 from .base import BaseHandler
 
 
@@ -220,32 +219,29 @@ class AdminHandlers(BaseHandler):
 
     def _build_tasks_status(self, user_id: str) -> tuple[str, list]:
         """Build lock status text and buttons (including queue)."""
-        user_tasks = [
-            info for info in self._active_tasks.values()
-            if info.user_id == user_id
-        ]
-
-        if user_id in self._user_semaphores:
-            semaphore = self._user_semaphores[user_id]
-            available = semaphore._value
-        else:
-            available = 3
-        total = 3
-
         lines = []
+        repo = self._repository
+        processing_rows = repo.list_processing_messages_by_user(user_id) if repo else []
+        active_rows = []
 
-        if not user_tasks:
+        for row in processing_rows:
+            if self._get_live_session_lock(row["session_id"]):
+                active_rows.append(row)
+
+        if not active_rows:
             lines.append(f"<b>No active tasks</b>")
         else:
-            lines.append(f"<b>Processing</b> ({len(user_tasks)}/{total})")
+            lines.append(f"<b>Processing</b> ({len(active_rows)})")
 
-            for i, info in enumerate(user_tasks, 1):
-                elapsed = time.time() - info.started_at
+            for i, row in enumerate(active_rows, 1):
+                started_at = datetime.fromisoformat(row["request_at"])
+                elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
                 elapsed_str = f"{int(elapsed // 60)}m {int(elapsed % 60)}s" if elapsed >= 60 else f"{int(elapsed)}s"
 
-                session_name = self.sessions.get_session_name(info.session_id) or info.session_id[:8]
-
-                msg_preview = info.message[:MAX_LOCK_STATUS_PREVIEW] + "..." if len(info.message) > MAX_LOCK_STATUS_PREVIEW else info.message
+                session_name = row.get("session_name") or row["session_id"][:8]
+                msg_preview = row["request"]
+                if len(msg_preview) > MAX_LOCK_STATUS_PREVIEW:
+                    msg_preview = msg_preview[:MAX_LOCK_STATUS_PREVIEW] + "..."
                 msg_preview = msg_preview.replace("<", "&lt;").replace(">", "&gt;")
 
                 lines.append(
@@ -254,31 +250,23 @@ class AdminHandlers(BaseHandler):
                     f"   {msg_preview or '(no message)'}"
                 )
 
-        all_sessions = self.sessions.list_sessions(user_id)
-        total_waiting = 0
+        waiting_rows = repo.list_queued_messages_by_user(user_id) if repo else []
+        total_waiting = len(waiting_rows)
         waiting_details = []
 
-        for s in all_sessions:
-            sid = s["full_session_id"]
-            state = session_queue_manager.get_status(sid)
-            if state and state.waiting_queue:
-                queue_size = len(state.waiting_queue)
-                total_waiting += queue_size
-                session_name = s.get("name") or s["session_id"]
-                for i, queued in enumerate(state.waiting_queue[:3], 1):
-                    msg_preview = queued.message[:30] + "..." if len(queued.message) > 30 else queued.message
-                    msg_preview = msg_preview.replace("<", "&lt;").replace(">", "&gt;")
-                    waiting_details.append(f"- <code>{session_name}</code>: {msg_preview}")
-                if queue_size > 3:
-                    waiting_details.append(f"  ... +{queue_size - 3} more")
+        for queued in waiting_rows[:8]:
+            session_name = queued.get("session_name") or queued["session_id"][:8]
+            msg_preview = queued["message"][:30] + "..." if len(queued["message"]) > 30 else queued["message"]
+            msg_preview = msg_preview.replace("<", "&lt;").replace(">", "&gt;")
+            waiting_details.append(f"- <code>{session_name}</code>: {msg_preview}")
 
         if total_waiting > 0:
             lines.append(f"\n\n<b>Queue</b> ({total_waiting})")
-            lines.extend([f"\n{d}" for d in waiting_details[:8]])
-            if len(waiting_details) > 8:
-                lines.append(f"\n  ... and {len(waiting_details) - 8} more")
+            lines.extend([f"\n{d}" for d in waiting_details])
+            if total_waiting > len(waiting_details):
+                lines.append(f"\n  ... and {total_waiting - len(waiting_details)} more")
 
-        lines.append(f"\n\nSlots: {available}/{total} available")
+        lines.append(f"\n\nDetached workers: {len(active_rows)}")
         text = "".join(lines) if lines else "No status info"
 
         keyboard = [[

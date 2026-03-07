@@ -365,11 +365,11 @@ class TestSendMessageToChat:
 
 
 class TestHandleMessage:
-    """handle_message 메서드 테스트 (Fire-and-Forget 패턴)."""
+    """handle_message 메서드 테스트 (detached worker 패턴)."""
 
     @pytest.mark.asyncio
-    async def test_handle_message_creates_background_task(self, handlers, mock_session_service):
-        """메시지가 백그라운드 태스크로 처리되는지 확인."""
+    async def test_handle_message_starts_detached_job(self, handlers, mock_session_service):
+        """메시지가 detached worker job으로 시작되는지 확인."""
         update = MagicMock()
         update.effective_chat.id = 12345
         update.message.text = "안녕하세요"
@@ -380,15 +380,16 @@ class TestHandleMessage:
 
         mock_session_service.get_current_session_id.return_value = "existing-session"
 
-        with patch("asyncio.create_task") as mock_create_task:
+        with patch.object(handlers, "_is_session_locked", return_value=False), patch.object(
+            handlers, "_start_detached_job", return_value=(1, None)
+        ) as mock_start_job:
             await handlers.handle_message(update, context)
 
-            # Fire-and-forget 백그라운드 태스크 생성 확인
-            mock_create_task.assert_called_once()
+            mock_start_job.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_handle_message_returns_immediately(self, handlers, mock_session_service):
-        """핸들러가 백그라운드 태스크 생성 후 즉시 리턴."""
+        """핸들러가 detached job 시작 후 즉시 리턴."""
         update = MagicMock()
         update.effective_chat.id = 12345
         update.message.text = "질문"
@@ -399,11 +400,12 @@ class TestHandleMessage:
 
         mock_session_service.get_current_session_id.return_value = "session-123"
 
-        with patch("asyncio.create_task") as mock_create_task:
+        with patch.object(handlers, "_is_session_locked", return_value=False), patch.object(
+            handlers, "_start_detached_job", return_value=(1, None)
+        ) as mock_start_job:
             await handlers.handle_message(update, context)
 
-            # 백그라운드 태스크가 생성되었는지 확인
-            mock_create_task.assert_called_once()
+            mock_start_job.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_handle_message_truncates_long_message(self, handlers, mock_session_service):
@@ -417,11 +419,12 @@ class TestHandleMessage:
 
         mock_session_service.get_current_session_id.return_value = "session-123"
 
-        with patch("asyncio.create_task") as mock_create_task:
+        with patch.object(handlers, "_is_session_locked", return_value=False), patch.object(
+            handlers, "_start_detached_job", return_value=(1, None)
+        ) as mock_start_job:
             await handlers.handle_message(update, context)
 
-            # 백그라운드 태스크 생성 확인
-            mock_create_task.assert_called_once()
+            assert mock_start_job.call_args.kwargs["message"] == "A" * MAX_MESSAGE_LENGTH
 
     @pytest.mark.asyncio
     async def test_handle_message_new_session_creation(
@@ -440,14 +443,14 @@ class TestHandleMessage:
         mock_session_service.get_current_session_id.return_value = None
         mock_claude_client.create_session = AsyncMock(return_value="new-session-123")
 
-        with patch("asyncio.create_task"):
+        with patch.object(handlers, "_is_session_locked", return_value=False), patch.object(
+            handlers, "_start_detached_job", return_value=(1, None)
+        ):
             await handlers.handle_message(update, context)
 
             # 새 세션 생성 확인
             mock_claude_client.create_session.assert_called_once()
-            mock_session_service.create_session.assert_called_once_with(
-                "12345", "new-session-123", first_message="첫 질문"
-            )
+            mock_session_service.create_session.assert_called_once_with("12345", "new-session-123")
 
     @pytest.mark.asyncio
     async def test_handle_message_uses_existing_session(
@@ -464,7 +467,9 @@ class TestHandleMessage:
         # 기존 세션 존재
         mock_session_service.get_current_session_id.return_value = "existing-session"
 
-        with patch("asyncio.create_task"):
+        with patch.object(handlers, "_is_session_locked", return_value=False), patch.object(
+            handlers, "_start_detached_job", return_value=(1, None)
+        ):
             await handlers.handle_message(update, context)
 
             # 새 세션 생성하지 않음
@@ -510,7 +515,9 @@ class TestUserLock:
 
         mock_claude_client.create_session = track_create_session
 
-        with patch("asyncio.create_task"):
+        with patch.object(handlers, "_is_session_locked", return_value=False), patch.object(
+            handlers, "_start_detached_job", return_value=(1, None)
+        ):
             # 동시에 두 메시지 처리
             await asyncio.gather(
                 handlers.handle_message(update1, context1),
