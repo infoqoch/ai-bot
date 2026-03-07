@@ -103,6 +103,48 @@ class PluginLoader:
         loaded = []
         logger.trace(f"load_all() 시작 - base_dir={self.base_dir}")
 
+        # 충돌 감지용 레지스트리 (name/prefix/marker → 등록한 플러그인 name)
+        registered_names: dict[str, str] = {}
+        registered_callback_prefixes: dict[str, str] = {}
+        registered_force_reply_markers: dict[str, str] = {}
+
+        def try_register(plugin: Plugin, location: str) -> bool:
+            """플러그인 충돌 여부 확인 후 등록. 충돌 시 False 반환."""
+            # name 중복 체크
+            if plugin.name in registered_names:
+                logger.warning(
+                    f"Plugin '{plugin.name}' skipped: name '{plugin.name}' already registered by '{registered_names[plugin.name]}'"
+                )
+                return False
+
+            # CALLBACK_PREFIX 중복 체크 (빈 문자열 제외)
+            if plugin.CALLBACK_PREFIX and plugin.CALLBACK_PREFIX in registered_callback_prefixes:
+                existing = registered_callback_prefixes[plugin.CALLBACK_PREFIX]
+                logger.warning(
+                    f"Plugin '{plugin.name}' skipped: CALLBACK_PREFIX '{plugin.CALLBACK_PREFIX}' already registered by '{existing}'"
+                )
+                return False
+
+            # FORCE_REPLY_MARKER 중복 체크 (빈 문자열 제외)
+            if plugin.FORCE_REPLY_MARKER and plugin.FORCE_REPLY_MARKER in registered_force_reply_markers:
+                existing = registered_force_reply_markers[plugin.FORCE_REPLY_MARKER]
+                logger.warning(
+                    f"Plugin '{plugin.name}' skipped: FORCE_REPLY_MARKER '{plugin.FORCE_REPLY_MARKER}' already registered by '{existing}'"
+                )
+                return False
+
+            # 충돌 없음 → 등록
+            registered_names[plugin.name] = plugin.name
+            if plugin.CALLBACK_PREFIX:
+                registered_callback_prefixes[plugin.CALLBACK_PREFIX] = plugin.name
+            if plugin.FORCE_REPLY_MARKER:
+                registered_force_reply_markers[plugin.FORCE_REPLY_MARKER] = plugin.name
+
+            self.plugins.append(plugin)
+            loaded.append(location)
+            logger.info(f"플러그인 로드됨: {location}")
+            return True
+
         # builtin 먼저, custom 나중에 (덮어쓰기 가능)
         for plugin_dir in ["builtin", "custom"]:
             dir_path = self.base_dir / "plugins" / plugin_dir
@@ -121,9 +163,8 @@ class PluginLoader:
                         logger.trace(f"플러그인 패키지 발견: {item.name}")
                         plugin = self._load_plugin_from_package(item)
                         if plugin:
-                            self.plugins.append(plugin)
-                            loaded.append(f"{plugin_dir}/{plugin.name}")
-                            logger.info(f"플러그인 로드됨: {plugin_dir}/{plugin.name}")
+                            if not try_register(plugin, f"{plugin_dir}/{plugin.name}"):
+                                pass  # 충돌 경고는 try_register 내부에서 출력
                         else:
                             logger.warning(f"플러그인 로드 실패: {item.name}")
 
@@ -135,9 +176,7 @@ class PluginLoader:
                 logger.trace(f"플러그인 파일 발견: {py_file.name}")
                 plugin = self._load_plugin_safe(py_file)
                 if plugin:
-                    self.plugins.append(plugin)
-                    loaded.append(f"{plugin_dir}/{plugin.name}")
-                    logger.info(f"플러그인 로드됨: {plugin_dir}/{plugin.name}")
+                    try_register(plugin, f"{plugin_dir}/{plugin.name}")
 
         logger.info(f"플러그인 로드 완료: {len(loaded)}개")
         logger.trace(f"로드된 플러그인: {loaded}")

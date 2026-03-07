@@ -225,6 +225,37 @@ class BaseHandler:
         logger.trace(f"Authentication check result: {result}")
         return result
 
+    @staticmethod
+    def _split_message(text: str, max_length: int = 4000) -> list[str]:
+        """Split text into chunks no longer than max_length.
+
+        Splits preferably at the last newline within the max_length window.
+        Falls back to hard character split if no newline is found.
+        Empty chunks are never returned.
+        """
+        if len(text) <= max_length:
+            return [text]
+
+        chunks: list[str] = []
+        remaining = text
+
+        while len(remaining) > max_length:
+            window = remaining[:max_length]
+            split_pos = window.rfind("\n")
+            if split_pos > 0:
+                chunk = remaining[:split_pos]
+                remaining = remaining[split_pos + 1:]
+            else:
+                chunk = window
+                remaining = remaining[max_length:]
+            if chunk:
+                chunks.append(chunk)
+
+        if remaining:
+            chunks.append(remaining)
+
+        return chunks
+
     async def _send_message_to_chat(
         self,
         bot,
@@ -235,37 +266,25 @@ class BaseHandler:
         """Send message directly to chat_id (split if too long)."""
         logger.trace(f"_send_message_to_chat - length={len(text)}, max={max_length}")
 
-        if len(text) <= max_length:
-            try:
-                await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
-                logger.trace("Message sent successfully (HTML)")
-            except Exception as e:
-                logger.trace(f"HTML send failed, retrying as plain text: {e}")
-                await bot.send_message(chat_id=chat_id, text=text)
-            return
-
-        chunks = [text[i:i + max_length] for i in range(0, len(text), max_length)]
+        chunks = self._split_message(text, max_length)
         logger.trace(f"Message split: {len(chunks)} chunks")
 
         for i, chunk in enumerate(chunks):
             logger.trace(f"Sending chunk {i+1}/{len(chunks)}")
             try:
                 await bot.send_message(chat_id=chat_id, text=chunk, parse_mode="HTML")
-            except Exception:
+                if i == 0:
+                    logger.trace("Message sent successfully (HTML)")
+            except Exception as e:
+                if i == 0:
+                    logger.trace(f"HTML send failed, retrying as plain text: {e}")
                 await bot.send_message(chat_id=chat_id, text=chunk)
 
     async def _send_long_message(self, update: Update, text: str, max_length: int = 4000) -> None:
         """Send message, splitting if too long. (Legacy - uses update.reply_text)"""
         logger.trace(f"_send_long_message - length={len(text)}")
 
-        if len(text) <= max_length:
-            try:
-                await update.message.reply_text(text, parse_mode="HTML")
-            except Exception:
-                await update.message.reply_text(text)
-            return
-
-        chunks = [text[i:i + max_length] for i in range(0, len(text), max_length)]
+        chunks = self._split_message(text, max_length)
         logger.trace(f"Message split: {len(chunks)} chunks")
 
         for chunk in chunks:
