@@ -81,33 +81,55 @@ class MessageHandlers(BaseHandler):
                         return
 
                     logger.trace(f"Saving session - session_id={session_id[:8]}")
-                    self.sessions.create_session(user_id, session_id, first_message=message)
-                    is_new_session = True
+                    self.sessions.create_session(user_id, session_id)
                 finally:
                     self._creating_sessions.discard(user_id)
-            else:
-                is_new_session = False
 
-        model = self.sessions.get_session_model(session_id)
-        workspace_path = self.sessions.get_workspace_path(session_id)
+            model = self.sessions.get_session_model(session_id) or "sonnet"
+            workspace_path = self.sessions.get_workspace_path(session_id)
+
+            if self._is_session_locked(session_id):
+                await self._show_session_selection_ui(
+                    update=update,
+                    user_id=user_id,
+                    message=message,
+                    current_session_id=session_id,
+                    model=model,
+                    is_new_session=False,
+                    workspace_path=workspace_path or "",
+                )
+                clear_context()
+                return
+
+            try:
+                _, start_error = self._start_detached_job(
+                    chat_id=chat_id,
+                    session_id=session_id,
+                    message=message,
+                    model=model,
+                    workspace_path=workspace_path,
+                )
+            except Exception:
+                await update.message.reply_text("❌ Failed to start detached worker. Please try again.")
+                clear_context()
+                return
+
+            if start_error == "session_locked":
+                await self._show_session_selection_ui(
+                    update=update,
+                    user_id=user_id,
+                    message=message,
+                    current_session_id=session_id,
+                    model=model,
+                    is_new_session=False,
+                    workspace_path=workspace_path or "",
+                )
+                clear_context()
+                return
 
         set_session_id(session_id)
-        logger.info(f"Session decided - model={model}, new={is_new_session}, workspace={workspace_path or '(none)'}")
-
-        # Fire-and-forget: 백그라운드에서 Claude 호출
-        task = asyncio.create_task(
-            self._process_claude_request_with_semaphore(
-                bot=context.bot,
-                chat_id=chat_id,
-                user_id=user_id,
-                session_id=session_id,
-                message=message,
-                is_new_session=is_new_session,
-                trace_id=trace_id,
-                model=model,
-            )
-        )
-        logger.trace("/ai handler complete - background task created")
+        logger.info(f"Detached /ai job started: model={model}, workspace={workspace_path or '(none)'}")
+        logger.trace("/ai handler complete - detached worker spawned")
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle regular text messages.
@@ -115,7 +137,7 @@ class MessageHandlers(BaseHandler):
         Fire-and-Forget pattern:
         1. Auth/authorization check
         2. Session decision (Lock protected)
-        3. Background task for Claude call + response
+        3. Spawn detached worker for Claude call + Telegram response
         4. Handler returns immediately
         """
         chat_id = update.effective_chat.id
@@ -254,48 +276,55 @@ class MessageHandlers(BaseHandler):
                         return
 
                     logger.trace(f"Saving session - session_id={session_id[:8]}")
-                    self.sessions.create_session(user_id, session_id, first_message=message)
-                    is_new_session = True
+                    self.sessions.create_session(user_id, session_id)
                 finally:
                     self._creating_sessions.discard(user_id)
-            else:
-                is_new_session = False
+            model = self.sessions.get_session_model(session_id) or "sonnet"
+            workspace_path = self.sessions.get_workspace_path(session_id)
 
-        model = self.sessions.get_session_model(session_id)
-        workspace_path = self.sessions.get_workspace_path(session_id)
+            if self._is_session_locked(session_id):
+                await self._show_session_selection_ui(
+                    update=update,
+                    user_id=user_id,
+                    message=message,
+                    current_session_id=session_id,
+                    model=model,
+                    is_new_session=False,
+                    workspace_path=workspace_path or "",
+                )
+                clear_context()
+                return
+
+            try:
+                _, start_error = self._start_detached_job(
+                    chat_id=chat_id,
+                    session_id=session_id,
+                    message=message,
+                    model=model,
+                    workspace_path=workspace_path,
+                )
+            except Exception:
+                await update.message.reply_text("❌ Failed to start detached worker. Please try again.")
+                clear_context()
+                return
+
+            if start_error == "session_locked":
+                await self._show_session_selection_ui(
+                    update=update,
+                    user_id=user_id,
+                    message=message,
+                    current_session_id=session_id,
+                    model=model,
+                    is_new_session=False,
+                    workspace_path=workspace_path or "",
+                )
+                clear_context()
+                return
 
         set_session_id(session_id)
 
-        logger.info(f"Message accepted: model={model}, new={is_new_session}, workspace={workspace_path or '(none)'}")
-
-        # message_log에 기록 (재시작 시 재처리용)
-        queue_id = None
-        repo = self._repository
-        if repo:
-            queue_id = repo.enqueue_message(
-                chat_id=chat_id,
-                session_id=session_id,
-                request=message,
-                model=model or "sonnet",
-                workspace_path=workspace_path,
-            )
-            logger.debug(f"message_log 기록 - queue_id={queue_id}")
-
-        # Fire-and-forget: 백그라운드에서 Claude 호출
-        task = asyncio.create_task(
-            self._process_claude_request_with_semaphore(
-                bot=context.bot,
-                chat_id=chat_id,
-                user_id=user_id,
-                session_id=session_id,
-                message=message,
-                is_new_session=is_new_session,
-                trace_id=trace_id,
-                model=model,
-                queue_id=queue_id,
-            )
-        )
-        logger.trace("handle_message complete - background task created")
+        logger.info(f"Detached message job started: model={model}, workspace={workspace_path or '(none)'}")
+        logger.trace("handle_message complete - detached worker spawned")
 
     async def _process_claude_request_with_semaphore(
         self,
@@ -498,7 +527,7 @@ class MessageHandlers(BaseHandler):
 
             # Complete message in message_log (processed=1 → 2)
             if queue_id and repo:
-                repo.complete_message(queue_id, response=response[:500] if response else None)
+                repo.complete_message(queue_id, response=response if response else None)
 
         except Exception as e:
             logger.exception(f"Claude processing failed: {e}")
@@ -540,8 +569,8 @@ class MessageHandlers(BaseHandler):
         if update:
             chat_id = update.effective_chat.id
 
-        current_state = session_queue_manager.get_status(current_session_id)
-        queue_size = current_state.get_queue_size() if current_state else 0
+        repo = self._repository
+        queue_size = len(repo.get_queued_messages_by_session(current_session_id)) if repo else 0
 
         all_sessions = self.sessions.list_sessions(user_id)
         available_sessions = []
@@ -550,7 +579,7 @@ class MessageHandlers(BaseHandler):
             sid = s["full_session_id"]
             if sid == current_session_id:
                 continue
-            if not session_queue_manager.is_locked(sid):
+            if not self._is_session_locked(sid):
                 history = self.sessions.get_session_history(sid)
                 recent = history[-2:] if history else []
                 available_sessions.append({

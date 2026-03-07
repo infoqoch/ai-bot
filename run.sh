@@ -45,9 +45,16 @@ _rotate_logs() {
 }
 
 _kill_all_instances() {
-    # 모든 관련 프로세스 강제 종료 (supervisor + main)
+    # 모든 관련 프로세스 강제 종료
+    # $1=1 이면 detached worker까지 종료, 기본은 supervisor/main만 종료
+    local include_workers="${1:-0}"
+    local pattern='python.*src\.(supervisor|main)'
+    if [ "$include_workers" = "1" ]; then
+        pattern='python.*src\.(supervisor|main|worker_job)'
+    fi
+
     # macOS 호환: pgrep 대신 ps + grep + awk 사용
-    local pids=$(ps aux | grep -E 'python.*src\.(supervisor|main)' | grep -v grep | awk '{print $2}')
+    local pids=$(ps aux | grep -E "$pattern" | grep -v grep | awk '{print $2}')
 
     if [ -n "$pids" ]; then
         for pid in $pids; do
@@ -99,7 +106,7 @@ case "$1" in
     ;;
   stop)
     if _is_running; then
-        _kill_all_instances
+        _kill_all_instances 1
         echo "✅ 봇 중지됨"
     else
         # 좀비 파일 정리
@@ -109,7 +116,7 @@ case "$1" in
     ;;
   restart)
     echo "🔄 봇 재시작 중..."
-    $0 stop
+    _kill_all_instances 0
     sleep 1
     $0 start
     ;;
@@ -118,7 +125,7 @@ case "$1" in
         echo "✅ 봇 실행 중"
         echo ""
         echo "프로세스:"
-        ps aux | grep -E "python.*src\.(supervisor|main)" | grep -v grep
+        ps aux | grep -E "python.*src\.(supervisor|main|worker_job)" | grep -v grep
         # 중복 프로세스 경고
         proc_count=$(pgrep -f "python.*src\.(supervisor|main)" 2>/dev/null | wc -l | tr -d ' ')
         if [ "$proc_count" -gt 2 ]; then

@@ -32,7 +32,7 @@ class TestBasicMessageFlow:
         await wait_for_handlers(handlers)
 
         # Claude가 호출되거나 응답이 전송되어야 함
-        assert mock_claude.chat.called or context.bot.send_message.called
+        assert handlers._spawn_detached_worker.called
 
     @pytest.mark.asyncio
     async def test_message_without_session_creates_one(self, handlers, mock_claude, session_store):
@@ -43,7 +43,7 @@ class TestBasicMessageFlow:
         await wait_for_handlers(handlers)
 
         # 응답이 있어야 함 (세션 생성 또는 에러)
-        assert context.bot.send_message.called or update.message.reply_text.called
+        assert handlers._spawn_detached_worker.called or update.message.reply_text.called
 
     @pytest.mark.asyncio
     async def test_long_message_handled(self, handlers, mock_claude, session_store):
@@ -58,7 +58,7 @@ class TestBasicMessageFlow:
         await wait_for_handlers(handlers)
 
         # 에러 없이 처리되어야 함
-        assert mock_claude.chat.called or context.bot.send_message.called
+        assert handlers._spawn_detached_worker.called
 
 
 class TestClaudeResponses:
@@ -78,7 +78,7 @@ class TestClaudeResponses:
         await wait_for_handlers(handlers)
 
         # 응답 전송 확인
-        assert context.bot.send_message.called or update.message.reply_text.called
+        assert handlers._spawn_detached_worker.called
 
     @pytest.mark.asyncio
     async def test_timeout_error_response(self, handlers, session_store):
@@ -94,7 +94,7 @@ class TestClaudeResponses:
         await wait_for_handlers(handlers)
 
         # 에러 메시지가 전송되어야 함
-        assert context.bot.send_message.called or update.message.reply_text.called
+        assert handlers._spawn_detached_worker.called
 
     @pytest.mark.asyncio
     async def test_cli_error_response(self, handlers, session_store):
@@ -109,7 +109,7 @@ class TestClaudeResponses:
         await handlers.handle_message(update, context)
         await wait_for_handlers(handlers)
 
-        assert context.bot.send_message.called or update.message.reply_text.called
+        assert handlers._spawn_detached_worker.called
 
 
 class TestCallbackQueries:
@@ -194,7 +194,7 @@ class TestSpecialCharacters:
         await wait_for_handlers(handlers)
 
         # 에러 없이 처리
-        assert mock_claude.chat.called or context.bot.send_message.called
+        assert handlers._spawn_detached_worker.called
 
     @pytest.mark.asyncio
     async def test_emoji_message(self, handlers, session_store, mock_claude):
@@ -206,7 +206,7 @@ class TestSpecialCharacters:
         await handlers.handle_message(update, context)
         await wait_for_handlers(handlers)
 
-        assert mock_claude.chat.called or context.bot.send_message.called
+        assert handlers._spawn_detached_worker.called
 
     @pytest.mark.asyncio
     async def test_unicode_message(self, handlers, session_store, mock_claude):
@@ -218,7 +218,7 @@ class TestSpecialCharacters:
         await handlers.handle_message(update, context)
         await wait_for_handlers(handlers)
 
-        assert mock_claude.chat.called or context.bot.send_message.called
+        assert handlers._spawn_detached_worker.called
 
 
 class TestEmptyAndEdgeCases:
@@ -261,4 +261,4 @@ class TestEmptyAndEdgeCases:
         await wait_for_handlers(handlers)
 
         # 에러 없이 처리 (잘리거나 전체 처리)
-        assert mock_claude.chat.called or context.bot.send_message.called
+        assert handlers._spawn_detached_worker.called

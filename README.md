@@ -32,8 +32,8 @@ AI 응답은 느립니다(수십 초~수 분). 모든 요청을 Claude에 보내
     │       "메모해줘: 장보기"  → 저장 완료
     │       "서울 날씨"        → Open-Meteo API
     │
-    └─▶ [Track 2] Claude CLI  → 백그라운드 처리 (수십 초)
-            "코드 리뷰해줘"    → Fire-and-Forget
+    └─▶ [Track 2] Claude CLI  → detached worker 처리 (수십 초)
+            "코드 리뷰해줘"    → bot은 즉시 반환, worker가 끝까지 실행
 ```
 
 플러그인이 처리 가능하면 Claude를 호출하지 않아 빠르고, 처리 불가하면 Claude로 넘깁니다.
@@ -49,14 +49,24 @@ AI 응답은 느립니다(수십 초~수 분). 모든 요청을 Claude에 보내
 | **모델 변경** | `/model sonnet` - 기존 세션 모델 변경 |
 | **세션 전환** | `/s_abc123` - 다른 세션으로 전환 |
 
-### Fire-and-Forget 아키텍처
+### Detached Worker 아키텍처
 
-```python
-# 핸들러는 즉시 반환 → 텔레그램 응답 지연 없음
-task = asyncio.create_task(self._process_claude_request(...))
-self._register_task(task, user_id, session_id, trace_id)
-# Claude 응답(수 분)을 기다리지 않고 다음 메시지 처리 가능
 ```
+사용자 메시지
+    │
+    ├─▶ bot (`src.main`)
+    │     - 인증/플러그인/세션 결정
+    │     - job 저장
+    │     - `src.worker_job` spawn
+    │     - 즉시 반환
+    │
+    └─▶ detached worker (`src.worker_job`)
+          - Claude CLI 실행 owner
+          - Telegram 직접 응답
+          - 세션 queue drain
+```
+
+이 구조 덕분에 Claude가 작업 중 `./run.sh restart`를 실행해도, in-flight worker는 살아남아 응답을 끝까지 전송할 수 있습니다.
 
 ### ACTION 패턴 시스템
 
@@ -158,8 +168,9 @@ Claude 호출 없이 즉시 응답:
 
 | 문서 | 내용 |
 |------|------|
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 시스템 설계, 프로젝트 구조 |
-| [CLAUDE.md](CLAUDE.md) | AI 개발 가이드, 플러그인 작성법 |
+| [CLAUDE.md](CLAUDE.md) | 개발 규칙, 프로세스 아키텍처, 확장 인터페이스 |
+| [docs/SPEC.md](docs/SPEC.md) | UI/UX 기획, 세션/스케줄/재시작 시나리오 |
+| [docs/SPEC_PLUGINS_BUILTIN.md](docs/SPEC_PLUGINS_BUILTIN.md) | 빌트인 플러그인 기획 |
 
 ---
 

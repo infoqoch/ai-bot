@@ -132,8 +132,7 @@ class TestWeatherPlugin:
         await handlers.handle_message(update, context)
         await wait_for_handlers(handlers)
 
-        # 플러그인이 아닌 Claude가 처리해야 함
-        assert mock_claude.chat.called or context.bot.send_message.called
+        assert handlers._spawn_detached_worker.called
 
 
 class TestPluginExcludePatterns:
@@ -150,9 +149,7 @@ class TestPluginExcludePatterns:
         await handlers.handle_message(update, context)
         await wait_for_handlers(handlers)
 
-        # Claude가 호출되어야 함 (플러그인이 아닌)
-        # mock_claude.chat이 호출되었거나 send_message가 호출됨
-        assert mock_claude.chat.called or context.bot.send_message.called
+        assert handlers._spawn_detached_worker.called
 
     @pytest.mark.asyncio
     async def test_todo_translation_goes_to_claude(self, handlers, mock_claude):
@@ -162,8 +159,7 @@ class TestPluginExcludePatterns:
         await handlers.handle_message(update, context)
         await wait_for_handlers(handlers)
 
-        # Claude가 호출되어야 함
-        assert mock_claude.chat.called or context.bot.send_message.called
+        assert handlers._spawn_detached_worker.called
 
 
 class TestPluginLoader:

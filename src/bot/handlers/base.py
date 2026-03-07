@@ -1,10 +1,14 @@
 """Base handler class with common utilities."""
 
 import asyncio
+import os
 import subprocess
+import sys
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from telegram import Update
@@ -134,6 +138,147 @@ class BaseHandler:
             logger.info(f"DB에서 pending message {count}개 복원")
         return count
 
+    def _is_pid_alive(self, pid: Optional[int]) -> bool:
+        """Check whether a local process PID is still alive."""
+        if not pid or pid <= 0:
+            return False
+
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+    def _get_live_session_lock(self, session_id: str) -> Optional[dict]:
+        """Return a live detached-worker lock or clean it up if stale."""
+        repo = self._repository
+        if not repo:
+            return None
+
+        lock = repo.get_session_lock(session_id)
+        if not lock:
+            return None
+
+        worker_pid = lock.get("worker_pid")
+        if worker_pid:
+            if self._is_pid_alive(int(worker_pid)):
+                return lock
+
+            logger.warning(f"Dead detached worker lock cleaned: session={session_id[:8]}, pid={worker_pid}")
+            repo.release_session_lock(session_id, lock.get("job_id"))
+            job = repo.get_message_log(lock["job_id"])
+            if job and job["processed"] != 2:
+                repo.complete_message(lock["job_id"], error="worker_lost")
+            return None
+
+        acquired_at = lock.get("acquired_at")
+        if acquired_at:
+            age = datetime.now(timezone.utc) - datetime.fromisoformat(acquired_at)
+            if age.total_seconds() > 60:
+                logger.warning(f"Stale unattached lock cleaned: session={session_id[:8]}, job={lock['job_id']}")
+                repo.release_session_lock(session_id, lock.get("job_id"))
+                job = repo.get_message_log(lock["job_id"])
+                if job and job["processed"] != 2:
+                    repo.complete_message(lock["job_id"], error="worker_spawn_timeout")
+                return None
+
+        return lock
+
+    def _is_session_locked(self, session_id: str) -> bool:
+        """Check if a session is actively locked by a detached worker."""
+        return self._get_live_session_lock(session_id) is not None
+
+    def _spawn_detached_worker(self, job_id: int) -> int:
+        """Spawn a detached worker process for a message_log job."""
+        env = os.environ.copy()
+        env.pop("CLAUDECODE", None)
+        env.setdefault("PYTHONUNBUFFERED", "1")
+        env.setdefault("PYTHONPYCACHEPREFIX", ".build")
+        base_dir = Path(__file__).resolve().parents[3]
+
+        process = subprocess.Popen(
+            [sys.executable, "-u", "-m", "src.worker_job", "--job-id", str(job_id)],
+            cwd=str(base_dir),
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        logger.info(f"Detached worker spawned: job_id={job_id}, pid={process.pid}")
+        return process.pid
+
+    def _start_detached_job(
+        self,
+        chat_id: int,
+        session_id: str,
+        message: str,
+        model: str,
+        workspace_path: Optional[str] = None,
+    ) -> tuple[Optional[int], Optional[str]]:
+        """Create a message_log job, reserve the session lock, and spawn a worker."""
+        repo = self._repository
+        if not repo:
+            raise RuntimeError("Repository not initialized")
+
+        job_id = repo.enqueue_message(
+            chat_id=chat_id,
+            session_id=session_id,
+            request=message,
+            model=model or "sonnet",
+            workspace_path=workspace_path,
+        )
+
+        if not repo.reserve_session_lock(session_id, job_id):
+            repo.complete_message(job_id, error="session_locked_before_spawn")
+            return None, "session_locked"
+
+        try:
+            worker_pid = self._spawn_detached_worker(job_id)
+            attached = repo.attach_worker_to_session_lock(session_id, job_id, worker_pid)
+            if not attached:
+                lock = repo.get_session_lock(session_id)
+                if not lock or lock["job_id"] != job_id:
+                    raise RuntimeError("failed to attach worker to reserved lock")
+        except Exception as e:
+            repo.release_session_lock(session_id, job_id)
+            repo.complete_message(job_id, error=f"worker_spawn_failed: {e}")
+            logger.exception(f"Detached worker spawn failed: job_id={job_id}, error={e}")
+            raise
+
+        return job_id, None
+
+    async def _cleanup_detached_jobs(self, bot) -> int:
+        """Cleanup stale lock reservations or dead detached workers after bot startup."""
+        repo = self._repository
+        if not repo:
+            return 0
+
+        cleaned = 0
+
+        for lock in repo.clear_unattached_session_locks(max_age_seconds=60):
+            cleaned += 1
+            job = repo.get_message_log(lock["job_id"])
+            if job and job["processed"] != 2:
+                repo.complete_message(lock["job_id"], error="worker_spawn_timeout")
+                await self._notify_message_lost(bot, job, reason="worker start timed out")
+
+        for lock in repo.list_all_session_locks():
+            worker_pid = lock.get("worker_pid")
+            if worker_pid and self._is_pid_alive(int(worker_pid)):
+                continue
+
+            cleaned += 1
+            repo.release_session_lock(lock["session_id"], lock["job_id"])
+            job = repo.get_message_log(lock["job_id"])
+            if job and job["processed"] != 2:
+                repo.complete_message(lock["job_id"], error="worker_lost")
+                await self._notify_message_lost(bot, job, reason="worker stopped unexpectedly")
+
+        if cleaned:
+            logger.warning(f"Detached job cleanup completed: cleaned={cleaned}")
+
+        return cleaned
+
     async def _retry_interrupted_messages(self, bot) -> int:
         """봇 재시작 후 미완료 메시지의 응답을 복구.
 
@@ -176,14 +321,14 @@ class BaseHandler:
 
         return recover_count
 
-    async def _notify_message_lost(self, bot, msg: dict) -> None:
+    async def _notify_message_lost(self, bot, msg: dict, reason: str = "bot restart") -> None:
         """유실된 메시지에 대해 사용자에게 알림."""
         try:
             short_req = msg["request"][:50]
             await bot.send_message(
                 chat_id=msg["chat_id"],
                 text=(
-                    f"⚠️ 봇 재시작으로 아래 메시지의 응답이 유실되었습니다.\n"
+                    f"⚠️ {reason} 때문에 아래 메시지의 응답을 전달하지 못했습니다.\n"
                     f"<code>{short_req}</code>\n\n"
                     f"다시 메시지를 보내주세요."
                 ),

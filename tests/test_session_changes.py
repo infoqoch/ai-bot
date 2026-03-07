@@ -949,7 +949,7 @@ class TestFireAndForgetPattern:
 
     @pytest.mark.asyncio
     async def test_handle_message_creates_task_not_enqueue(self):
-        """handle_message가 create_task를 호출 (enqueue가 아님)."""
+        """handle_message가 detached worker job을 시작한다."""
         from src.bot.handlers import BotHandlers
 
         session_service = MagicMock()
@@ -976,6 +976,15 @@ class TestFireAndForgetPattern:
         update.message.reply_to_message = None
         context = MagicMock()
 
-        with patch("asyncio.create_task") as mock_create_task:
+        with (
+            patch.object(handlers, "_is_session_locked", return_value=False),
+            patch.object(handlers, "_start_detached_job", return_value=(123, None)) as mock_start_detached_job,
+        ):
             await handlers.handle_message(update, context)
-            mock_create_task.assert_called_once()
+            mock_start_detached_job.assert_called_once_with(
+                chat_id=12345,
+                session_id="existing-session",
+                message="테스트 메시지",
+                model="sonnet",
+                workspace_path=None,
+            )

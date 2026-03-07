@@ -5,7 +5,7 @@ AuthManager, temp_pending의 DB 영속화 및 복원을 검증한다.
 
 import sqlite3
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -260,3 +260,51 @@ class TestQueuedMessagesRepository:
         )
         deleted = repo.clear_expired_queued_messages()
         assert deleted == 1
+
+
+class TestSessionLocksRepository:
+    """session_locks CRUD 테스트."""
+
+    def test_reserve_attach_release_session_lock(self, repo):
+        """세션 락 예약/worker 연결/해제."""
+        repo.create_session("u1", "sess1", "sonnet", "테스트")
+        job_id = repo.enqueue_message(
+            chat_id=123,
+            session_id="sess1",
+            request="hello",
+            model="sonnet",
+        )
+
+        assert repo.reserve_session_lock("sess1", job_id) is True
+        assert repo.reserve_session_lock("sess1", job_id) is False
+
+        assert repo.attach_worker_to_session_lock("sess1", job_id, 99999) is True
+
+        lock = repo.get_session_lock("sess1")
+        assert lock is not None
+        assert lock["job_id"] == job_id
+        assert lock["worker_pid"] == 99999
+
+        assert repo.release_session_lock("sess1", job_id) is True
+        assert repo.get_session_lock("sess1") is None
+
+    def test_clear_unattached_session_locks(self, repo):
+        """worker가 붙지 못한 오래된 락 정리."""
+        repo.create_session("u1", "sess1", "sonnet", "테스트")
+        job_id = repo.enqueue_message(
+            chat_id=123,
+            session_id="sess1",
+            request="hello",
+            model="sonnet",
+        )
+        repo.reserve_session_lock("sess1", job_id)
+        repo._conn.execute(
+            "UPDATE session_locks SET acquired_at = ? WHERE session_id = ?",
+            ((datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(), "sess1"),
+        )
+        repo._conn.commit()
+
+        stale = repo.clear_unattached_session_locks(max_age_seconds=60)
+        assert len(stale) == 1
+        assert stale[0]["job_id"] == job_id
+        assert repo.get_session_lock("sess1") is None

@@ -226,7 +226,7 @@ Session History
 
 ### 세션 충돌 처리 (Session Queue)
 
-현재 세션이 처리 중일 때 새 메시지가 오면:
+현재 세션에 detached worker가 실행 중일 때 새 메시지가 오면:
 
 ```
 Current session is processing
@@ -242,6 +242,20 @@ Current session is processing
 - 대기열 위치 표시: `Position: #N`
 - 요청 임시 저장 만료: 5분 (`expires_at = time.time() + 300`)
 - 만료 시: `Request expired. Please resend the message.`
+- 세션 사용 여부는 봇 메모리가 아니라 persistent lock 기준으로 판단
+- 따라서 봇이 재시작돼도 같은 세션은 계속 busy로 보이며 중복 실행되지 않음
+
+### 봇 재시작 중 응답 보존
+
+자가 개발 중 Claude가 `./run.sh restart`를 실행할 수 있다. 이때 UX 목표는 "응답 유실 없이 계속 진행되는 것"이다.
+
+| 상황 | 사용자 경험 |
+|------|-------------|
+| 요청 접수 직후 | 핸들러는 즉시 반환. 사용자는 봇이 멈춘 것처럼 느끼지 않음 |
+| 처리 중 봇 재시작 | 별도 복구 질문 없이 기존 작업이 계속 진행되고, 완료 응답이 그대로 도착 |
+| 재시작 중 같은 세션에 새 메시지 | 세션은 여전히 busy로 보이며 Session Queue UI가 그대로 동작 |
+| `Wait in this session` 선택 | 요청은 영속 대기열에 저장되고 현재 작업 완료 뒤 자동 실행 |
+| worker 자체 비정상 종료 | 유실 알림 후 재전송을 유도 |
 
 ---
 
@@ -414,17 +428,19 @@ question_preview
 | 0~5분 | 처리 중 (별도 표시 없음) |
 | 5분 | 알림: `Task taking N+ minutes. Will notify on completion!` |
 | 완료 (5분 이상 걸린 경우) | 알림: `Task complete! (Mm Ss)` |
-| 30분 | Watchdog이 좀비 태스크 강제 종료 (Claude 프로세스 kill 포함) |
+| 봇 재시작 | detached worker가 계속 실행되고 완료 후 결과를 전송 |
 
 ### 동시 요청 정책
 
-유저당 최대 3개 Claude 요청 동시 처리 (Semaphore).
+세션 단위 직렬화를 우선한다. 같은 세션에는 동시에 하나의 detached worker만 붙는다.
 
-| 슬롯 상태 | 동작 |
+| 세션 상태 | 동작 |
 |----------|------|
-| 슬롯 여유 + 세션 미사용 | 즉시 처리 |
-| 슬롯 여유 + 세션 사용 중 | 세션 큐 UI 표시 (대기/전환/새 세션) |
-| 슬롯 3/3 사용 중 | 대기 |
+| 세션 idle | detached worker 즉시 시작 |
+| 같은 세션 busy | Session Queue UI 표시 |
+| `Wait` 선택 | persistent queue에 저장 후 현재 작업 완료 뒤 자동 처리 |
+| 다른 세션 선택 | 세션 전환 후 즉시 처리 |
+| 새 세션 선택 | 새 세션 생성 후 즉시 처리 |
 
 ### 시스템 프롬프트
 
@@ -442,7 +458,7 @@ Claude CLI에 전달되는 전역 프롬프트:
 처리 중인 메시지와 대기열의 실시간 현황 대시보드.
 
 ```
-Processing (2/3)
+Processing (2)
 
 1. session-name
    3m 45s elapsed
@@ -455,13 +471,13 @@ Processing (2/3)
 Queue (1)
 - session-name: Waiting message pre...  ← 30자 truncate
 
-Slots: 1/3 available
+Detached workers: 2
 
 [Refresh] [Session List]
 ```
 
-- 태스크 없음: `No active tasks` + 슬롯 현황
-- 태스크 등록 시 메시지 100자로 저장, 표시 시 40자로 재절삭
+- 태스크 없음: `No active tasks`
+- 처리 중/대기열 상태는 DB 기준으로 계산되므로, 봇 재시작 직후에도 끊기지 않음
 
 ---
 

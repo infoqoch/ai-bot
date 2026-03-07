@@ -1,0 +1,124 @@
+"""Detached job execution service tests."""
+
+import sqlite3
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from src.claude.client import ChatResponse
+from src.repository.database import init_schema
+from src.repository.repository import Repository
+from src.services.job_service import JobService
+from src.services.session_service import SessionService
+
+
+@pytest.fixture
+def repo(tmp_path):
+    """Temporary repository fixture."""
+    db_path = tmp_path / "test.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+
+    schema_path = Path(__file__).parent.parent / "src" / "repository" / "schema.sql"
+    init_schema(conn, schema_path)
+
+    return Repository(conn)
+
+
+@pytest.fixture
+def session_service(repo):
+    """Session service backed by the temp repository."""
+    return SessionService(repo, session_timeout_hours=24)
+
+
+@pytest.mark.asyncio
+async def test_run_job_completes_message_and_releases_lock(repo, session_service):
+    """Detached worker completes a job and releases its session lock."""
+    session_service.create_session("12345", "sess1", model="sonnet", name="테스트")
+    job_id = repo.enqueue_message(
+        chat_id=12345,
+        session_id="sess1",
+        request="질문",
+        model="sonnet",
+    )
+    repo.reserve_session_lock("sess1", job_id)
+
+    claude = MagicMock()
+    claude.chat = AsyncMock(return_value=ChatResponse(text="응답", error=None, session_id="sess1"))
+
+    fake_bot = MagicMock()
+    fake_bot.send_message = AsyncMock()
+
+    service = JobService(
+        repo=repo,
+        session_service=session_service,
+        claude_client=claude,
+        telegram_token="test-token",
+    )
+
+    with patch("src.services.job_service.Bot", return_value=fake_bot):
+        result = await service.run_job(job_id)
+
+    assert result is True
+    saved = repo.get_message_log(job_id)
+    assert saved["processed"] == 2
+    assert saved["response"] == "응답"
+    assert repo.get_session_lock("sess1") is None
+    assert fake_bot.send_message.called
+
+
+@pytest.mark.asyncio
+async def test_run_job_drains_persistent_queue(repo, session_service):
+    """Detached worker keeps processing queued messages in the same session."""
+    session_service.create_session("12345", "sess1", model="sonnet", name="테스트")
+    first_job_id = repo.enqueue_message(
+        chat_id=12345,
+        session_id="sess1",
+        request="첫 질문",
+        model="sonnet",
+    )
+    repo.reserve_session_lock("sess1", first_job_id)
+    repo.save_queued_message(
+        session_id="sess1",
+        user_id="12345",
+        chat_id=12345,
+        message="두 번째 질문",
+        model="sonnet",
+        is_new_session=False,
+    )
+
+    claude = MagicMock()
+    claude.chat = AsyncMock(
+        side_effect=[
+            ChatResponse(text="첫 응답", error=None, session_id="sess1"),
+            ChatResponse(text="두 응답", error=None, session_id="sess1"),
+        ]
+    )
+
+    fake_bot = MagicMock()
+    fake_bot.send_message = AsyncMock()
+
+    service = JobService(
+        repo=repo,
+        session_service=session_service,
+        claude_client=claude,
+        telegram_token="test-token",
+    )
+
+    with patch("src.services.job_service.Bot", return_value=fake_bot):
+        result = await service.run_job(first_job_id)
+
+    assert result is True
+    assert claude.chat.await_count == 2
+    assert repo.get_session_lock("sess1") is None
+    assert repo.get_queued_messages_by_session("sess1") == []
+
+    rows = repo._conn.execute(
+        "SELECT processed, response FROM message_log WHERE session_id = ? ORDER BY id ASC",
+        ("sess1",),
+    ).fetchall()
+    assert len(rows) == 2
+    assert rows[0]["processed"] == 2
+    assert rows[1]["processed"] == 2
