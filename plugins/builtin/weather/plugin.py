@@ -1,12 +1,26 @@
 """Weather plugin - button-based weather lookup (Open-Meteo API)."""
 
+import csv
 import re
+from pathlib import Path
 from typing import Optional
 
 import httpx
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.plugins.loader import Plugin, PluginResult
+
+
+def _load_cities_csv(csv_path: Path) -> dict[str, str]:
+    """CSV 파일에서 한국어→영어 도시 매핑을 로드."""
+    mapping = {}
+    if not csv_path.exists():
+        return mapping
+    with csv_path.open(encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            mapping[row["korean"]] = row["english"]
+    return mapping
 
 
 class WeatherPlugin(Plugin):
@@ -25,36 +39,26 @@ class WeatherPlugin(Plugin):
 
     CALLBACK_PREFIX = "weather:"
 
+    def get_schema(self) -> str:
+        return """
+CREATE TABLE IF NOT EXISTS weather_locations (
+    chat_id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    country TEXT,
+    lat REAL NOT NULL,
+    lon REAL NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+"""
+
     GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
     WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 
     QUICK_CITIES = ["서울", "부산", "대구", "인천", "광주", "대전", "제주"]
 
-    KOREAN_TO_ENGLISH = {
-        "서울": "Seoul", "부산": "Busan", "인천": "Incheon", "대구": "Daegu",
-        "대전": "Daejeon", "광주": "Gwangju", "울산": "Ulsan", "수원": "Suwon",
-        "성남": "Seongnam", "고양": "Goyang", "용인": "Yongin", "창원": "Changwon",
-        "청주": "Cheongju", "전주": "Jeonju", "천안": "Cheonan", "제주": "Jeju",
-        "세종": "Sejong", "포항": "Pohang", "김해": "Gimhae", "평택": "Pyeongtaek",
-        "안산": "Ansan", "안양": "Anyang", "파주": "Paju", "의정부": "Uijeongbu",
-        "김포": "Gimpo", "화성": "Hwaseong", "시흥": "Siheung", "구미": "Gumi",
-        "양산": "Yangsan", "춘천": "Chuncheon", "원주": "Wonju", "강릉": "Gangneung",
-        "속초": "Sokcho", "목포": "Mokpo", "여수": "Yeosu", "순천": "Suncheon",
-        "군산": "Gunsan", "익산": "Iksan", "경주": "Gyeongju", "거제": "Geoje",
-        "통영": "Tongyeong", "진주": "Jinju", "안동": "Andong", "충주": "Chungju",
-        "제천": "Jecheon", "논산": "Nonsan", "공주": "Gongju", "서산": "Seosan",
-        "당진": "Dangjin", "아산": "Asan", "보령": "Boryeong", "나주": "Naju",
-        "광양": "Gwangyang", "정읍": "Jeongeup", "남원": "Namwon", "김천": "Gimcheon",
-        "상주": "Sangju", "영주": "Yeongju", "문경": "Mungyeong", "영천": "Yeongcheon",
-        "밀양": "Miryang", "사천": "Sacheon",
-        "도쿄": "Tokyo", "오사카": "Osaka", "교토": "Kyoto", "후쿠오카": "Fukuoka",
-        "삿포로": "Sapporo", "베이징": "Beijing", "상하이": "Shanghai",
-        "홍콩": "Hong Kong", "타이베이": "Taipei", "방콕": "Bangkok",
-        "싱가포르": "Singapore", "뉴욕": "New York", "로스앤젤레스": "Los Angeles",
-        "샌프란시스코": "San Francisco", "시애틀": "Seattle", "런던": "London",
-        "파리": "Paris", "베를린": "Berlin", "로마": "Rome",
-        "시드니": "Sydney", "멜버른": "Melbourne",
-    }
+    # CSV에서 로드 (클래스 로드 시점에 한 번)
+    _CITIES_CSV = Path(__file__).parent / "cities.csv"
+    KOREAN_TO_ENGLISH = _load_cities_csv(_CITIES_CSV)
 
     WEATHER_PATTERNS = [r"날씨", r"기온", r"weather"]
     CITY_WEATHER_PATTERNS = [r"(.+)\s*날씨"]

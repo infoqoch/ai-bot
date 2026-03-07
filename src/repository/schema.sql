@@ -91,41 +91,7 @@ CREATE TABLE IF NOT EXISTS workspaces (
 CREATE INDEX IF NOT EXISTS idx_workspaces_user_id ON workspaces(user_id);
 CREATE INDEX IF NOT EXISTS idx_workspaces_path ON workspaces(path);
 
--- Memos table: per-chat memo storage
-CREATE TABLE IF NOT EXISTS memos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    chat_id INTEGER NOT NULL,
-    content TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_memos_chat_id ON memos(chat_id);
-
--- Todos table: per-chat daily task management
-CREATE TABLE IF NOT EXISTS todos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    chat_id INTEGER NOT NULL,
-    date TEXT NOT NULL,  -- YYYY-MM-DD format
-    slot TEXT NOT NULL DEFAULT 'default',
-    text TEXT NOT NULL,
-    done INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_todos_chat_id ON todos(chat_id);
-CREATE INDEX IF NOT EXISTS idx_todos_date ON todos(date);
-CREATE INDEX IF NOT EXISTS idx_todos_chat_date ON todos(chat_id, date);
-
--- Weather locations table: per-chat weather location preference
-CREATE TABLE IF NOT EXISTS weather_locations (
-    chat_id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,
-    country TEXT,
-    lat REAL NOT NULL,
-    lon REAL NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
+-- Plugin tables (memos, todos, weather_locations) are managed by each plugin's get_schema()
 
 -- Message log table: AI message request/response tracking
 CREATE TABLE IF NOT EXISTS message_log (
@@ -161,8 +127,3 @@ BEGIN
     UPDATE users SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
 
-CREATE TRIGGER IF NOT EXISTS update_todos_timestamp
-AFTER UPDATE ON todos
-BEGIN
-    UPDATE todos SET updated_at = datetime('now') WHERE id = NEW.id;
-END;

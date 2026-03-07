@@ -520,6 +520,4 @@ Slots: 1/3 available
 
 ## 향후 계획
 
-- 플러그인별 schema 분리 (플러그인이 자체 DDL 관리)
-- 날씨 플러그인 CSV 기반 도시 데이터 확장
 - `/model` 명령어 제거 검토 (`/session` 통합으로 중복)

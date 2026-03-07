@@ -7,6 +7,9 @@ import pytest
 
 from src.repository import init_repository, shutdown_repository, reset_connection
 from src.repository.repository import Repository
+from plugins.builtin.todo.plugin import TodoPlugin
+from plugins.builtin.memo.plugin import MemoPlugin
+from plugins.builtin.weather.plugin import WeatherPlugin
 
 
 @pytest.fixture
@@ -22,6 +25,12 @@ def temp_db():
 def repo(temp_db):
     """Repository 인스턴스 생성."""
     repository = init_repository(temp_db)
+    # 플러그인 스키마 초기화
+    for plugin_cls in [TodoPlugin, MemoPlugin, WeatherPlugin]:
+        schema = plugin_cls().get_schema()
+        if schema:
+            repository._conn.executescript(schema)
+    repository._conn.commit()
     yield repository
     shutdown_repository()
 

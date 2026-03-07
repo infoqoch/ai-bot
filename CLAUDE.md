@@ -341,9 +341,11 @@ class MyPlugin(Plugin):
 ### 플러그인 데이터 저장 확장
 
 플러그인이 새 데이터를 저장하려면:
-1. `src/repository/schema.sql`에 `CREATE TABLE IF NOT EXISTS` 추가
+1. 플러그인 클래스의 `get_schema()` 메서드에 `CREATE TABLE IF NOT EXISTS` DDL 반환
 2. `src/repository/repository.py`에 CRUD 메서드 추가
 3. 플러그인에서 `self.repository.xxx()` 호출
+
+**주의:** 코어 `schema.sql`에는 플러그인 테이블을 추가하지 않음. 각 플러그인이 자체 DDL을 관리한다.
 
 ### 콜백 처리 패턴
 
