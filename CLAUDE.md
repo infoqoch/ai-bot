@@ -1,5 +1,24 @@
 # AI Bot - 프로젝트 규칙
 
+## 문서 아키텍처
+
+본 프로젝트의 문서는 3개 레이어로 구성된다.
+
+| 레이어 | 파일 | 성격 | 참조 시점 |
+|--------|------|------|----------|
+| **Layer 1: 개발 규칙** | `CLAUDE.md` | 코드로 표현 불가능한 메타 규칙 | 모든 작업의 시작과 끝 |
+| **Layer 2: 개발 인터페이스** | `CLAUDE.md` | 확장 포인트의 계약(contract) | 기능 확장/수정할 때 |
+| **Layer 3: UI/UX 기획서** | `docs/SPEC.md` | 사용자 경험 의도, 시나리오, UX 원칙 | 신규 기능 기획, UX 판단 |
+
+**원칙:**
+- Layer 1, 2는 코드만으로 파악 불가능하거나 역추출 비용이 높은 정보만 기술
+- Layer 3는 코드에 존재하지 않는 기획 의도, 사용자 시나리오, UX 정책을 기술
+- 코드가 이미 설명하는 단일 기능의 구현 상세는 문서화하지 않음
+
+---
+
+# Layer 1: 개발 규칙
+
 ## 개발 원칙 (CRITICAL)
 
 ### 베타 개발 모드
@@ -17,12 +36,12 @@
 1. 논의하고 결정한 기획안 전체는 완수하는 것을 목표로 한다. 기획안의 업무는 기능/역할/업무편의에 따라 분리한다. 분리할 필요가 없으면 하나의 업무만으로 처리한다.
 2. 분리한 것은 다음에 순서에 따라 처리한다.
     - 개발한다.
-    - 유닛테스트/통합테스트 전체 수행한다. 
-    - 정상이면 커밋 및 푸시한다. 
-    - 모든 업무가 완료될 때까지 2를 반복한다. 
+    - 유닛테스트/통합테스트 전체 수행한다.
+    - 정상이면 커밋 및 푸시한다.
+    - 모든 업무가 완료될 때까지 2를 반복한다.
 3. 모든 업무가 완료되면, 통합테스트를 수행하여 필요한 개선을 수행한다.
 4. 기획안을 기반으로 코드리뷰를 한다.
-5. 보고서를 제출하고 봇을 재실행한다. 
+5. 보고서를 제출하고 봇을 재실행한다.
 
 ### 테스트 범위
 - 텔래그램의 풀링을 직접 할 수는 없으므로 목킹한다.
@@ -47,10 +66,6 @@ if new_system_available():
     use_new()
 else:
     use_legacy()  # 이런 코드 작성 금지
-
-# ❌ 금지: 하위 호환 wrapper
-def legacy_compatible_method():
-    """레거시 지원용"""  # 이런 메서드 작성 금지
 
 # ❌ 금지: send_chat_action 사용 금지 (타임아웃 원인)
 await context.bot.send_chat_action(chat_id=chat_id, action="typing")  # 절대 사용 금지!
@@ -133,10 +148,45 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
 ### 구조
 ```
 src/
-├── main.py, config.py, notify.py
-├── bot/     # 텔레그램 (handlers, middleware, formatters)
-└── claude/  # AI CLI (client, session)
+├── main.py                    # 봇 진입점, 핸들러 등록
+├── config.py                  # 환경변수 기반 설정 (Pydantic Settings)
+├── constants.py               # 전역 상수 (모델, 시간, 제한값)
+├── notify.py                  # 개발 리포트 CLI
+├── lock.py                    # 파일 락 (싱글톤)
+├── supervisor.py              # 프로세스 감시
+├── scheduler.py               # 세션 compact 스케줄러
+├── scheduler_manager.py       # 통합 job_queue 매니저
+├── logging_config.py          # 로깅 설정
+│
+├── bot/
+│   ├── handlers/              # 명령어/콜백/메시지 핸들러
+│   ├── middleware.py           # 인증/권한 데코레이터
+│   ├── formatters.py          # 메시지 포맷팅 (마크다운→HTML, truncation)
+│   ├── session_queue.py       # 세션 큐 매니저
+│   ├── constants.py           # UI 상수 (이모지, 제한값)
+│   └── prompts/               # 시스템 프롬프트
+│
+├── claude/
+│   └── client.py              # Claude CLI 래퍼
+│
+├── plugins/
+│   └── loader.py              # Plugin 기본 클래스 + PluginLoader
+│
+├── repository/
+│   ├── database.py            # DB 커넥션 싱글톤
+│   ├── repository.py          # 통합 Repository (모든 데이터 접근)
+│   ├── schema.sql             # DDL (Single Source of Truth)
+│   └── adapters/              # 도메인별 어댑터
+│       ├── schedule_adapter.py
+│       └── workspace_adapter.py
+│
+└── services/
+    ├── session_service.py     # 세션 생명주기
+    ├── message_service.py     # 메시지 처리
+    └── schedule_service.py    # 스케줄 CRUD + 실행
 ```
+
+**호출 흐름:** Handler → Service → Repository → SQLite
 
 ### 네이밍
 - 파일: `snake_case.py`
@@ -158,348 +208,16 @@ src/
 |------|--------|------|
 | `TELEGRAM_TOKEN` | (필수) | 봇 토큰 |
 | `ALLOWED_CHAT_IDS` | (빈값) | 허용 채팅 ID (쉼표 구분) |
-| `MAINTAINER_CHAT_ID` | (빈값) | 개발 리포트 수신 |
+| `ADMIN_CHAT_ID` | `0` | 관리자 알림/리포트 수신 chat ID |
 | `AI_COMMAND` | `claude` | AI CLI 명령어 |
 | `SESSION_TIMEOUT_HOURS` | `24` | 세션 만료 시간 |
+| `RESPONSE_NOTIFY_SECONDS` | `60` | 응답 대기 알림까지 시간(초) |
+| `SESSION_LIST_AI_SUMMARY` | `false` | 세션 목록에서 AI 요약 사용 여부 |
 | `REQUIRE_AUTH` | `true` | 인증 필요 여부 |
 | `AUTH_SECRET_KEY` | (조건부 필수) | 인증 키 (`REQUIRE_AUTH=true` 시 필수) |
 | `AUTH_TIMEOUT_MINUTES` | `30` | 인증 유효 시간 |
-## 플러그인 아키텍처
-
-### 디렉토리 구조
-```
-telegram-claude-bot/
-├── src/plugins/
-│   └── loader.py              # Plugin 기본 클래스 + PluginLoader
-└── plugins/
-    ├── builtin/               # Git 관리 ✅ (내장 플러그인)
-    │   ├── memo/
-    │   │   ├── __init__.py
-    │   │   └── plugin.py
-    │   └── weather/
-    │       ├── __init__.py
-    │       └── plugin.py
-    └── custom/                # Git 무시 ❌ (개인용)
-        └── my_plugin/
-            ├── __init__.py
-            └── plugin.py
-```
-
-### 플러그인 클래스 구조
-
-```python
-from src.plugins.loader import Plugin, PluginResult, ScheduledAction
-
-class MyPlugin(Plugin):
-    name = "myplugin"                    # 필수: /myplugin 명령어로 사용
-    description = "플러그인 설명"         # 필수: /plugins에 표시
-    usage = (                            # 필수: /myplugin 실행 시 표시
-        "📌 <b>사용법</b>\n\n"
-        "• <code>명령어1</code> - 설명\n"
-        "• <code>명령어2</code> - 설명"
-    )
-
-    # 트리거 패턴 (정규식)
-    PATTERNS = [r"패턴1", r"패턴2"]
-
-    # 제외 패턴 - 매칭되면 AI에게 넘김
-    EXCLUDE_PATTERNS = [
-        r"(란|이란|가|이)\s*(뭐|무엇)",  # "X란 뭐야" → AI
-        r"영어로|번역",                   # 번역 요청 → AI
-    ]
-
-    async def can_handle(self, message: str, chat_id: int) -> bool:
-        # 1. 제외 패턴 먼저 체크
-        for pattern in self.EXCLUDE_PATTERNS:
-            if re.search(pattern, message):
-                return False  # AI에게 넘김
-        # 2. 트리거 패턴 체크
-        for pattern in self.PATTERNS:
-            if re.search(pattern, message):
-                return True
-        return False
-
-    async def handle(self, message: str, chat_id: int) -> PluginResult:
-        # 처리 로직
-        return PluginResult(handled=True, response="응답")
-
-    # --- 스케줄 API (선택) ---
-
-    def get_scheduled_actions(self) -> list[ScheduledAction]:
-        """스케줄 가능한 액션 목록. /scheduler에서 "+ Plugin"으로 등록."""
-        return [
-            ScheduledAction(name="daily_report", description="일일 리포트"),
-        ]
-
-    async def execute_scheduled_action(self, action_name: str, chat_id: int) -> str:
-        """스케줄된 액션 실행. HTML 텍스트 반환. 빈 문자열이면 메시지 안 보냄."""
-        if action_name == "daily_report":
-            return "<b>리포트</b>\n오늘 활동 요약..."
-        raise NotImplementedError(f"Action '{action_name}' not implemented")
-```
-
-### 처리 흐름 (AI 호출 안함 = 빠름)
-
-```
-사용자 메시지
-    ↓
-handlers.py: plugins.process_message()
-    ↓
-각 플러그인.can_handle() 순회
-    ├─ 제외 패턴 매칭 → return False (AI에게 넘김)
-    └─ 트리거 패턴 매칭 → return True
-    ↓
-플러그인.handle() 실행
-    ↓
-PluginResult.response 즉시 반환 (Claude 호출 없음)
-```
-
-### 명령어 체계
-
-| 명령어 | 설명 |
-|--------|------|
-| `/plugins` | 전체 플러그인 목록 |
-| `/플러그인명` | 해당 플러그인 사용법 (예: `/memo`) |
-
-### 플러그인 규칙 (CRITICAL)
-
-1. **제외 패턴 필수**: 자연어 명령어는 AI 질문과 충돌 가능
-   - "메모란 뭐야" → 메모 플러그인이 아닌 AI가 답변해야 함
-   - `EXCLUDE_PATTERNS`로 질문/번역 등 제외
-
-2. **안전한 로딩**: 플러그인 로드 실패 시 봇은 계속 동작
-   - 각 플러그인은 try-catch로 격리
-   - 실패한 플러그인만 스킵
-
-3. **데이터 저장**: `self.repository` (Repository 인스턴스)
-   - 플러그인은 Repository를 통해 SQLite에 데이터 저장
-   - 예: `self.repository.add_memo(chat_id, content)`
-
-4. **검증 후 배포**: custom 플러그인 작성 시
-   - `python -m py_compile plugins/custom/my.py`
-   - 검증 실패해도 기존 봇 정상 동작
-
-### 플러그인 사용 가능 API
-
-| API | 타입 | 설명 |
-|-----|------|------|
-| `self.repository` | `Repository` | SQLite 데이터 저장소 (PluginLoader가 주입) |
-| `self._base_dir` | `Path` | 프로젝트 루트 경로 |
-| `name` | `str` | 플러그인 이름 (명령어로 사용: `/name`) |
-| `description` | `str` | 플러그인 설명 (`/plugins`에 표시) |
-| `usage` | `str` | 사용법 (HTML, `/name` 실행 시 표시) |
-| `can_handle()` | `async` | 메시지 처리 가능 여부 |
-| `handle()` | `async` | 메시지 처리 → `PluginResult` |
-| `handle_callback()` | `sync` | 인라인 버튼 콜백 처리 (선택) |
-| `handle_force_reply()` | `sync` | ForceReply 응답 처리 (선택) |
-| `get_scheduled_actions()` | `sync` | 스케줄 가능 액션 목록 (선택) |
-| `execute_scheduled_action()` | `async` | 스케줄 액션 실행 (선택) |
-
-### 플러그인 라이프사이클
-
-```
-봇 시작
-  ↓
-PluginLoader.load_all()
-  ├─ builtin/ 스캔 → Plugin 인스턴스 생성
-  ├─ custom/ 스캔 → Plugin 인스턴스 생성
-  └─ _repository 주입 (각 플러그인에)
-  ↓
-핸들러 등록
-  ├─ /plugins → 전체 목록
-  ├─ /{name} → usage 표시
-  ├─ callback_data "prefix:" → handle_callback()
-  └─ /scheduler "+ Plugin" → get_scheduled_actions() 기반 등록
-  ↓
-메시지 수신
-  ├─ can_handle() → True → handle() → PluginResult
-  └─ schedule 실행 시 → execute_scheduled_action()
-```
-
-### 콜백 처리 패턴
-
-플러그인이 인라인 버튼을 사용하려면:
-
-1. `CALLBACK_PREFIX = "td:"` 정의
-2. `handle_callback(callback_data, chat_id) → dict` 구현
-3. `callback_handlers.py`에 prefix 라우팅 추가
-
-```python
-# callback_handlers.py
-if callback_data.startswith("td:"):
-    await self._handle_todo_callback(query, chat_id, callback_data)
-```
-
-### 참고 파일 (Claude 개발 시 확인)
-
-| 파일 | 용도 |
-|------|------|
-| `src/plugins/loader.py` | Plugin 기본 클래스, PluginLoader |
-| `plugins/builtin/todo/` | 참고용: 콜백, ForceReply, 스케줄 구현체 |
-| `plugins/builtin/memo/` | 참고용: 간단한 플러그인 구현체 |
-| `src/bot/handlers/callback_handlers.py` | 플러그인 콜백 라우팅 |
-
-## 메시지 처리 아키텍처
-
-### 처리 우선순위
-
-```
-사용자 메시지 도착
-    │
-    ▼
-┌─────────────────────────────────────────────────────────┐
-│ 1️⃣ 명령어 (/command)                                    │
-│    • /start, /help, /new, /session, /m 등              │
-│    • CommandHandler가 먼저 처리                         │
-│    • 즉시 응답 (Claude 호출 없음)                        │
-└─────────────────────────────────────────────────────────┘
-    │ 명령어 아님
-    ▼
-┌─────────────────────────────────────────────────────────┐
-│ 2️⃣ 플러그인 (자연어 패턴)                                │
-│    • "메모해줘", "오늘 할일", "날씨" 등                   │
-│    • plugins.process_message() 순회                     │
-│    • can_handle() → handle() → 즉시 응답               │
-│    • EXCLUDE_PATTERNS으로 AI 질문 제외                  │
-└─────────────────────────────────────────────────────────┘
-    │ 플러그인 매칭 없음
-    ▼
-┌─────────────────────────────────────────────────────────┐
-│ 3️⃣ Claude AI                                            │
-│    • 일반 대화, 질문, 코딩 요청 등                       │
-│    • Fire-and-Forget 패턴 (백그라운드 처리)             │
-│    • Semaphore로 동시 3개 제한                          │
-└─────────────────────────────────────────────────────────┘
-```
-
-### 처리자별 특징
-
-| 처리자 | 응답 속도 | Claude 호출 | 히스토리 기록 |
-|--------|----------|-------------|--------------|
-| 명령어 | 즉시 | ❌ | ❌ |
-| 플러그인 | 즉시 | ❌ | ✅ `plugin:{name}` |
-| Claude | 1초~수분 | ✅ | ✅ `claude` |
-| 거절됨 | 즉시 | ❌ | ❌ |
-
-### 동시 요청 처리
-
-```
-Semaphore = 3 (유저당)
-
-요청1 → 처리 중 (slot 1)
-요청2 → 처리 중 (slot 2)
-요청3 → 처리 중 (slot 3)
-요청4 → ⚠️ 거절 (메시지 표시 후 버림)
-요청5 → ⚠️ 거절
-(요청1 완료)
-요청6 → 처리 중 (slot 1)
-```
-
-### 장시간 작업 알림
-
-| 경과 시간 | 동작 |
-|----------|------|
-| 0~5분 | 처리 중 (typing 표시) |
-| 5분 | "⏳ 작업이 걸리고 있어요" 알림 |
-| 완료 | "✅ 작업 완료! (Xm Ys 소요)" + 응답 |
-| 30분 | Watchdog이 좀비 태스크 정리 |
-
-### 히스토리 구조
-
-```python
-HistoryEntry = {
-    "message": str,      # 사용자 메시지
-    "timestamp": str,    # ISO format
-    "processed": bool,   # 처리 완료 여부
-    "processor": str,    # "command" | "plugin:{name}" | "claude" | "rejected"
-}
-```
-
-## 텔레그램 명령어 규칙
-
-### 언더바(_) 규칙 (CRITICAL)
-
-텔레그램은 **언더바로 연결된 문자열**을 하나의 명령어로 인식:
-
-| 입력 | 클릭 가능한 부분 | 이유 |
-|------|-----------------|------|
-| `/new_opus` | `/new_opus` 전체 | 언더바로 연결 → 하나의 명령어 |
-| `/new opus` | `/new`만 | 공백 → 별개의 단어 |
-| `/s_12345678` | `/s_12345678` 전체 | 동적 세션 ID 포함 가능 |
-
-### 명령어 설계 원칙
-
-1. **고정 명령어**: 언더바로 연결
-   - ✅ `/new_opus`, `/new_sonnet`, `/new_haiku`
-   - ❌ `/new opus` (opus가 클릭 불가)
-
-2. **동적 파라미터**: 언더바 + ID
-   - ✅ `/s_12345678` (세션 전환)
-   - ✅ `/h_12345678` (히스토리)
-   - ✅ `/d_12345678` (삭제)
-
-3. **단축 명령어**: 자주 쓰는 명령어
-   - `/sl` = `/session_list`
-   - `/m` = 매니저 모드
-
-### 현재 명령어 목록
-
-| 명령어 | 설명 | 단축 |
-|--------|------|------|
-| `/session_list` | 세션 목록 | `/sl` |
-| `/new_opus` | Opus 세션 생성 | - |
-| `/new_sonnet` | Sonnet 세션 생성 | - |
-| `/new_haiku` | Haiku 세션 생성 | - |
-| `/s_{id}` | 세션 전환 | - |
-| `/h_{id}` | 히스토리 보기 | - |
-| `/d_{id}` | 세션 삭제 | - |
-| `/new_workspace` | 워크스페이스 세션 생성 | `/nw` |
-
-## 워크스페이스 세션
-
-로컬 디렉토리에 바인딩된 세션. 해당 워크스페이스의 CLAUDE.md 규칙을 따르면서 텔레그램 포맷으로 응답.
-
-### 사용법
-
-```
-/new_workspace 경로 [모델] [이름]
-/nw ~/AiSandbox/my-app opus 마이앱
-```
-
-### 동작 방식
-
-| 레이어 | 소스 | 역할 |
-|--------|------|------|
-| 워크스페이스 규칙 | `cwd`의 CLAUDE.md | 코드 스타일, 빌드 명령, 커밋 규칙 |
-| 텔레그램 규칙 | `--append-system-prompt` | HTML 포맷, 간결한 응답 |
-
-### 허용 디렉토리
-
-`.env`에서 설정 (기본값):
-```
-ALLOWED_WORKSPACE_PATHS=/Users/bae/AiSandbox/*,/Users/bae/Projects/*
-```
-
-## 스케줄 타입
-
-| 타입 | 설명 |
-|------|------|
-| `claude` | 일반 스케줄 (새 세션에서 실행) |
-| `workspace` | 워크스페이스 스케줄 (경로의 CLAUDE.md 적용)
-
-## /lock - 태스크 현황 대시보드
-
-사용자가 보낸 메시지의 실시간 처리 현황을 보여주는 명령어.
-
-| 섹션 | 데이터 소스 | 표시 내용 |
-|------|------------|----------|
-| **Processing** | `_active_tasks` | 처리 중인 메시지 (세션명, 경과시간, 미리보기) |
-| **Queue** | `session_queue_manager` | 대기 중인 메시지 |
-| **Slots** | `_user_semaphores` | 동시 처리 슬롯 (X/3) |
-
-- 핸들러: `AdminHandlers.lock_command()` → `_build_lock_status()`
-- 태스크 등록: `_register_task()` (handle_message, /ai에서 asyncio.create_task 후 호출)
-- 좀비 정리: `_cleanup_zombie_tasks()` → `_active_tasks` 제거 + `session_queue_manager.force_unlock()`
+| `WORKING_DIR` | (없음) | 봇 작업 디렉토리 (미설정 시 프로젝트 루트) |
+| `ALLOWED_PROJECT_PATHS` | `~/AiSandbox/*,~/Projects/*` | 워크스페이스 허용 디렉토리 (glob 패턴, 쉼표 구분) |
 
 ## 프로세스 관리 (CRITICAL)
 
@@ -518,9 +236,9 @@ ALLOWED_WORKSPACE_PATHS=/Users/bae/AiSandbox/*,/Users/bae/Projects/*
 
 | 상황 | 올바른 방법 | 금지 |
 |------|-------------|------|
-| 봇 재시작 | `./run.sh restart` | `kill -9 PID` ❌ |
-| 봇 중지 | `./run.sh stop` | `pkill -f src.main` ❌ |
-| 중복 프로세스 정리 | `./run.sh restart` | 수동 kill ❌ |
+| 봇 재시작 | `./run.sh restart` | `kill -9 PID` |
+| 봇 중지 | `./run.sh stop` | `pkill -f src.main` |
+| 중복 프로세스 정리 | `./run.sh restart` | 수동 kill |
 
 ### 왜 수동 kill이 위험한가?
 
@@ -528,21 +246,167 @@ ALLOWED_WORKSPACE_PATHS=/Users/bae/AiSandbox/*,/Users/bae/Projects/*
 2. **zsh에서 `kill -9 PID`가 실패할 수 있음** → 에러 무시되어 인지 못함
 3. **Supervisor가 자식 프로세스 재생성** → 중복 발생
 
-### 중복 프로세스 발생 시
-
-```bash
-# 상태 확인
-./run.sh status
-
-# 중복 감지되면 restart로 정리
-./run.sh restart
-```
-
-`./run.sh`의 `_kill_all_instances()`가 pgrep + xargs로 안전하게 정리함.
-
 ## 금지
 
 - `.env` 커밋 금지
 - `.data/` 커밋 금지
 - 토큰 하드코딩 금지
 - **수동 `kill -9` 사용 금지** → `./run.sh restart` 사용
+
+---
+
+# Layer 2: 개발 인터페이스
+
+## 플러그인 아키텍처
+
+### 디렉토리 구조
+```
+plugins/
+├── builtin/               # Git 관리 (내장 플러그인)
+│   ├── todo/
+│   │   ├── __init__.py
+│   │   ├── plugin.py      # 콜백, ForceReply, 스케줄 구현체
+│   │   └── scheduler.py   # 투두 전용 스케줄 액션
+│   ├── memo/
+│   │   ├── __init__.py
+│   │   └── plugin.py
+│   └── weather/
+│       ├── __init__.py
+│       └── plugin.py
+└── custom/                # Git 무시 (개인용)
+    └── my_plugin/
+        ├── __init__.py
+        └── plugin.py
+```
+
+### 플러그인 클래스 구조
+
+```python
+from src.plugins.loader import Plugin, PluginResult, ScheduledAction
+
+class MyPlugin(Plugin):
+    name = "myplugin"                    # 필수: /myplugin 명령어로 사용
+    description = "플러그인 설명"         # 필수: /plugins에 표시
+    usage = (                            # 필수: /myplugin 실행 시 표시
+        "<b>사용법</b>\n\n"
+        "<code>명령어1</code> - 설명\n"
+        "<code>명령어2</code> - 설명"
+    )
+
+    PATTERNS = [r"패턴1", r"패턴2"]          # 트리거 패턴 (정규식)
+    EXCLUDE_PATTERNS = [r"(란|이란)\s*뭐"]   # 제외 패턴 → AI에게 넘김
+
+    async def can_handle(self, message: str, chat_id: int) -> bool: ...
+    async def handle(self, message: str, chat_id: int) -> PluginResult: ...
+
+    # --- 선택 API ---
+    # handle_callback(callback_data, chat_id) → dict    # 인라인 버튼 콜백
+    # handle_force_reply(message, chat_id) → dict       # ForceReply 응답
+    # get_scheduled_actions() → list[ScheduledAction]   # 스케줄 액션 목록
+    # execute_scheduled_action(action_name, chat_id) → str  # 스케줄 실행
+```
+
+참고 구현체: `plugins/builtin/todo/` (콜백+ForceReply+스케줄), `plugins/builtin/memo/` (간단한 CRUD)
+
+### 플러그인 규칙 (CRITICAL)
+
+1. **제외 패턴 필수**: 자연어 명령어는 AI 질문과 충돌 가능
+   - "메모란 뭐야" → 메모 플러그인이 아닌 AI가 답변해야 함
+2. **안전한 로딩**: 플러그인 로드 실패 시 봇은 계속 동작 (try-catch 격리)
+3. **데이터 저장**: `self.repository` (Repository 인스턴스, PluginLoader가 주입)
+4. **검증 후 배포**: `python -m py_compile plugins/custom/my.py`
+
+### 플러그인 데이터 저장 확장
+
+플러그인이 새 데이터를 저장하려면:
+1. `src/repository/schema.sql`에 `CREATE TABLE IF NOT EXISTS` 추가
+2. `src/repository/repository.py`에 CRUD 메서드 추가
+3. 플러그인에서 `self.repository.xxx()` 호출
+
+### 콜백 처리 패턴
+
+플러그인이 인라인 버튼을 사용하려면:
+
+1. `CALLBACK_PREFIX = "myplugin:"` 정의 (기존 prefix와 충돌 금지)
+2. `handle_callback(callback_data, chat_id) → dict` 구현
+3. `callback_handlers.py`의 `handle_callback()` 메서드에 prefix 라우팅 분기 추가
+
+**등록된 콜백 prefix (충돌 금지):**
+
+| Prefix | 대상 | 등록 위치 |
+|--------|------|----------|
+| `td:` | 투두 플러그인 | `callback_handlers.py` |
+| `memo:` | 메모 플러그인 | `callback_handlers.py` |
+| `weather:` | 날씨 플러그인 | `callback_handlers.py` |
+| `sess:` | 세션 관리 | `callback_handlers.py` |
+| `sched:` | 스케줄러 | `callback_handlers.py` |
+| `ws:` | 워크스페이스 | `callback_handlers.py` |
+| `sq:` | 세션 큐 (충돌 처리) | `callback_handlers.py` |
+| `lock:` | 태스크 현황 | `callback_handlers.py` |
+
+**ForceReply 마커 (충돌 금지):**
+
+| 마커 | 용도 | 라우팅 위치 |
+|------|------|------------|
+| `td:add` | 투두 추가 | `message_handlers.py` |
+| `memo_add` | 메모 추가 | `message_handlers.py` |
+| `sess_name:{model}` | 세션 이름 입력 | `message_handlers.py` |
+| `schedule_input` | 스케줄 메시지 입력 | `message_handlers.py` |
+| `_pending_workspace_input` | 워크스페이스 플로우 | `message_handlers.py` (dict 기반) |
+
+## 메시지 처리 흐름
+
+```
+사용자 메시지 도착
+    │
+    ▼
+[1] 명령어 (/command)
+    │ CommandHandler가 먼저 처리. 즉시 응답 (Claude 호출 없음)
+    │
+    ▼ 명령어 아님
+[2] ForceReply 응답 감지
+    │ reply_to_message.text에서 마커 추출 → 해당 핸들러로 라우팅
+    │
+    ▼ ForceReply 아님
+[3] 플러그인 (자연어 패턴)
+    │ plugins.process_message() 순회
+    │ can_handle() → handle() → 즉시 응답
+    │
+    ▼ 플러그인 매칭 없음
+[4] Claude AI (백그라운드 처리)
+```
+
+## 텔레그램 명령어 규칙
+
+### 언더바(_) 규칙 (CRITICAL)
+
+텔레그램은 **언더바로 연결된 문자열**을 하나의 명령어로 인식:
+
+| 입력 | 클릭 가능한 부분 | 이유 |
+|------|-----------------|------|
+| `/new_opus` | `/new_opus` 전체 | 언더바로 연결 → 하나의 명령어 |
+| `/new opus` | `/new`만 | 공백 → 별개의 단어 |
+| `/s_12345678` | `/s_12345678` 전체 | 동적 세션 ID 포함 가능 |
+
+### 명령어 설계 원칙
+
+1. **고정 명령어**: 언더바로 연결 (`/new_opus`, `/model_haiku`)
+2. **동적 파라미터**: 언더바 + ID (`/s_{id}`, `/h_{id}`, `/d_{id}`)
+3. **단축 명령어**: 자주 쓰는 명령어 (`/sl` = `/session_list`, `/nw` = `/new_workspace`, `/ws` = `/workspace`)
+
+## 워크스페이스 세션
+
+로컬 디렉토리에 바인딩된 세션. `--cwd`로 디렉토리 지정, `--append-system-prompt`로 텔레그램 포맷 규칙 주입.
+
+| 레이어 | 소스 | 역할 |
+|--------|------|------|
+| 워크스페이스 규칙 | `cwd`의 CLAUDE.md | 코드 스타일, 빌드 명령, 커밋 규칙 |
+| 텔레그램 규칙 | `--append-system-prompt` | HTML 포맷, 간결한 응답 |
+
+## 스케줄 타입
+
+| 타입 | 설명 |
+|------|------|
+| `claude` | 일반 스케줄 (새 세션에서 실행) |
+| `workspace` | 워크스페이스 스케줄 (경로의 CLAUDE.md 적용) |
+| `plugin` | 플러그인 액션 스케줄 (모델/메시지 불필요) |
