@@ -108,7 +108,7 @@ def run_bot() -> int:
     """봇 프로세스 실행 및 종료 대기. exit code 반환."""
     global _child_process
 
-    cmd = [sys.executable, "-m", "src.main"]
+    cmd = [sys.executable, "-u", "-m", "src.main"]
     cwd = Path(__file__).parent.parent
 
     logger.info(f"봇 시작: {' '.join(cmd)}")
