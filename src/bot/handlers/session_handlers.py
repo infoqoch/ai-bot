@@ -406,7 +406,7 @@ class SessionHandlers(BaseHandler):
 
                 is_current = "> " if sid == current_session_id else ""
                 is_locked = session_queue_manager.is_locked(sid)
-                lock_indicator = " [locked]" if is_locked else ""
+                lock_indicator = " 🔒" if is_locked else ""
                 lines.append(f"{is_current}{model_badge} <b>{name}</b> (<code>{short_id}</code>){lock_indicator}")
 
                 buttons.append([
