@@ -158,6 +158,18 @@ def setup_logging(
         diagnose=True,
     )
 
+    # 항상 파일에도 출력 (nohup stderr 리다이렉트가 자식 프로세스에서 동작하지 않는 문제 우회)
+    logger.add(
+        "/tmp/telegram-bot-loguru.log",
+        format=_log_format_file,
+        level=level,
+        colorize=False,
+        backtrace=True,
+        diagnose=True,
+        rotation="50 MB",
+        retention="3 days",
+    )
+
     # 파일 출력 (옵션)
     if log_file:
         logger.add(

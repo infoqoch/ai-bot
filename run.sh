@@ -82,7 +82,7 @@ case "$1" in
     # CLAUDECODE 환경변수 제거 (Claude Code 세션 내에서 실행 시 nested session 방지)
     unset CLAUDECODE
     _rotate_logs
-    LOG_LEVEL="${LOG_LEVEL:-DEBUG}" PYTHONPYCACHEPREFIX=.build nohup python -m src.supervisor > "$LOG_FILE" 2>&1 &
+    LOG_LEVEL="${LOG_LEVEL:-DEBUG}" PYTHONUNBUFFERED=1 PYTHONPYCACHEPREFIX=.build nohup python -m src.supervisor > "$LOG_FILE" 2>&1 &
     new_pid=$!
     echo $new_pid > "$PID_FILE"
     sleep 2
@@ -134,7 +134,7 @@ case "$1" in
     fi
     ;;
   log)
-    tail -f "$LOG_FILE"
+    tail -f /tmp/telegram-bot-loguru.log
     ;;
   trace)
     # TRACE 모드로 시작 (최상세 로깅)
@@ -148,7 +148,7 @@ case "$1" in
     source venv/bin/activate
     unset CLAUDECODE
     _rotate_logs
-    LOG_LEVEL="TRACE" PYTHONPYCACHEPREFIX=.build nohup python -m src.supervisor > "$LOG_FILE" 2>&1 &
+    LOG_LEVEL="TRACE" PYTHONUNBUFFERED=1 PYTHONPYCACHEPREFIX=.build nohup python -m src.supervisor > "$LOG_FILE" 2>&1 &
     new_pid=$!
     echo $new_pid > "$PID_FILE"
     sleep 2
@@ -173,7 +173,7 @@ case "$1" in
     source venv/bin/activate
     unset CLAUDECODE
     _rotate_logs
-    LOG_LEVEL="DEBUG" PYTHONPYCACHEPREFIX=.build nohup python -m src.supervisor > "$LOG_FILE" 2>&1 &
+    LOG_LEVEL="DEBUG" PYTHONUNBUFFERED=1 PYTHONPYCACHEPREFIX=.build nohup python -m src.supervisor > "$LOG_FILE" 2>&1 &
     new_pid=$!
     echo $new_pid > "$PID_FILE"
     sleep 2
