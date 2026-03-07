@@ -125,15 +125,15 @@ class TestWeatherPlugin:
         assert reply or context.bot.send_message.called
 
     @pytest.mark.asyncio
-    async def test_weather_city_query(self, handlers, repository):
-        """특정 도시 날씨 조회."""
-        update, context = create_message_update("서울 날씨")
+    async def test_weather_city_query_not_handled(self, handlers, mock_claude):
+        """'도시+날씨' 자연어 패턴은 플러그인이 처리하지 않음 (AI로 넘김)."""
+        update, context = create_message_update("경주 날씨")
 
         await handlers.handle_message(update, context)
+        await wait_for_handlers(handlers)
 
-        reply = await get_reply_text(update)
-        # 서울 날씨 정보 또는 API 에러
-        assert reply or context.bot.send_message.called
+        # 플러그인이 아닌 Claude가 처리해야 함
+        assert mock_claude.chat.called or context.bot.send_message.called
 
 
 class TestPluginExcludePatterns:
