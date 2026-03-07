@@ -487,6 +487,20 @@ ALLOWED_WORKSPACE_PATHS=/Users/bae/AiSandbox/*,/Users/bae/Projects/*
 | `claude` | 일반 스케줄 (새 세션에서 실행) |
 | `workspace` | 워크스페이스 스케줄 (경로의 CLAUDE.md 적용)
 
+## /lock - 태스크 현황 대시보드
+
+사용자가 보낸 메시지의 실시간 처리 현황을 보여주는 명령어.
+
+| 섹션 | 데이터 소스 | 표시 내용 |
+|------|------------|----------|
+| **Processing** | `_active_tasks` | 처리 중인 메시지 (세션명, 경과시간, 미리보기) |
+| **Queue** | `session_queue_manager` | 대기 중인 메시지 |
+| **Slots** | `_user_semaphores` | 동시 처리 슬롯 (X/3) |
+
+- 핸들러: `AdminHandlers.lock_command()` → `_build_lock_status()`
+- 태스크 등록: `_register_task()` (handle_message, /ai에서 asyncio.create_task 후 호출)
+- 좀비 정리: `_cleanup_zombie_tasks()` → `_active_tasks` 제거 + `session_queue_manager.force_unlock()`
+
 ## 프로세스 관리 (CRITICAL)
 
 ### 싱글톤 락 시스템

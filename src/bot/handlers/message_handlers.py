@@ -93,7 +93,7 @@ class MessageHandlers(BaseHandler):
         logger.info(f"Session decided - model={model}, new={is_new_session}, workspace={workspace_path or '(none)'}")
 
         # Fire-and-forget: 백그라운드에서 Claude 호출
-        asyncio.create_task(
+        task = asyncio.create_task(
             self._process_claude_request_with_semaphore(
                 bot=context.bot,
                 chat_id=chat_id,
@@ -105,6 +105,7 @@ class MessageHandlers(BaseHandler):
                 model=model,
             )
         )
+        self._register_task(task, user_id, session_id, trace_id, message)
         logger.trace("/ai handler complete - background task created")
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -259,7 +260,7 @@ class MessageHandlers(BaseHandler):
         logger.info(f"Message accepted: model={model}, new={is_new_session}, workspace={workspace_path or '(none)'}")
 
         # Fire-and-forget: 백그라운드에서 Claude 호출
-        asyncio.create_task(
+        task = asyncio.create_task(
             self._process_claude_request_with_semaphore(
                 bot=context.bot,
                 chat_id=chat_id,
@@ -271,6 +272,7 @@ class MessageHandlers(BaseHandler):
                 model=model,
             )
         )
+        self._register_task(task, user_id, session_id, trace_id, message)
         logger.trace("handle_message complete - background task created")
 
     async def _process_claude_request_with_semaphore(

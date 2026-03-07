@@ -11,6 +11,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from src.logging_config import logger, set_trace_id, set_user_id, clear_context
+from ..session_queue import session_queue_manager
 from ..constants import (
     WATCHDOG_INTERVAL_SECONDS,
     TASK_TIMEOUT_SECONDS,
@@ -158,6 +159,7 @@ class BaseHandler:
                 logger.info(f"Task cancelled - trace={info.trace_id}")
 
             await self._kill_claude_process(info.session_id)
+            await session_queue_manager.force_unlock(info.session_id)
             self._active_tasks.pop(task_id, None)
 
     async def _kill_claude_process(self, session_id: str) -> None:
