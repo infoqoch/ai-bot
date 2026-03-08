@@ -15,7 +15,7 @@ from src.ai import (
 )
 from src.logging_config import logger, clear_context
 from src.constants import AVAILABLE_HOURS
-from ..constants import MAX_WORKSPACE_PATHS_DISPLAY, get_model_emoji, get_model_badge
+from ..constants import get_model_emoji, get_model_badge
 from ..formatters import truncate_message
 from .base import BaseHandler
 
@@ -73,11 +73,6 @@ class CallbackHandlers(BaseHandler):
         # Session queue callback (new method)
         if callback_data.startswith("sq:"):
             await self._handle_session_queue_callback(query, chat_id, callback_data)
-            return
-
-        # Alternative session selection callback (legacy)
-        if callback_data.startswith("alt:"):
-            await self._handle_alternative_session_callback(query, chat_id, callback_data)
             return
 
         logger.warning(f"Unknown callback: {callback_data}")
@@ -1350,116 +1345,6 @@ class CallbackHandlers(BaseHandler):
             return
 
         await query.answer("Unknown action")
-
-    async def _handle_alternative_session_callback(self, query, chat_id: int, callback_data: str) -> None:
-        """Handle alternative session selection callback (legacy)."""
-        user_id = str(chat_id)
-        parts = callback_data.split(":")
-
-        if len(parts) < 3:
-            await query.edit_message_text("Invalid request.")
-            return
-
-        action = parts[1]
-
-        if action == "cancel":
-            pending_key = parts[2] if len(parts) > 2 else None
-            if pending_key and hasattr(self, '_pending_messages'):
-                self._pending_messages.pop(pending_key, None)
-            await query.edit_message_text("Request cancelled.")
-            return
-
-        if len(parts) < 4:
-            await query.edit_message_text("Invalid request.")
-            return
-
-        target = parts[2]
-        pending_key = parts[3]
-
-        message = self._get_pending_message(pending_key, user_id) if hasattr(self, '_get_pending_message') else None
-        if not message:
-            logger.warning(f"Alternative session callback - pending message not found: key={pending_key}")
-            await query.edit_message_text(
-                "<b>Request expired</b>\n\n"
-                "Please resend the message.",
-                parse_mode="HTML"
-            )
-            return
-
-        message_preview = truncate_message(message, 30)
-
-        if action == "s":
-            session_info = self.sessions.get_session_by_prefix(user_id, target[:8])
-            if not session_info:
-                await query.edit_message_text("❌ Session not found.")
-                return
-
-            full_session_id = session_info["full_session_id"]
-            session_name = session_info.get("name") or session_info["session_id"]
-            model = session_info.get("model", "sonnet")
-
-            if self._is_session_locked(full_session_id):
-                await query.edit_message_text("❌ Selected session is busy now. Please resend the message.")
-                return
-
-            await query.edit_message_text(
-                f"Processing in <b>{session_name}</b> session...\n\n"
-                f"<code>{message_preview}</code>",
-                parse_mode="HTML"
-            )
-
-            self.sessions.switch_session(user_id, full_session_id)
-            try:
-                _, start_error = self._start_detached_job(
-                    chat_id=chat_id,
-                    session_id=full_session_id,
-                    message=message,
-                    model=model,
-                    workspace_path=session_info.get("workspace_path"),
-                )
-            except Exception:
-                await query.message.reply_text("❌ Failed to start detached worker.")
-                return
-
-            if start_error == "session_locked":
-                await query.message.reply_text("❌ Selected session is busy now. Please resend the message.")
-
-        elif action == "n":
-            provider = self._get_selected_ai_provider(user_id)
-            model = target if is_supported_model(provider, target) else get_default_model(provider)
-
-            await query.edit_message_text(
-                f"Creating new <b>{get_profile_label(provider, model)}</b> session...\n\n"
-                f"<code>{message_preview}</code>",
-                parse_mode="HTML"
-            )
-
-            logger.info(f"Alternative session - creating new {provider}:{model} session")
-            new_session_id = self.sessions.create_session(
-                user_id=user_id,
-                ai_provider=provider,
-                model=model,
-                first_message="(new session)",
-            )
-            logger.info(f"New session created: {new_session_id[:8]}, model={model}")
-
-            try:
-                _, start_error = self._start_detached_job(
-                    chat_id=chat_id,
-                    session_id=new_session_id,
-                    message=message,
-                    model=model,
-                    workspace_path=None,
-                )
-            except Exception:
-                await query.message.reply_text("❌ Failed to start detached worker.")
-                return
-
-            if start_error == "session_locked":
-                await query.message.reply_text("❌ New session became busy unexpectedly. Please resend the message.")
-
-        else:
-            await query.edit_message_text("Unknown action.")
 
     async def _handle_session_queue_callback(self, query, chat_id: int, callback_data: str) -> None:
         """Handle session queue callbacks (new method).

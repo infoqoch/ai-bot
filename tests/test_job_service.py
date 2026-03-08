@@ -1,5 +1,6 @@
 """Detached job execution service tests."""
 
+import asyncio
 import sqlite3
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -126,3 +127,49 @@ async def test_run_job_drains_persistent_queue(repo, session_service):
     assert len(rows) == 2
     assert rows[0]["processed"] == 2
     assert rows[1]["processed"] == 2
+
+
+@pytest.mark.asyncio
+async def test_run_job_marks_watchdog_timeout_without_completion_notice(repo, session_service):
+    """Detached watchdog timeout stops the job and stores a timeout state."""
+    session_service.create_session("12345", "sess1", model="sonnet", name="테스트")
+    job_id = repo.enqueue_message(
+        chat_id=12345,
+        session_id="sess1",
+        request="오래 걸리는 질문",
+        model="sonnet",
+    )
+    repo.reserve_session_lock("sess1", job_id)
+
+    async def hang(*_args, **_kwargs):
+        await asyncio.sleep(3600)
+
+    claude = MagicMock()
+    claude.chat = AsyncMock(side_effect=hang)
+
+    fake_bot = MagicMock()
+    fake_bot.send_message = AsyncMock()
+
+    service = JobService(
+        repo=repo,
+        session_service=session_service,
+        claude_client=claude,
+        telegram_token="test-token",
+    )
+
+    with (
+        patch("src.services.job_service.Bot", return_value=fake_bot),
+        patch("src.services.job_service.TASK_TIMEOUT_SECONDS", 1),
+    ):
+        result = await service.run_job(job_id)
+
+    assert result is True
+    saved = repo.get_message_log(job_id)
+    assert saved["processed"] == 2
+    assert saved["error"] == "watchdog_timeout"
+    assert "Task exceeded 1 second and was stopped" in saved["response"]
+    assert repo.get_session_lock("sess1") is None
+
+    sent_texts = [call.kwargs["text"] for call in fake_bot.send_message.await_args_list]
+    assert any("Task exceeded 1 second and was stopped" in text for text in sent_texts)
+    assert not any("Task complete!" in text for text in sent_texts)

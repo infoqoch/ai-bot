@@ -166,14 +166,13 @@ CREATE TABLE IF NOT EXISTS queued_messages (
     is_new_session INTEGER NOT NULL,
     workspace_path TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    expires_at TEXT NOT NULL
+    expires_at TEXT NOT NULL DEFAULT '9999-12-31T23:59:59+00:00'
 );
 
 CREATE INDEX IF NOT EXISTS idx_message_log_chat_id ON message_log(chat_id);
 CREATE INDEX IF NOT EXISTS idx_message_log_processed ON message_log(processed);
 CREATE INDEX IF NOT EXISTS idx_message_log_request_at ON message_log(request_at);
 CREATE INDEX IF NOT EXISTS idx_queued_messages_session_id ON queued_messages(session_id);
-CREATE INDEX IF NOT EXISTS idx_queued_messages_expires_at ON queued_messages(expires_at);
 
 -- session_locks: detached worker ownership for Claude processing
 CREATE TABLE IF NOT EXISTS session_locks (

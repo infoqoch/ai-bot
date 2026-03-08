@@ -290,8 +290,9 @@ Current session is processing
 ```
 
 - 대기열 위치 표시: `Position: #N`
-- 요청 임시 저장 만료: 5분 (`expires_at = time.time() + 300`)
+- 요청 임시 저장 만료: 5분
 - 만료 시: `Request expired. Please resend the message.`
+- `Wait in this session` 선택 후 저장되는 persistent queue는 자동 만료되지 않음
 - 세션 사용 여부는 봇 메모리가 아니라 persistent lock 기준으로 판단
 - 따라서 봇이 재시작돼도 같은 세션은 계속 busy로 보이며 중복 실행되지 않음
 
@@ -468,7 +469,8 @@ question_preview
 
 | 상황 | 메시지 |
 |------|--------|
-| 타임아웃 | `Response timed out. Please try again.` |
+| detached watchdog 타임아웃 (30분) | `Task exceeded 30 minutes and was stopped. Please try again.` |
+| provider 내부 타임아웃 | `Response timed out. Please try again.` |
 | 빈 응답 | `{question_preview} Response is empty. Please try again.` |
 | CLI 에러 | `Error: {error_detail}` |
 | 처리 중 예외 | `An error occurred. Please try again later.` |
@@ -480,8 +482,10 @@ question_preview
 | 경과 시간 | 동작 |
 |----------|------|
 | 0~5분 | 처리 중 (별도 표시 없음) |
-| 5분 | 알림: `Task taking N+ minutes. Will notify on completion!` |
-| 완료 (5분 이상 걸린 경우) | 알림: `Task complete! (Mm Ss)` |
+| 5분 | 알림: `Task taking N+ minutes. Still running. I will notify you when it finishes.` |
+| 5~30분 | detached worker는 계속 실행. provider client에는 별도 5분 hard timeout 없음 |
+| 30분 | detached watchdog이 작업 중단, DB에는 `watchdog_timeout` 저장, 사용자에게 timeout 메시지 전송 |
+| 완료 (5분 이상 걸린 경우) | 성공인 경우에만 알림: `Task complete! (Mm Ss)` |
 | 봇 재시작 | detached worker가 계속 실행되고 완료 후 결과를 전송 |
 
 ### 동시 요청 정책
@@ -495,6 +499,22 @@ question_preview
 | `Wait` 선택 | persistent queue에 저장 후 현재 작업 완료 뒤 자동 처리 |
 | 다른 세션 선택 | 세션 전환 후 즉시 처리 |
 | 새 세션 선택 | 새 세션 생성 후 즉시 처리 |
+
+### SQLite WAL 메모
+
+- WAL이어도 reader 여러 개 + writer 한 개 모델이다.
+- 즉 서로 다른 세션/row를 만지는 write라도 동시에 commit 단계로 들어가면 직렬화된다.
+- 이 프로젝트는 그래서 DB row lock에 기대기보다, 앱 레벨 `session_locks`로 같은 세션의 worker를 직렬화하고, 각 write는 autocommit으로 짧게 끝내는 방식을 기본 원칙으로 둔다.
+
+### AI 대화 실행 시나리오
+
+1. 사용자가 메시지를 보냄
+2. 세션이 idle이면 `message_log` row 생성 + `session_locks` 예약 + detached worker spawn
+3. worker가 provider CLI를 호출하고, 5분이 지나면 "still running" 알림만 전송
+4. 같은 세션에 새 메시지가 오면 Session Queue UI 표시
+5. 사용자가 `Wait in this session`을 누르면 요청이 persistent queue에 저장됨
+6. 현재 worker가 성공/실패/timeout으로 종료되면 lock을 유지한 채 다음 queued message를 이어 처리
+7. 마지막 queued message까지 끝나면 lock 해제
 
 ### 시스템 프롬프트
 
@@ -571,7 +591,7 @@ Queue (1)
 | 스케줄 워크스페이스 없음 | `/workspace`에서 등록 안내 |
 | 스케줄 가능 플러그인 없음 | `get_scheduled_actions()` 구현 안내 |
 | ForceReply 입력 만료 | `Input expired. Please try again.` |
-| 큐 요청 만료 (5분) | `Request expired. Please resend the message.` |
+| 세션 충돌 UI 선택 만료 (5분) | `Request expired. Please resend the message.` |
 | 동일 워크스페이스 세션 존재 | 기존 세션으로 자동 전환 (중복 생성 방지) |
 
 ---

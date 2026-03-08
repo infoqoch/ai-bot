@@ -32,12 +32,12 @@ def build_default_registry(settings) -> AIRegistry:
             "claude": ClaudeClient(
                 command="claude",
                 system_prompt_file=settings.telegram_prompt_file,
-                timeout=300,
+                timeout=None,
             ),
             "codex": CodexClient(
                 command="codex",
                 system_prompt_file=settings.telegram_prompt_file,
-                timeout=300,
+                timeout=None,
             ),
         }
     )

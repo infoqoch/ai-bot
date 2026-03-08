@@ -126,6 +126,7 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_user_provider_state_provider ON user_provider_state(ai_provider)"
     )
+    conn.execute("DROP INDEX IF EXISTS idx_queued_messages_expires_at")
 
     _backfill_session_provider_data(conn)
     _cleanup_unsupported_provider_rows(conn)

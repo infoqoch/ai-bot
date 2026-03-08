@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from .base import BaseHandler, TaskInfo, PendingMessage
+from .base import BaseHandler, TaskInfo
 from .session_handlers import SessionHandlers
 from .message_handlers import MessageHandlers
 from .admin_handlers import AdminHandlers
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from src.plugins.loader import PluginLoader
     from ..middleware import AuthManager
 
-__all__ = ["BotHandlers", "TaskInfo", "PendingMessage"]
+__all__ = ["BotHandlers", "TaskInfo"]
 
 
 class BotHandlers(
@@ -30,7 +30,7 @@ class BotHandlers(
     Composed from:
     - BaseHandler: Common utilities, watchdog, task tracking
     - SessionHandlers: Session commands (new, switch, delete, etc.)
-    - MessageHandlers: Message processing, Claude requests
+    - MessageHandlers: Message intake and detached worker spawning
     - AdminHandlers: Admin commands (tasks, jobs, auth, etc.)
     - WorkspaceHandlers: Workspace management
     - CallbackHandlers: Inline button callbacks

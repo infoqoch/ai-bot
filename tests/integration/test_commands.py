@@ -8,7 +8,6 @@ import pytest
 from tests.integration.conftest import (
     create_command_update,
     get_reply_text,
-    get_sent_message,
     MockTelegram,
 )
 

@@ -10,7 +10,6 @@ from tests.integration.conftest import (
     create_message_update,
     create_callback_update,
     get_reply_text,
-    get_sent_message,
     MockTelegram,
     MockClaude,
     wait_for_handlers,

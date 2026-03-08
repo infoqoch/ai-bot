@@ -19,7 +19,7 @@ class CodexClient:
         self,
         command: str = "codex",
         system_prompt_file: Optional[Path] = None,
-        timeout: int = 300,
+        timeout: Optional[int] = None,
     ):
         self.command_parts = shlex.split(command)
         self.system_prompt = self._load_system_prompt(system_prompt_file)
@@ -48,6 +48,12 @@ class CodexClient:
                 stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
             else:
                 stdout, stderr = await process.communicate()
+        except asyncio.CancelledError:
+            with suppress(ProcessLookupError):
+                process.kill()
+            with suppress(Exception):
+                await process.communicate()
+            raise
         except asyncio.TimeoutError:
             with suppress(ProcessLookupError):
                 process.kill()

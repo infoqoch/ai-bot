@@ -2,15 +2,14 @@
 
 모든 콜백 플로우의 정상 동작을 검증:
 1. Workspace 콜백 (ws:) - 7개 플로우
-2. Session Queue 콜백 (sq:) - 4개 플로우
-3. Alternative Session 콜백 (alt:) - 3개 플로우
-4. Session 콜백 (sess:) - 누락분
-5. Lock 콜백 (lock:)
+2. Session Queue 콜백 (sq:) - 핵심 2개 플로우
+3. Session 콜백 (sess:) - 누락분
+4. Lock 콜백 (lock:)
 """
 
 import asyncio
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -24,9 +23,12 @@ def make_query():
     query = MagicMock()
     query.answer = AsyncMock()
     query.edit_message_text = AsyncMock()
+    query.from_user = MagicMock()
+    query.from_user.id = 12345
     query.message = MagicMock()
     query.message.reply_text = AsyncMock()
     query.message.chat_id = 12345
+    query.get_bot = MagicMock(return_value=MagicMock())
     return query
 
 
@@ -382,29 +384,55 @@ class TestSessionQueueCallbackFlows:
     async def test_sq_cancel(self, handlers):
         """sq:cancel - 큐 요청 취소."""
         handlers._temp_pending = {
-            "user_id": "12345",
-            "message": "테스트",
+            "pending-1": {
+                "user_id": "12345",
+                "message": "테스트",
+                "model": "sonnet",
+                "is_new_session": False,
+                "workspace_path": "",
+                "current_session_id": "session-123",
+            },
         }
 
         query = make_query()
-        await handlers._handle_session_queue_callback(query, 12345, "sq:cancel")
+        await handlers._handle_session_queue_callback(query, 12345, "sq:cancel:pending-1")
 
         text = get_text(query)
-        # 취소 메시지 또는 빈 temp_pending
-        assert query.edit_message_text.called or query.answer.called
+        assert text == "Request cancelled."
+        assert handlers._temp_pending == {}
 
     @pytest.mark.asyncio
     async def test_sq_wait(self, handlers):
         """sq:wait:{session_id} - 대기열에 추가."""
+        repo = MagicMock()
+        repo.get_queued_messages_by_session.return_value = [{"id": 1}, {"id": 2}]
+        handlers.sessions._repo = repo
+        handlers.sessions.get_session_info.return_value = "sess1"
+        handlers._is_session_locked = MagicMock(return_value=True)
         handlers._temp_pending = {
-            "user_id": "12345",
-            "message": "기다려줘",
+            "pending-1": {
+                "user_id": "12345",
+                "message": "기다려줘",
+                "model": "sonnet",
+                "is_new_session": False,
+                "workspace_path": "",
+                "current_session_id": "session-123",
+            },
         }
 
         query = make_query()
-        await handlers._handle_session_queue_callback(query, 12345, "sq:wait:session-123")
+        await handlers._handle_session_queue_callback(query, 12345, "sq:wait:pending-1:session-123")
 
-        assert query.edit_message_text.called or query.answer.called
+        repo.save_queued_message.assert_called_once_with(
+            session_id="session-123",
+            user_id="12345",
+            chat_id=12345,
+            message="기다려줘",
+            model="sonnet",
+            is_new_session=False,
+            workspace_path="",
+        )
+        assert "Added to queue" in get_text(query)
 
 
 # =============================================================================
