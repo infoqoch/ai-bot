@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from src.ai import DEFAULT_PROVIDER
 from src.repository import init_repository, shutdown_repository, reset_connection
 from src.repository.repository import Repository
 from plugins.builtin.todo.plugin import TodoPlugin
@@ -56,6 +57,44 @@ class TestUserOperations:
         user = repo.get_user("user1")
         assert user["current_session_id"] == "session1"
         assert user["previous_session_id"] == "session0"
+
+        state = repo._conn.execute(
+            """SELECT current_session_id, previous_session_id
+               FROM user_provider_state
+               WHERE user_id = ? AND ai_provider = ?""",
+            ("user1", DEFAULT_PROVIDER),
+        ).fetchone()
+        assert state is not None
+        assert state["current_session_id"] == "session1"
+        assert state["previous_session_id"] == "session0"
+
+
+class TestRepositoryConnectionRules:
+    """SQLite connection/runtime rules."""
+
+    def test_repository_uses_autocommit(self, repo):
+        """운영 Repository 커넥션은 autocommit 모드다."""
+        assert repo._conn.autocommit is True
+        assert repo._conn.in_transaction is False
+
+    def test_read_methods_do_not_create_provider_state(self, repo):
+        """조회 메서드는 user/provider_state row를 암묵적으로 만들지 않는다."""
+        assert repo.get_selected_ai_provider("missing-user") == DEFAULT_PROVIDER
+        assert repo.get_current_session_id("missing-user") is None
+        assert repo.get_previous_session_id("missing-user") is None
+
+        user_count = repo._conn.execute(
+            "SELECT COUNT(*) FROM users WHERE id = ?",
+            ("missing-user",),
+        ).fetchone()[0]
+        state_count = repo._conn.execute(
+            "SELECT COUNT(*) FROM user_provider_state WHERE user_id = ?",
+            ("missing-user",),
+        ).fetchone()[0]
+
+        assert user_count == 0
+        assert state_count == 0
+        assert repo._conn.in_transaction is False
 
 
 class TestSessionOperations:

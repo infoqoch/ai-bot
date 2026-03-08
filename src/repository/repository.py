@@ -243,8 +243,8 @@ class Repository:
 
     def get_selected_ai_provider(self, user_id: str) -> str:
         """Get currently selected AI provider for a user."""
-        user = self.get_or_create_user(user_id)
-        provider = user.get("selected_ai_provider") or DEFAULT_PROVIDER
+        user = self.get_user(user_id)
+        provider = user.get("selected_ai_provider") if user else DEFAULT_PROVIDER
         return provider if provider in SUPPORTED_PROVIDERS else DEFAULT_PROVIDER
 
     def set_selected_ai_provider(self, user_id: str, ai_provider: str) -> None:
@@ -257,7 +257,7 @@ class Repository:
         self._conn.commit()
 
     def _ensure_provider_state(self, user_id: str, ai_provider: str) -> None:
-        """Ensure one provider-state row exists."""
+        """Ensure one provider-state row exists on explicit write paths."""
         self.get_or_create_user(user_id)
         self._conn.execute(
             """INSERT OR IGNORE INTO user_provider_state
@@ -265,6 +265,7 @@ class Repository:
                VALUES (?, ?, ?)""",
             (user_id, ai_provider, self._now()),
         )
+        self._conn.commit()
 
     def update_user_current_session(
         self,
@@ -307,7 +308,6 @@ class Repository:
     def get_current_session_id(self, user_id: str, ai_provider: Optional[str] = None) -> Optional[str]:
         """Get current session ID for one provider."""
         provider = ai_provider or self.get_selected_ai_provider(user_id)
-        self._ensure_provider_state(user_id, provider)
         row = self._conn.execute(
             """SELECT current_session_id
                FROM user_provider_state
@@ -319,7 +319,6 @@ class Repository:
     def get_previous_session_id(self, user_id: str, ai_provider: Optional[str] = None) -> Optional[str]:
         """Get previous session ID for one provider."""
         provider = ai_provider or self.get_selected_ai_provider(user_id)
-        self._ensure_provider_state(user_id, provider)
         row = self._conn.execute(
             """SELECT previous_session_id
                FROM user_provider_state
