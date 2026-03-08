@@ -395,8 +395,9 @@ class BaseHandler:
         command = text.split()[0] if text else ""
         logger.info(f"Unknown command: {command}")
 
+        from ..formatters import escape_html as _esc
         await update.message.reply_text(
-            f"Unknown command: <code>{command}</code>\n\n"
+            f"Unknown command: <code>{_esc(command)}</code>\n\n"
             f"/help for command list",
             parse_mode="HTML"
         )

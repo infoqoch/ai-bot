@@ -637,6 +637,99 @@ class Repository:
             for row in cursor.fetchall()
         ]
 
+    def count_session_history(self, session_id: str) -> int:
+        """Count history entries for a session without fetching all rows."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM session_history WHERE session_id = ?",
+            (session_id,)
+        ).fetchone()
+        return row[0] if row else 0
+
+    def list_sessions_with_counts(
+        self,
+        user_id: str,
+        ai_provider: Optional[str] = None,
+        include_deleted: bool = False,
+        limit: Optional[int] = None,
+    ) -> list[tuple[SessionData, int]]:
+        """List sessions with history counts in a single query."""
+        conditions = ["s.user_id = ?"]
+        params: list[Any] = [user_id]
+        if ai_provider:
+            conditions.append("s.ai_provider = ?")
+            params.append(ai_provider)
+        if not include_deleted:
+            conditions.append("s.deleted = 0")
+        where = " AND ".join(conditions)
+        query = f"""
+            SELECT s.*, COALESCE(h.cnt, 0) AS history_count
+            FROM sessions s
+            LEFT JOIN (
+                SELECT session_id, COUNT(*) AS cnt
+                FROM session_history
+                GROUP BY session_id
+            ) h ON s.id = h.session_id
+            WHERE {where}
+            ORDER BY s.last_used DESC
+        """
+        if limit:
+            query += " LIMIT ?"
+            params.append(limit)
+        rows = self._conn.execute(query, params).fetchall()
+        return [
+            (
+                SessionData(
+                    id=row["id"],
+                    user_id=row["user_id"],
+                    ai_provider=row["ai_provider"],
+                    provider_session_id=row["provider_session_id"],
+                    model=row["model"],
+                    name=row["name"],
+                    workspace_path=row["workspace_path"],
+                    created_at=row["created_at"],
+                    last_used=row["last_used"],
+                    deleted=bool(row["deleted"]),
+                ),
+                row["history_count"],
+            )
+            for row in rows
+        ]
+
+    def get_session_by_id_prefix(self, user_id: str, prefix: str) -> Optional[tuple[SessionData, int]]:
+        """Find a session by ID prefix with server-side filtering."""
+        rows = self._conn.execute(
+            """
+            SELECT s.*, COALESCE(h.cnt, 0) AS history_count
+            FROM sessions s
+            LEFT JOIN (
+                SELECT session_id, COUNT(*) AS cnt
+                FROM session_history
+                GROUP BY session_id
+            ) h ON s.id = h.session_id
+            WHERE s.user_id = ? AND s.id LIKE ? AND s.deleted = 0
+            ORDER BY s.last_used DESC
+            """,
+            (user_id, f"{prefix}%"),
+        ).fetchall()
+        if len(rows) == 1:
+            row = rows[0]
+            return (
+                SessionData(
+                    id=row["id"],
+                    user_id=row["user_id"],
+                    ai_provider=row["ai_provider"],
+                    provider_session_id=row["provider_session_id"],
+                    model=row["model"],
+                    name=row["name"],
+                    workspace_path=row["workspace_path"],
+                    created_at=row["created_at"],
+                    last_used=row["last_used"],
+                    deleted=bool(row["deleted"]),
+                ),
+                row["history_count"],
+            )
+        return None  # ambiguous or not found
+
     def clear_session_history(self, session_id: str) -> int:
         """Clear all history for session."""
         cursor = self._conn.execute(

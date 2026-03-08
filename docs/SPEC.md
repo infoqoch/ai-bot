@@ -298,12 +298,12 @@ Current session is processing
 
 ### 봇 재시작 중 응답 보존
 
-자가 개발 중 AI agent가 `./run.sh restart`를 실행할 수 있다. 이때 UX 목표는 "응답 유실 없이 계속 진행되는 것"이다.
+자가 개발 중 AI agent가 `./run.sh restart-soft`를 실행할 수 있다. 이때 UX 목표는 "응답 유실 없이 계속 진행되는 것"이다.
 
 | 상황 | 사용자 경험 |
 |------|-------------|
 | 요청 접수 직후 | 핸들러는 즉시 반환. 사용자는 봇이 멈춘 것처럼 느끼지 않음 |
-| 처리 중 봇 재시작 | 별도 복구 질문 없이 기존 작업이 계속 진행되고, 완료 응답이 그대로 도착 |
+| 처리 중 soft 재시작 | 별도 복구 질문 없이 기존 작업이 계속 진행되고, 완료 응답이 그대로 도착 |
 | 재시작 중 같은 세션에 새 메시지 | 세션은 여전히 busy로 보이며 Session Queue UI가 그대로 동작 |
 | `Wait in this session` 선택 | 요청은 영속 대기열에 저장되고 현재 작업 완료 뒤 자동 실행 |
 | worker 자체 비정상 종료 | 유실 알림 후 재전송을 유도 |
@@ -488,7 +488,7 @@ question_preview
 | 5~30분 | detached worker는 계속 실행. provider client에는 별도 5분 hard timeout 없음 |
 | 30분 | detached watchdog이 작업 중단, DB에는 `watchdog_timeout` 저장, 사용자에게 timeout 메시지 전송 |
 | 완료 (5분 이상 걸린 경우) | 성공인 경우에만 알림: `Task complete! (Mm Ss)` |
-| 봇 재시작 | detached worker가 계속 실행되고 완료 후 결과를 전송 |
+| 봇 soft 재시작 | detached worker가 계속 실행되고 완료 후 결과를 전송 |
 
 ### 동시 요청 정책
 

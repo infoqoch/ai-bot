@@ -21,8 +21,10 @@ Usage:
 
 import contextvars
 import logging
+import os
 import sys
 import uuid
+from pathlib import Path
 from typing import Optional
 
 from loguru import logger
@@ -148,6 +150,10 @@ def setup_logging(
     # 기존 핸들러 제거
     logger.remove()
 
+    log_dir = Path(os.getenv("BOT_LOG_DIR", "/tmp/telegram-bot-logs"))
+    log_dir.mkdir(parents=True, exist_ok=True)
+    default_log_file = log_dir / "telegram-bot-loguru.log"
+
     # 콘솔 출력 (컬러)
     logger.add(
         sys.stderr,
@@ -160,14 +166,14 @@ def setup_logging(
 
     # 항상 파일에도 출력 (nohup stderr 리다이렉트가 자식 프로세스에서 동작하지 않는 문제 우회)
     logger.add(
-        "/tmp/telegram-bot-loguru.log",
+        str(default_log_file),
         format=_log_format_file,
         level=level,
         colorize=False,
         backtrace=True,
         diagnose=True,
-        rotation="50 MB",
-        retention="3 days",
+        rotation="00:00",
+        retention="14 days",
     )
 
     # 파일 출력 (옵션)
@@ -176,8 +182,8 @@ def setup_logging(
             log_file,
             format=_log_format_file,
             level=level,
-            rotation="50 MB",
-            retention="7 days",
+            rotation="00:00",
+            retention="14 days",
             compression="gz",
             backtrace=True,
             diagnose=True,

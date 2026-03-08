@@ -10,6 +10,7 @@ from src.ai import get_profile_label, get_provider_label
 from src.logging_config import logger, clear_context
 from src.constants import AVAILABLE_HOURS
 from ..constants import get_model_emoji
+from ..formatters import escape_html
 from ..middleware import authorized_only, authenticated_only
 from .base import BaseHandler
 
@@ -102,9 +103,9 @@ class WorkspaceHandlers(BaseHandler):
             ]
 
             await query.edit_message_text(
-                f"<b>{ws.name}</b>\n\n"
-                f"<code>{ws.short_path}</code>\n"
-                f"{ws.description}\n\n"
+                f"<b>{escape_html(ws.name)}</b>\n\n"
+                f"<code>{escape_html(ws.short_path)}</code>\n"
+                f"{escape_html(ws.description)}\n\n"
                 f"What would you like to do?",
                 reply_markup=InlineKeyboardMarkup(buttons),
                 parse_mode="HTML"
@@ -128,8 +129,8 @@ class WorkspaceHandlers(BaseHandler):
             ]
 
             await query.edit_message_text(
-                f"<b>{ws.name}</b> - Start Session\n\n"
-                f"<code>{ws.short_path}</code>\n\n"
+                f"<b>{escape_html(ws.name)}</b> - Start Session\n\n"
+                f"<code>{escape_html(ws.short_path)}</code>\n\n"
                 f"Current AI: <b>{get_provider_label(provider)}</b>\n"
                 f"Select model:",
                 reply_markup=InlineKeyboardMarkup(buttons),
@@ -154,7 +155,7 @@ class WorkspaceHandlers(BaseHandler):
                     self.sessions.switch_session(user_id, s["full_session_id"])
                     await query.edit_message_text(
                         f"A workspace session already exists.\n"
-                        f"Switched to existing session: <b>{s.get('name', ws.name)}</b>",
+                        f"Switched to existing session: <b>{escape_html(s.get('name', ws.name))}</b>",
                         parse_mode="HTML"
                     )
                     await query.answer("Switched to existing session")
@@ -175,8 +176,8 @@ class WorkspaceHandlers(BaseHandler):
             model_emoji = get_model_emoji(model)
             await query.edit_message_text(
                 f"<b>Workspace Session Created!</b>\n\n"
-                f"<b>{ws.name}</b>\n"
-                f"<code>{ws.short_path}</code>\n"
+                f"<b>{escape_html(ws.name)}</b>\n"
+                f"<code>{escape_html(ws.short_path)}</code>\n"
                 f"AI: <b>{get_provider_label(provider)}</b>\n"
                 f"{model_emoji} Model: <b>{get_profile_label(provider, model)}</b> (<code>{model}</code>)\n"
                 f"Session: <code>{session_id[:8]}</code>\n\n"
@@ -211,8 +212,8 @@ class WorkspaceHandlers(BaseHandler):
             ])
 
             await query.edit_message_text(
-                f"<b>{ws.name}</b> - Schedule Registration\n\n"
-                f"<code>{ws.short_path}</code>\n\n"
+                f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
+                f"<code>{escape_html(ws.short_path)}</code>\n\n"
                 f"Select time (daily repeat):",
                 reply_markup=InlineKeyboardMarkup(buttons),
                 parse_mode="HTML"
@@ -252,7 +253,7 @@ class WorkspaceHandlers(BaseHandler):
             ])
 
             await query.edit_message_text(
-                f"<b>{ws.name}</b> - Schedule Registration\n\n"
+                f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
                 f"Hour: <b>{hour:02d}:00</b>\n\n"
                 f"Select minute:",
                 reply_markup=InlineKeyboardMarkup(buttons),
@@ -284,7 +285,7 @@ class WorkspaceHandlers(BaseHandler):
             ]
 
             await query.edit_message_text(
-                f"<b>{ws.name}</b> - Schedule Registration\n\n"
+                f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
                 f"Time: <b>{hour:02d}:{minute:02d}</b>\n\n"
                 f"Current AI: <b>{get_provider_label(provider)}</b>\n"
                 f"Select model:",
@@ -312,7 +313,7 @@ class WorkspaceHandlers(BaseHandler):
             provider = pending.get("ai_provider", self._get_selected_ai_provider(user_id))
 
             await query.edit_message_text(
-                f"<b>{ws.name}</b> - Schedule Registration\n\n"
+                f"<b>{escape_html(ws.name)}</b> - Schedule Registration\n\n"
                 f"Time: <b>{hour:02d}:{minute:02d}</b>\n"
                 f"AI: <b>{get_provider_label(provider)}</b>\n"
                 f"Model: <b>{get_profile_label(provider, model)}</b> (<code>{model}</code>)\n\n"
@@ -466,16 +467,16 @@ class WorkspaceHandlers(BaseHandler):
             ])
 
             rec_text = "\n\n".join([
-                f"<b>{i+1}. {r['name']}</b>\n"
-                f"<code>{r['path'].replace(str(Path.home()), '~')}</code>\n"
-                f"{r['description']}\n"
-                f"{r.get('reason', '')}"
+                f"<b>{i+1}. {escape_html(r['name'])}</b>\n"
+                f"<code>{escape_html(r['path'].replace(str(Path.home()), '~'))}</code>\n"
+                f"{escape_html(r['description'])}\n"
+                f"{escape_html(r.get('reason', ''))}"
                 for i, r in enumerate(recommendations)
             ])
 
             await update.message.reply_text(
                 f"<b>AI Recommendations</b>\n\n"
-                f"Purpose: <i>{message}</i>\n\n"
+                f"Purpose: <i>{escape_html(message)}</i>\n\n"
                 f"────────────\n\n"
                 f"{rec_text}",
                 reply_markup=InlineKeyboardMarkup(buttons),
@@ -503,9 +504,9 @@ class WorkspaceHandlers(BaseHandler):
 
             await update.message.reply_text(
                 f"<b>Workspace Registered!</b>\n\n"
-                f"<b>{ws.name}</b>\n"
-                f"<code>{ws.short_path}</code>\n"
-                f"{ws.description}\n\n"
+                f"<b>{escape_html(ws.name)}</b>\n"
+                f"<code>{escape_html(ws.short_path)}</code>\n"
+                f"{escape_html(ws.description)}\n\n"
                 f"────────────\n\n{text}",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="HTML"
@@ -519,7 +520,7 @@ class WorkspaceHandlers(BaseHandler):
 
             if not expanded_path.exists():
                 await update.message.reply_text(
-                    f"Path does not exist: <code>{path}</code>\n\n"
+                    f"Path does not exist: <code>{escape_html(path)}</code>\n\n"
                     f"Enter again:",
                     reply_markup=ForceReply(selective=True, input_field_placeholder="/path/to/workspace"),
                     parse_mode="HTML"
@@ -546,7 +547,7 @@ class WorkspaceHandlers(BaseHandler):
             self._ws_pending[user_id] = pending
 
             await update.message.reply_text(
-                f"Name: <b>{name}</b>\n\n"
+                f"Name: <b>{escape_html(name)}</b>\n\n"
                 f"Enter workspace description:",
                 reply_markup=ForceReply(selective=True, input_field_placeholder="e.g., Stock investment analysis project"),
                 parse_mode="HTML"
@@ -573,9 +574,9 @@ class WorkspaceHandlers(BaseHandler):
 
             await update.message.reply_text(
                 f"<b>Workspace Registered!</b>\n\n"
-                f"<b>{ws.name}</b>\n"
-                f"<code>{ws.short_path}</code>\n"
-                f"{ws.description}\n\n"
+                f"<b>{escape_html(ws.name)}</b>\n"
+                f"<code>{escape_html(ws.short_path)}</code>\n"
+                f"{escape_html(ws.description)}\n\n"
                 f"────────────\n\n{text}",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="HTML"
@@ -620,13 +621,13 @@ class WorkspaceHandlers(BaseHandler):
 
             await update.message.reply_text(
                 f"<b>Workspace Schedule Registered!</b>\n\n"
-                f"<b>{ws.name}</b>\n"
-                f"<code>{ws.short_path}</code>\n"
+                f"<b>{escape_html(ws.name)}</b>\n"
+                f"<code>{escape_html(ws.short_path)}</code>\n"
                 f"AI: <b>{get_provider_label(schedule.ai_provider)}</b>\n"
                 f"Time: <b>{schedule.time_str}</b> (daily)\n"
                 f"Model: <b>{get_profile_label(schedule.ai_provider, pending['model'])}</b> "
                 f"(<code>{pending['model']}</code>)\n"
-                f"Message: <i>{message[:50]}{'...' if len(message) > 50 else ''}</i>",
+                f"Message: <i>{escape_html(message[:50])}{'...' if len(message) > 50 else ''}</i>",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="HTML"
             )

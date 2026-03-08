@@ -12,7 +12,7 @@ from ..constants import (
     MAX_MESSAGE_LENGTH,
     get_model_badge,
 )
-from ..formatters import truncate_message
+from ..formatters import escape_html, truncate_message
 from ..middleware import authorized_only, authenticated_only
 from .base import BaseHandler
 
@@ -52,77 +52,7 @@ class MessageHandlers(BaseHandler):
             logger.warning(f"Message length limited: {len(message)} -> {MAX_MESSAGE_LENGTH}")
             message = message[:MAX_MESSAGE_LENGTH]
 
-        if user_id in self._creating_sessions:
-            logger.info(f"Session creation in progress - /ai blocked: user={user_id}")
-            await update.message.reply_text(
-                "<b>Session initializing...</b>\n\n"
-                "Please try again shortly!",
-                parse_mode="HTML"
-            )
-            clear_context()
-            return
-
-        logger.trace("Session decision start - waiting for Lock")
-        async with self._user_locks[user_id]:
-            logger.trace("Lock acquired")
-            session_id = self.sessions.get_current_session_id(user_id)
-            logger.trace(f"Current session: {session_id[:8] if session_id else 'None'}")
-
-            if not session_id:
-                default_model = get_default_model(provider)
-                logger.info(f"Creating new {provider} session envelope...")
-                session_id = self.sessions.create_session(
-                    user_id=user_id,
-                    ai_provider=provider,
-                    model=default_model,
-                    first_message="(new session)",
-                )
-
-            model = self.sessions.get_session_model(session_id) or get_default_model(provider)
-            workspace_path = self.sessions.get_workspace_path(session_id)
-
-            if self._is_session_locked(session_id):
-                await self._show_session_selection_ui(
-                    update=update,
-                    user_id=user_id,
-                    message=message,
-                    current_session_id=session_id,
-                    model=model,
-                    is_new_session=False,
-                    workspace_path=workspace_path or "",
-                )
-                clear_context()
-                return
-
-            try:
-                _, start_error = self._start_detached_job(
-                    chat_id=chat_id,
-                    session_id=session_id,
-                    message=message,
-                    model=model,
-                    workspace_path=workspace_path,
-                )
-            except Exception:
-                await update.message.reply_text("❌ Failed to start detached worker. Please try again.")
-                clear_context()
-                return
-
-            if start_error == "session_locked":
-                await self._show_session_selection_ui(
-                    update=update,
-                    user_id=user_id,
-                    message=message,
-                    current_session_id=session_id,
-                    model=model,
-                    is_new_session=False,
-                    workspace_path=workspace_path or "",
-                )
-                clear_context()
-                return
-
-        set_session_id(session_id)
-        logger.info(f"Detached /ai job started: model={model}, workspace={workspace_path or '(none)'}")
-        logger.trace("/ai handler complete - detached worker spawned")
+        await self._dispatch_to_ai(update, chat_id, user_id, message)
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle regular text messages.
@@ -240,6 +170,19 @@ class MessageHandlers(BaseHandler):
         else:
             logger.debug("[PLUGIN] No plugin loader")
 
+        await self._dispatch_to_ai(update, chat_id, user_id, message)
+
+    async def _dispatch_to_ai(
+        self,
+        update: Update,
+        chat_id: int,
+        user_id: str,
+        message: str,
+    ) -> None:
+        """Common AI dispatch: session decision → detached job spawn.
+
+        Shared by ai_command and handle_message.
+        """
         if user_id in self._creating_sessions:
             logger.info(f"Session creation in progress - message blocked: user={user_id}")
             await update.message.reply_text(
@@ -311,9 +254,8 @@ class MessageHandlers(BaseHandler):
                 return
 
         set_session_id(session_id)
-
-        logger.info(f"Detached message job started: model={model}, workspace={workspace_path or '(none)'}")
-        logger.trace("handle_message complete - detached worker spawned")
+        logger.info(f"Detached job started: model={model}, workspace={workspace_path or '(none)'}")
+        logger.trace("Dispatch complete - detached worker spawned")
 
     async def _show_session_selection_ui(
         self,
@@ -370,7 +312,7 @@ class MessageHandlers(BaseHandler):
             f"",
             f"AI: <b>{provider_label}</b>",
             f"",
-            f"<code>{message_preview}</code>",
+            f"<code>{escape_html(message_preview)}</code>",
             f"",
         ]
 
@@ -411,9 +353,9 @@ class MessageHandlers(BaseHandler):
                 recent_msgs = s.get("recent", [])
                 if recent_msgs:
                     recent_preview = " / ".join(truncate_message(m, 12) for m in recent_msgs[-2:])
-                    lines.append(f"- {model_emoji} <b>{name[:10]}</b>: {recent_preview}")
+                    lines.append(f"- {model_emoji} <b>{escape_html(name[:10])}</b>: {escape_html(recent_preview)}")
                 else:
-                    lines.append(f"- {model_emoji} <b>{name[:10]}</b>")
+                    lines.append(f"- {model_emoji} <b>{escape_html(name[:10])}</b>")
 
                 buttons.append([
                     InlineKeyboardButton(
