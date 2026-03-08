@@ -9,6 +9,8 @@ from uuid import uuid4
 
 from src.ai import DEFAULT_PROVIDER, SUPPORTED_PROVIDERS, infer_provider_from_model
 
+DEFAULT_QUEUE_EXPIRY_MINUTES = 30
+
 
 @dataclass
 class HistoryEntry:
@@ -1513,7 +1515,8 @@ class Repository:
 
     def save_queued_message(self, session_id: str, user_id: str, chat_id: int,
                             message: str, model: str, is_new_session: bool,
-                            workspace_path: str = "", expires_minutes: int = 5) -> int:
+                            workspace_path: str = "",
+                            expires_minutes: int = DEFAULT_QUEUE_EXPIRY_MINUTES) -> int:
         """세션 큐 메시지 저장. 생성된 ID 반환."""
         expires_at = (datetime.now() + timedelta(minutes=expires_minutes)).isoformat()
         cursor = self._conn.execute(
@@ -1605,6 +1608,17 @@ class Repository:
                SET worker_pid = ?
                WHERE session_id = ? AND job_id = ? AND worker_pid IS NULL""",
             (worker_pid, session_id, job_id),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def rebind_session_lock(self, session_id: str, from_job_id: int, to_job_id: int, worker_pid: int) -> bool:
+        """Move an active session lock to the next queued job handled by the same worker."""
+        cursor = self._conn.execute(
+            """UPDATE session_locks
+               SET job_id = ?, worker_pid = ?, acquired_at = ?
+               WHERE session_id = ? AND job_id = ?""",
+            (to_job_id, worker_pid, self._now(), session_id, from_job_id),
         )
         self._conn.commit()
         return cursor.rowcount > 0

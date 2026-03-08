@@ -125,6 +125,9 @@ def create_app() -> Application:
         count = await handlers._cleanup_detached_jobs(application.bot)
         if count:
             logger.info(f"Detached job cleanup count: {count}")
+        expired_queue_count = repo.clear_expired_queued_messages()
+        if expired_queue_count:
+            logger.info(f"Expired queued messages cleared: {expired_queue_count}")
 
     # Create application (concurrent_updates=True로 동시 메시지 처리 활성화)
     logger.trace("Application 빌드 시작")

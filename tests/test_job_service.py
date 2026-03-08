@@ -100,6 +100,9 @@ async def test_run_job_drains_persistent_queue(repo, session_service):
     fake_bot = MagicMock()
     fake_bot.send_message = AsyncMock()
 
+    original_rebind = repo.rebind_session_lock
+    repo.rebind_session_lock = MagicMock(wraps=original_rebind)
+
     service = JobService(
         repo=repo,
         session_service=session_service,
@@ -112,6 +115,7 @@ async def test_run_job_drains_persistent_queue(repo, session_service):
 
     assert result is True
     assert claude.chat.await_count == 2
+    assert repo.rebind_session_lock.call_count == 1
     assert repo.get_session_lock("sess1") is None
     assert repo.get_queued_messages_by_session("sess1") == []
 

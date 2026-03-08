@@ -1,6 +1,7 @@
 """Async Codex CLI client."""
 
 import asyncio
+from contextlib import suppress
 import json
 import shlex
 from pathlib import Path
@@ -42,10 +43,17 @@ class CodexClient:
             cwd=cwd,
         )
 
-        if timeout:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-        else:
-            stdout, stderr = await process.communicate()
+        try:
+            if timeout:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            else:
+                stdout, stderr = await process.communicate()
+        except asyncio.TimeoutError:
+            with suppress(ProcessLookupError):
+                process.kill()
+            with suppress(Exception):
+                await process.communicate()
+            raise
 
         return stdout.decode("utf-8").strip(), stderr.decode("utf-8").strip(), process.returncode
 
