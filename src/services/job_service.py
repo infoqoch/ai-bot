@@ -44,6 +44,7 @@ class JobService:
 
         session_id = job["session_id"]
         worker_pid = os.getpid()
+        active_lock_job_id = job_id
         request_preview = truncate_message(job["request"], 60)
 
         logger.info(
@@ -89,16 +90,27 @@ class JobService:
                     model=next_queued["model"],
                     workspace_path=next_queued.get("workspace_path"),
                 )
+                previous_job_id = current_job["id"]
+                if not self._repo.rebind_session_lock(session_id, previous_job_id, next_job_id, worker_pid):
+                    logger.error(
+                        f"Detached worker lock rebind failed: previous={previous_job_id}, "
+                        f"next={next_job_id}, session={session_id[:8]}, worker_pid={worker_pid}"
+                    )
+                    self._repo.complete_message(next_job_id, error="lock_rebind_failed")
+                    current_job = None
+                    continue
+
+                active_lock_job_id = next_job_id
                 current_job = self._repo.get_message_log(next_job_id)
                 logger.info(
-                    f"Detached worker continuing queued job: previous={job_id}, next={next_job_id}, "
+                    f"Detached worker continuing queued job: previous={previous_job_id}, next={next_job_id}, "
                     f"session={session_id[:8]}, request={truncate_message(next_queued['message'], 60)!r}"
                 )
 
             return True
         finally:
-            logger.info(f"Detached job releasing lock - job_id={job_id}, session={session_id[:8]}")
-            self._repo.release_session_lock(session_id, job_id)
+            logger.info(f"Detached job releasing lock - job_id={active_lock_job_id}, session={session_id[:8]}")
+            self._repo.release_session_lock(session_id, active_lock_job_id)
             clear_context()
 
     def _attach_or_acquire_lock(self, session_id: str, job_id: int, worker_pid: int) -> bool:

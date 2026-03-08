@@ -232,6 +232,21 @@ class TestQueuedMessagesRepository:
         assert len(msgs) == 1
         assert msgs[0]["message"] == "hello"
 
+    def test_default_expiry_is_long_enough_for_runtime_queue(self, repo):
+        """기본 만료 시간은 provider timeout/queue 대기보다 충분히 길다."""
+        qid = repo.save_queued_message(
+            session_id="sess1", user_id="u1", chat_id=123,
+            message="hello", model="sonnet", is_new_session=False,
+        )
+
+        row = repo._conn.execute(
+            "SELECT expires_at FROM queued_messages WHERE id = ?",
+            (qid,),
+        ).fetchone()
+        expires_at = datetime.fromisoformat(row["expires_at"])
+
+        assert expires_at > datetime.now() + timedelta(minutes=25)
+
     def test_delete(self, repo):
         """큐 메시지 삭제."""
         qid = repo.save_queued_message(
@@ -287,6 +302,31 @@ class TestSessionLocksRepository:
 
         assert repo.release_session_lock("sess1", job_id) is True
         assert repo.get_session_lock("sess1") is None
+
+    def test_rebind_session_lock(self, repo):
+        """같은 worker가 다음 queued job으로 넘어갈 때 lock job_id를 갱신한다."""
+        repo.create_session("u1", "sess1", "sonnet", "테스트")
+        first_job_id = repo.enqueue_message(
+            chat_id=123,
+            session_id="sess1",
+            request="hello",
+            model="sonnet",
+        )
+        second_job_id = repo.enqueue_message(
+            chat_id=123,
+            session_id="sess1",
+            request="second",
+            model="sonnet",
+        )
+
+        assert repo.reserve_session_lock("sess1", first_job_id) is True
+        assert repo.attach_worker_to_session_lock("sess1", first_job_id, 99999) is True
+        assert repo.rebind_session_lock("sess1", first_job_id, second_job_id, 99999) is True
+
+        lock = repo.get_session_lock("sess1")
+        assert lock is not None
+        assert lock["job_id"] == second_job_id
+        assert lock["worker_pid"] == 99999
 
     def test_clear_unattached_session_locks(self, repo):
         """worker가 붙지 못한 오래된 락 정리."""
