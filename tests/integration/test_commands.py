@@ -216,6 +216,7 @@ class TestSessionManagement:
         # 두 개의 세션 생성
         session_store.create_session("12345", "session-aaa", "sonnet", "첫번째")
         session_store.create_session("12345", "session-bbb", "opus", "두번째")
+        assert session_store.get_current_session_id("12345") == "session-bbb"
 
         # 첫번째로 전환
         update, context = create_command_update("s_session-a")  # short id
@@ -226,8 +227,8 @@ class TestSessionManagement:
 
         # 응답 확인
         reply = await get_reply_text(update)
-        # 전환 성공 또는 에러 메시지
-        assert reply or update.message.reply_text.called
+        assert "Session switched!" in reply
+        assert session_store.get_current_session_id("12345") == "session-aaa"
 
     @pytest.mark.asyncio
     async def test_back_to_previous_session(self, handlers, session_store):

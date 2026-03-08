@@ -525,12 +525,11 @@ Processing (2)
 Queue (1)
 - session-name: Waiting message pre...  ← 30자 truncate
 
-Detached workers: 2
-
 [Refresh] [Session List]
 ```
 
 - 태스크 없음: `No active tasks`
+- 멀티라인 메시지는 한 줄 미리보기로 정규화해서 표시
 - 처리 중/대기열 상태는 DB 기준으로 계산되므로, 봇 재시작 직후에도 끊기지 않음
 
 ---
