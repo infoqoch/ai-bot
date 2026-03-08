@@ -9,7 +9,7 @@ from telegram.ext import ContextTypes
 from src.ai import get_profile_label, get_provider_label
 from src.logging_config import logger, clear_context
 from src.constants import AVAILABLE_HOURS
-from ..constants import MAX_WORKSPACE_PATHS_DISPLAY, get_model_emoji
+from ..constants import get_model_emoji
 from .base import BaseHandler
 
 

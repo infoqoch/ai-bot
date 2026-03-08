@@ -26,7 +26,6 @@ from src.ai import (
     normalize_model,
 )
 from src.logging_config import logger, set_trace_id, set_user_id, clear_context
-from ..session_queue import session_queue_manager
 from ..constants import (
     WATCHDOG_INTERVAL_SECONDS,
     TASK_TIMEOUT_SECONDS,
@@ -50,15 +49,6 @@ class TaskInfo:
     message: str = ""
     started_at: float = field(default_factory=time.time)
     task: Optional[asyncio.Task] = None
-
-
-@dataclass
-class PendingMessage:
-    """Message pending during session lock conflict."""
-    user_id: str
-    message: str
-    created_at: float = field(default_factory=time.time)
-    expires_at: float = field(default_factory=lambda: time.time() + 300)
 
 
 class BaseHandler:
@@ -530,7 +520,6 @@ class BaseHandler:
                 logger.info(f"Task cancelled - trace={info.trace_id}")
 
             await self._kill_claude_process(info.session_id)
-            await session_queue_manager.force_unlock(info.session_id)
             self._active_tasks.pop(task_id, None)
 
     async def _kill_claude_process(self, session_id: str) -> None:

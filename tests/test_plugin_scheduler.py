@@ -28,8 +28,8 @@ class TestPluginSchedulerAPI:
         """기본 구현은 빈 리스트 반환."""
         class DummyPlugin(Plugin):
             name = "dummy"
-            async def can_handle(self, msg, cid): return False
-            async def handle(self, msg, cid): return PluginResult(handled=False)
+            async def can_handle(self, msg, _chat_id): return False
+            async def handle(self, msg, _chat_id): return PluginResult(handled=False)
 
         plugin = DummyPlugin()
         assert plugin.get_scheduled_actions() == []
@@ -39,8 +39,8 @@ class TestPluginSchedulerAPI:
         """기본 execute_scheduled_action은 NotImplementedError."""
         class DummyPlugin(Plugin):
             name = "dummy"
-            async def can_handle(self, msg, cid): return False
-            async def handle(self, msg, cid): return PluginResult(handled=False)
+            async def can_handle(self, msg, _chat_id): return False
+            async def handle(self, msg, _chat_id): return PluginResult(handled=False)
 
         plugin = DummyPlugin()
         with pytest.raises(NotImplementedError):

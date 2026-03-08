@@ -9,7 +9,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
-from unittest.mock import AsyncMock, MagicMock, PropertyMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 

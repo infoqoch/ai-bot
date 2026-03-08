@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 from src.logging_config import logger
 
 if TYPE_CHECKING:
-    from telegram.ext import Application, Job
+    from telegram.ext import Application
 
 
 # 한국 시간대

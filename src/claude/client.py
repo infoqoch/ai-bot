@@ -1,6 +1,7 @@
 """Async Claude Code CLI client."""
 
 import asyncio
+from contextlib import suppress
 import json
 import shlex
 from pathlib import Path
@@ -18,7 +19,7 @@ class ClaudeClient:
         self,
         command: str = "claude",
         system_prompt_file: Optional[Path] = None,
-        timeout: int = 300,
+        timeout: Optional[int] = None,
     ):
         logger.trace(f"ClaudeClient.__init__() - command='{command}', timeout={timeout}")
         self.command_parts = shlex.split(command)
@@ -64,14 +65,27 @@ class ClaudeClient:
         logger.trace(f"subprocess 생성됨 - pid={process.pid}")
 
         logger.trace("프로세스 실행 대기 중")
-        if timeout:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=timeout,
-            )
-        else:
-            # 타임아웃 없이 무제한 대기
-            stdout, stderr = await process.communicate()
+        try:
+            if timeout:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=timeout,
+                )
+            else:
+                # 타임아웃 없이 무제한 대기
+                stdout, stderr = await process.communicate()
+        except asyncio.CancelledError:
+            with suppress(ProcessLookupError):
+                process.kill()
+            with suppress(Exception):
+                await process.communicate()
+            raise
+        except asyncio.TimeoutError:
+            with suppress(ProcessLookupError):
+                process.kill()
+            with suppress(Exception):
+                await process.communicate()
+            raise
         stdout_str = stdout.decode("utf-8").strip()
         stderr_str = stderr.decode("utf-8").strip()
 
@@ -132,7 +146,7 @@ class ClaudeClient:
 
         try:
             logger.trace("CLI 실행 시작")
-            output, error, returncode = await self._run_command(cmd, timeout=None, cwd=workspace_path)
+            output, error, returncode = await self._run_command(cmd, timeout=self.timeout, cwd=workspace_path)
 
             logger.trace(f"CLI 결과 - returncode={returncode}")
 

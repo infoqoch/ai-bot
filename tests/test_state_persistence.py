@@ -232,8 +232,8 @@ class TestQueuedMessagesRepository:
         assert len(msgs) == 1
         assert msgs[0]["message"] == "hello"
 
-    def test_default_expiry_is_long_enough_for_runtime_queue(self, repo):
-        """기본 만료 시간은 provider timeout/queue 대기보다 충분히 길다."""
+    def test_persistent_queue_uses_far_future_expiry_sentinel(self, repo):
+        """영속 큐는 런타임 자동 만료 없이 far-future sentinel을 저장한다."""
         qid = repo.save_queued_message(
             session_id="sess1", user_id="u1", chat_id=123,
             message="hello", model="sonnet", is_new_session=False,
@@ -243,9 +243,7 @@ class TestQueuedMessagesRepository:
             "SELECT expires_at FROM queued_messages WHERE id = ?",
             (qid,),
         ).fetchone()
-        expires_at = datetime.fromisoformat(row["expires_at"])
-
-        assert expires_at > datetime.now() + timedelta(minutes=25)
+        assert row["expires_at"] == "9999-12-31T23:59:59+00:00"
 
     def test_delete(self, repo):
         """큐 메시지 삭제."""
@@ -256,25 +254,21 @@ class TestQueuedMessagesRepository:
         repo.delete_queued_message(qid)
         assert len(repo.get_queued_messages_by_session("sess1")) == 0
 
-    def test_expired_not_returned(self, repo):
-        """만료된 큐 메시지는 조회되지 않는다."""
+    def test_queue_rows_are_returned_even_if_legacy_expiry_is_in_past(self, repo):
+        """기존 만료 시각이 과거여도 영속 큐는 자동으로 숨기지 않는다."""
         repo.save_queued_message(
             session_id="sess1", user_id="u1", chat_id=123,
             message="hello", model="sonnet", is_new_session=False,
-            expires_minutes=0,  # 즉시 만료
         )
-        msgs = repo.get_queued_messages_by_session("sess1")
-        assert len(msgs) == 0
+        repo._conn.execute(
+            "UPDATE queued_messages SET expires_at = ? WHERE session_id = ?",
+            ("2000-01-01T00:00:00+00:00", "sess1"),
+        )
+        repo._conn.commit()
 
-    def test_clear_expired(self, repo):
-        """만료된 큐 메시지 정리."""
-        repo.save_queued_message(
-            session_id="sess1", user_id="u1", chat_id=123,
-            message="hello", model="sonnet", is_new_session=False,
-            expires_minutes=0,
-        )
-        deleted = repo.clear_expired_queued_messages()
-        assert deleted == 1
+        msgs = repo.get_queued_messages_by_session("sess1")
+        assert len(msgs) == 1
+        assert msgs[0]["message"] == "hello"
 
 
 class TestSessionLocksRepository:

@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from src.ai import DEFAULT_PROVIDER, SUPPORTED_PROVIDERS, infer_provider_from_model
 
-DEFAULT_QUEUE_EXPIRY_MINUTES = 30
+PERSISTENT_QUEUE_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
 
 
 @dataclass
@@ -1251,8 +1251,6 @@ class Repository:
         self._conn.commit()
         return cursor.rowcount > 0
 
-        self._conn.commit()
-
     # ========== Message Log Operations ==========
 
     def enqueue_message(
@@ -1515,42 +1513,38 @@ class Repository:
 
     def save_queued_message(self, session_id: str, user_id: str, chat_id: int,
                             message: str, model: str, is_new_session: bool,
-                            workspace_path: str = "",
-                            expires_minutes: int = DEFAULT_QUEUE_EXPIRY_MINUTES) -> int:
-        """세션 큐 메시지 저장. 생성된 ID 반환."""
-        expires_at = (datetime.now() + timedelta(minutes=expires_minutes)).isoformat()
+                            workspace_path: str = "") -> int:
+        """세션 큐 메시지 저장. 자동 만료 없이 생성된 ID 반환."""
         cursor = self._conn.execute(
             """INSERT INTO queued_messages
                (session_id, user_id, chat_id, message, model, is_new_session,
                 workspace_path, expires_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (session_id, user_id, chat_id, message, model, int(is_new_session),
-             workspace_path, expires_at),
+             workspace_path, PERSISTENT_QUEUE_EXPIRES_AT),
         )
         self._conn.commit()
         return cursor.lastrowid
 
     def get_queued_messages_by_session(self, session_id: str) -> list[dict[str, Any]]:
-        """세션의 대기 중인 메시지 목록 (만료되지 않은 것만)."""
-        now = datetime.now().isoformat()
+        """세션의 대기 중인 메시지 목록."""
         rows = self._conn.execute(
             """SELECT * FROM queued_messages
-               WHERE session_id = ? AND expires_at > ?
+               WHERE session_id = ?
                ORDER BY id ASC""",
-            (session_id, now),
+            (session_id,),
         ).fetchall()
         return [dict(r) for r in rows]
 
     def list_queued_messages_by_user(self, user_id: str) -> list[dict[str, Any]]:
         """List queued messages for a user across sessions."""
-        now = datetime.now().isoformat()
         rows = self._conn.execute(
             """SELECT q.*, s.name AS session_name
                FROM queued_messages q
                JOIN sessions s ON s.id = q.session_id
-               WHERE s.user_id = ? AND q.expires_at > ? AND s.deleted = 0
+               WHERE s.user_id = ? AND s.deleted = 0
                ORDER BY q.id ASC""",
-            (user_id, now),
+            (user_id,),
         ).fetchall()
         return [dict(row) for row in rows]
 
@@ -1560,13 +1554,12 @@ class Repository:
         self._conn.commit()
 
     def pop_next_queued_message(self, session_id: str) -> Optional[dict[str, Any]]:
-        """Pop the oldest unexpired queued message for a session."""
-        now = datetime.now().isoformat()
+        """Pop the oldest queued message for a session."""
         row = self._conn.execute(
             """SELECT * FROM queued_messages
-               WHERE session_id = ? AND expires_at > ?
+               WHERE session_id = ?
                ORDER BY id ASC LIMIT 1""",
-            (session_id, now),
+            (session_id,),
         ).fetchone()
         if not row:
             return None
@@ -1575,16 +1568,6 @@ class Repository:
         self._conn.execute("DELETE FROM queued_messages WHERE id = ?", (row["id"],))
         self._conn.commit()
         return result
-
-    def clear_expired_queued_messages(self) -> int:
-        """만료된 큐 메시지 정리."""
-        now = datetime.now().isoformat()
-        cursor = self._conn.execute(
-            "DELETE FROM queued_messages WHERE expires_at <= ?",
-            (now,),
-        )
-        self._conn.commit()
-        return cursor.rowcount
 
     # ── session_locks ─────────────────────────────────────────
 

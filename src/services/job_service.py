@@ -8,7 +8,7 @@ from typing import Optional
 from telegram import Bot
 
 from src.ai import AIRegistry, get_profile_label, get_provider_label
-from src.bot.constants import LONG_TASK_THRESHOLD_SECONDS
+from src.bot.constants import LONG_TASK_THRESHOLD_SECONDS, TASK_TIMEOUT_SECONDS
 from src.bot.formatters import truncate_message
 from src.logging_config import clear_context, logger, set_session_id, set_trace_id, set_user_id
 from src.repository import Repository
@@ -153,6 +153,16 @@ class JobService:
             )
         return attached
 
+    @staticmethod
+    def _format_watchdog_limit(seconds: int) -> str:
+        """Format watchdog timeout for user-facing status text."""
+        if seconds % 60 == 0 and seconds >= 60:
+            minutes = seconds // 60
+            return f"{minutes} minutes"
+        if seconds == 1:
+            return "1 second"
+        return f"{seconds} seconds"
+
     async def _execute_job(self, bot: Bot, job: dict) -> None:
         """Execute one provider job and send the final response to Telegram."""
         job_id = job["id"]
@@ -175,6 +185,7 @@ class JobService:
         start_time = time.time()
         short_message = truncate_message(message, 30)
         long_task_notified = False
+        stored_error = None
 
         logger.info(
             f"Detached provider job start - job_id={job_id}, session={session_id[:8]}, "
@@ -194,7 +205,11 @@ class JobService:
             )
             await bot.send_message(
                 chat_id=chat_id,
-                text=f"<code>{short_message}</code>\nTask taking {elapsed_min}+ minutes. Will notify on completion!",
+                text=(
+                    f"<code>{short_message}</code>\n"
+                    f"Task taking {elapsed_min}+ minutes. Still running. "
+                    f"I will notify you when it finishes."
+                ),
                 parse_mode="HTML",
             )
 
@@ -206,13 +221,25 @@ class JobService:
                     f"Detached provider CLI call - job_id={job_id}, session={session_id[:8]}, "
                     f"provider={provider}, model={model}"
                 )
-                chat_response = await client.chat(
-                    message,
-                    provider_session_id,
-                    model=model,
-                    workspace_path=workspace_path or None,
-                )
-                response, error, next_provider_session_id = chat_response
+                try:
+                    chat_response = await asyncio.wait_for(
+                        client.chat(
+                            message,
+                            provider_session_id,
+                            model=model,
+                            workspace_path=workspace_path or None,
+                        ),
+                        timeout=TASK_TIMEOUT_SECONDS,
+                    )
+                    response, error, next_provider_session_id = chat_response
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        f"Detached provider watchdog timeout - job_id={job_id}, "
+                        f"session={session_id[:8]}, timeout={TASK_TIMEOUT_SECONDS}s"
+                    )
+                    response = ""
+                    error = "WATCHDOG_TIMEOUT"
+                    next_provider_session_id = provider_session_id
                 logger.info(
                     f"Detached provider CLI returned - job_id={job_id}, session={session_id[:8]}, "
                     f"error={error or '-'}, response_chars={len(response or '')}"
@@ -239,12 +266,19 @@ class JobService:
 
             self._sessions.add_message(session_id, message, processor=provider)
 
-            if error == "TIMEOUT":
+            if error == "WATCHDOG_TIMEOUT":
+                timeout_label = self._format_watchdog_limit(TASK_TIMEOUT_SECONDS)
+                response = f"⏱️ Task exceeded {timeout_label} and was stopped. Please try again."
+                stored_error = "watchdog_timeout"
+            elif error == "TIMEOUT":
                 response = "⏱️ Response timed out. Please try again."
+                stored_error = "provider_timeout"
             elif error and error != "SESSION_NOT_FOUND":
                 response = f"❌ Error: {error}"
+                stored_error = error
             elif not response or not response.strip():
                 response = f"⚠️ <code>{short_message}</code>\nResponse is empty. Please try again."
+                stored_error = "empty_response"
 
             session_info = self._sessions.get_session_info(session_id)
             history_count = self._sessions.get_history_count(session_id)
@@ -259,7 +293,7 @@ class JobService:
                 f"/h_{session_short_id} history"
             )
 
-            if long_task_notified:
+            if long_task_notified and not stored_error:
                 elapsed_min = int(elapsed // 60)
                 elapsed_sec = int(elapsed % 60)
                 await bot.send_message(
@@ -273,7 +307,7 @@ class JobService:
                 f"session={session_id[:8]}, history_count={history_count}, response_chars={len(full_response)}"
             )
             await self._send_message_to_chat(bot, chat_id, full_response)
-            self._repo.complete_message(job_id, response=response)
+            self._repo.complete_message(job_id, response=response, error=stored_error)
             logger.info(
                 f"Detached provider persisted completion - job_id={job_id}, "
                 f"session={session_id[:8]}, stored_response_chars={len(response or '')}"
