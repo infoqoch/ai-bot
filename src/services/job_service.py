@@ -44,10 +44,20 @@ class JobService:
 
         session_id = job["session_id"]
         worker_pid = os.getpid()
+        request_preview = truncate_message(job["request"], 60)
+
+        logger.info(
+            f"Detached job loaded - job_id={job_id}, session={session_id[:8]}, "
+            f"processed={job['processed']}, worker_pid={worker_pid}, request={request_preview!r}"
+        )
 
         if not self._attach_or_acquire_lock(session_id, job_id, worker_pid):
             logger.warning(f"Detached job lock attach failed: job={job_id}, session={session_id[:8]}")
             return False
+
+        logger.info(
+            f"Detached job lock ready - job_id={job_id}, session={session_id[:8]}, worker_pid={worker_pid}"
+        )
 
         bot = Bot(token=self._telegram_token)
 
@@ -58,11 +68,17 @@ class JobService:
                 if current_job["processed"] == 0 and not self._repo.claim_pending_message(current_job["id"]):
                     logger.warning(f"Detached job claim failed: id={current_job['id']}")
                     break
+                if current_job["processed"] == 0:
+                    logger.info(
+                        f"Detached job claimed - job_id={current_job['id']}, "
+                        f"session={current_job['session_id'][:8]}"
+                    )
 
                 await self._execute_job(bot, current_job)
 
                 next_queued = self._repo.pop_next_queued_message(session_id)
                 if not next_queued:
+                    logger.info(f"Detached worker queue drained - job_id={current_job['id']}, session={session_id[:8]}")
                     current_job = None
                     continue
 
@@ -76,30 +92,54 @@ class JobService:
                 current_job = self._repo.get_message_log(next_job_id)
                 logger.info(
                     f"Detached worker continuing queued job: previous={job_id}, next={next_job_id}, "
-                    f"session={session_id[:8]}"
+                    f"session={session_id[:8]}, request={truncate_message(next_queued['message'], 60)!r}"
                 )
 
             return True
         finally:
+            logger.info(f"Detached job releasing lock - job_id={job_id}, session={session_id[:8]}")
             self._repo.release_session_lock(session_id, job_id)
             clear_context()
 
     def _attach_or_acquire_lock(self, session_id: str, job_id: int, worker_pid: int) -> bool:
         """Attach this worker to a reserved lock, or acquire it directly as fallback."""
         if self._repo.attach_worker_to_session_lock(session_id, job_id, worker_pid):
+            logger.info(
+                f"Detached lock attached to reserved slot - job_id={job_id}, "
+                f"session={session_id[:8]}, worker_pid={worker_pid}"
+            )
             return True
 
         existing = self._repo.get_session_lock(session_id)
         if existing and existing["job_id"] == job_id and existing.get("worker_pid") == worker_pid:
+            logger.info(
+                f"Detached lock already attached - job_id={job_id}, "
+                f"session={session_id[:8]}, worker_pid={worker_pid}"
+            )
             return True
 
         if existing:
+            logger.warning(
+                f"Detached lock already owned - job_id={job_id}, session={session_id[:8]}, "
+                f"existing_job={existing['job_id']}, existing_worker_pid={existing.get('worker_pid')}"
+            )
             return False
 
         if not self._repo.reserve_session_lock(session_id, job_id):
+            logger.warning(f"Detached lock reserve failed - job_id={job_id}, session={session_id[:8]}")
             return False
 
-        return self._repo.attach_worker_to_session_lock(session_id, job_id, worker_pid)
+        attached = self._repo.attach_worker_to_session_lock(session_id, job_id, worker_pid)
+        if attached:
+            logger.info(
+                f"Detached lock reserved and attached - job_id={job_id}, "
+                f"session={session_id[:8]}, worker_pid={worker_pid}"
+            )
+        else:
+            logger.warning(
+                f"Detached lock attach after reserve failed - job_id={job_id}, session={session_id[:8]}"
+            )
+        return attached
 
     async def _execute_job(self, bot: Bot, job: dict) -> None:
         """Execute one provider job and send the final response to Telegram."""
@@ -126,7 +166,9 @@ class JobService:
 
         logger.info(
             f"Detached provider job start - job_id={job_id}, session={session_id[:8]}, "
-            f"provider={provider}, model={model}"
+            f"provider={provider}, model={model}, provider_session="
+            f"{provider_session_id[:8] if provider_session_id else '-'}, "
+            f"workspace={workspace_path or '(none)'}, request={short_message!r}"
         )
 
         async def notify_long_task() -> None:
@@ -134,6 +176,10 @@ class JobService:
             await asyncio.sleep(LONG_TASK_THRESHOLD_SECONDS)
             long_task_notified = True
             elapsed_min = LONG_TASK_THRESHOLD_SECONDS // 60
+            logger.info(
+                f"Detached provider job long-task notice - job_id={job_id}, "
+                f"session={session_id[:8]}, threshold={LONG_TASK_THRESHOLD_SECONDS}s"
+            )
             await bot.send_message(
                 chat_id=chat_id,
                 text=f"<code>{short_message}</code>\nTask taking {elapsed_min}+ minutes. Will notify on completion!",
@@ -144,6 +190,10 @@ class JobService:
 
         try:
             try:
+                logger.info(
+                    f"Detached provider CLI call - job_id={job_id}, session={session_id[:8]}, "
+                    f"provider={provider}, model={model}"
+                )
                 chat_response = await client.chat(
                     message,
                     provider_session_id,
@@ -151,7 +201,16 @@ class JobService:
                     workspace_path=workspace_path or None,
                 )
                 response, error, next_provider_session_id = chat_response
+                logger.info(
+                    f"Detached provider CLI returned - job_id={job_id}, session={session_id[:8]}, "
+                    f"error={error or '-'}, response_chars={len(response or '')}"
+                )
                 if next_provider_session_id and next_provider_session_id != provider_session_id:
+                    logger.info(
+                        f"Detached provider session updated - job_id={job_id}, session={session_id[:8]}, "
+                        f"provider_session={provider_session_id[:8] if provider_session_id else '-'}"
+                        f"->{next_provider_session_id[:8]}"
+                    )
                     self._sessions.update_session_provider_session_id(session_id, next_provider_session_id)
             finally:
                 notify_task.cancel()
@@ -197,8 +256,16 @@ class JobService:
                     parse_mode="HTML",
                 )
 
+            logger.info(
+                f"Detached provider sending Telegram response - job_id={job_id}, "
+                f"session={session_id[:8]}, history_count={history_count}, response_chars={len(full_response)}"
+            )
             await self._send_message_to_chat(bot, chat_id, full_response)
             self._repo.complete_message(job_id, response=response)
+            logger.info(
+                f"Detached provider persisted completion - job_id={job_id}, "
+                f"session={session_id[:8]}, stored_response_chars={len(response or '')}"
+            )
 
         except Exception as e:
             logger.exception(f"Detached provider job failed: job_id={job_id}, trace={trace_id}, error={e}")
@@ -239,8 +306,19 @@ class JobService:
 
     async def _send_message_to_chat(self, bot: Bot, chat_id: int, text: str) -> None:
         """Send a split-safe Telegram message with HTML fallback."""
-        for chunk in self._split_message(text):
+        chunks = self._split_message(text)
+        logger.info(f"Detached provider Telegram chunks - chat_id={chat_id}, chunks={len(chunks)}")
+
+        for index, chunk in enumerate(chunks, start=1):
             try:
+                logger.info(
+                    f"Detached provider Telegram send - chat_id={chat_id}, chunk={index}/{len(chunks)}, "
+                    f"chars={len(chunk)}, parse_mode=HTML"
+                )
                 await bot.send_message(chat_id=chat_id, text=chunk, parse_mode="HTML")
             except Exception:
+                logger.warning(
+                    f"Detached provider Telegram HTML send failed, retrying plain text - "
+                    f"chat_id={chat_id}, chunk={index}/{len(chunks)}"
+                )
                 await bot.send_message(chat_id=chat_id, text=chunk)
