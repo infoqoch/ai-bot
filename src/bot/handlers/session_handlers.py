@@ -569,7 +569,8 @@ class SessionHandlers(BaseHandler):
             return
 
         logger.trace(f"Switching session - target={target_info['session_id']}")
-        if self.sessions.switch_session(user_id, target_info['session_id']):
+        full_session_id = target_info["full_session_id"]
+        if self.sessions.switch_session(user_id, full_session_id):
             logger.info(f"Session switch successful: {target_info['session_id']}")
             await update.message.reply_text(
                 f"Session switched!\n\n"

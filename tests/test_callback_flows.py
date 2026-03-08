@@ -9,6 +9,7 @@
 """
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
 import pytest
@@ -530,6 +531,50 @@ class TestTasksCallbackFlows:
         assert query.edit_message_text.called
         text = get_text(query)
         assert "task" in text.lower() or "slot" in text.lower() or "No" in text
+
+    def test_build_tasks_status_compacts_multiline_preview(self):
+        """멀티라인 요청은 한 줄 미리보기로 정리된다."""
+        h = make_handlers()
+        repo = MagicMock()
+        repo.list_processing_messages_by_user.return_value = [{
+            "session_id": "session-1234",
+            "session_name": "코닥스",
+            "request_at": (datetime.now(timezone.utc) - timedelta(hours=2, minutes=39, seconds=55)).isoformat(),
+            "request": "[Claude · Opus · 24bf6c58 (똘똘이)|#3]\nhey\n...",
+        }]
+        repo.list_queued_messages_by_user.return_value = []
+        h.sessions._repo = repo
+        h._get_live_session_lock = MagicMock(return_value={"job_id": 1})
+
+        text, _ = h._build_tasks_status("12345")
+
+        assert "<b>Processing</b> (1)" in text
+        assert "2h 39m 55s elapsed" in text
+        assert "<code>코닥스</code>" in text
+        assert "hey ..." in text
+        assert "[Claude" not in text
+        assert "Detached workers" not in text
+
+    def test_build_tasks_status_formats_queue_preview(self):
+        """대기열 미리보기는 줄바꿈을 제거하고 HTML을 escape한다."""
+        h = make_handlers()
+        repo = MagicMock()
+        repo.list_processing_messages_by_user.return_value = []
+        repo.list_queued_messages_by_user.return_value = [{
+            "session_id": "queue-1234",
+            "session_name": "review<bot>",
+            "message": "first line\n<script>alert(1)</script>",
+        }]
+        h.sessions._repo = repo
+        h._get_live_session_lock = MagicMock(return_value=None)
+
+        text, _ = h._build_tasks_status("12345")
+
+        assert "<b>Queue</b> (1)" in text
+        assert "<b>No active tasks</b>" not in text
+        assert "<code>review&lt;bot&gt;</code>" in text
+        assert "first line &lt;script&gt;alert(1)&lt;/s..." in text
+        assert "<script>" not in text
 
 
 # =============================================================================

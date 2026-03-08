@@ -1,5 +1,7 @@
 """Admin command handlers."""
 
+import html
+import re
 from datetime import datetime, timezone
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -14,6 +16,36 @@ from .base import BaseHandler
 
 class AdminHandlers(BaseHandler):
     """Admin command handlers."""
+
+    _TASK_HEADER_RE = re.compile(r"^\[(Claude|Codex)\b[^\]\n]*\|#\d+\]$")
+
+    @staticmethod
+    def _format_task_elapsed(elapsed_seconds: float) -> str:
+        """Format elapsed seconds for the task dashboard."""
+        total_seconds = max(0, int(elapsed_seconds))
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+
+        parts = []
+        if hours:
+            parts.append(f"{hours}h")
+        if minutes or hours:
+            parts.append(f"{minutes}m")
+        parts.append(f"{seconds}s")
+        return " ".join(parts)
+
+    def _summarize_task_preview(self, text: str, max_length: int) -> str:
+        """Normalize multi-line task text into a compact one-line preview."""
+        lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+        if lines and self._TASK_HEADER_RE.fullmatch(lines[0]):
+            lines = lines[1:]
+
+        normalized = re.sub(r"\s+", " ", " ".join(lines)).strip()
+        if not normalized:
+            normalized = "(no message)"
+        if len(normalized) > max_length:
+            normalized = normalized[:max_length].rstrip() + "..."
+        return html.escape(normalized)
 
     async def tasks_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /tasks command - show active tasks with buttons."""
@@ -234,36 +266,35 @@ class AdminHandlers(BaseHandler):
             if self._get_live_session_lock(row["session_id"]):
                 active_rows.append(row)
 
-        if not active_rows:
+        waiting_rows = repo.list_queued_messages_by_user(user_id) if repo else []
+        total_waiting = len(waiting_rows)
+
+        if not active_rows and total_waiting == 0:
             lines.append(f"<b>No active tasks</b>")
-        else:
+        elif active_rows:
             lines.append(f"<b>Processing</b> ({len(active_rows)})")
 
             for i, row in enumerate(active_rows, 1):
                 started_at = datetime.fromisoformat(row["request_at"])
                 elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
-                elapsed_str = f"{int(elapsed // 60)}m {int(elapsed % 60)}s" if elapsed >= 60 else f"{int(elapsed)}s"
+                elapsed_str = self._format_task_elapsed(elapsed)
 
                 session_name = row.get("session_name") or row["session_id"][:8]
-                msg_preview = row["request"]
-                if len(msg_preview) > MAX_LOCK_STATUS_PREVIEW:
-                    msg_preview = msg_preview[:MAX_LOCK_STATUS_PREVIEW] + "..."
-                msg_preview = msg_preview.replace("<", "&lt;").replace(">", "&gt;")
+                msg_preview = self._summarize_task_preview(row.get("request", ""), MAX_LOCK_STATUS_PREVIEW)
+                session_name = html.escape(session_name)
 
                 lines.append(
                     f"\n<b>{i}.</b> <code>{session_name}</code>\n"
                     f"   {elapsed_str} elapsed\n"
-                    f"   {msg_preview or '(no message)'}"
+                    f"   {msg_preview}"
                 )
 
-        waiting_rows = repo.list_queued_messages_by_user(user_id) if repo else []
-        total_waiting = len(waiting_rows)
         waiting_details = []
 
         for queued in waiting_rows[:8]:
             session_name = queued.get("session_name") or queued["session_id"][:8]
-            msg_preview = queued["message"][:30] + "..." if len(queued["message"]) > 30 else queued["message"]
-            msg_preview = msg_preview.replace("<", "&lt;").replace(">", "&gt;")
+            msg_preview = self._summarize_task_preview(queued.get("message", ""), 30)
+            session_name = html.escape(session_name)
             waiting_details.append(f"- <code>{session_name}</code>: {msg_preview}")
 
         if total_waiting > 0:
@@ -271,8 +302,6 @@ class AdminHandlers(BaseHandler):
             lines.extend([f"\n{d}" for d in waiting_details])
             if total_waiting > len(waiting_details):
                 lines.append(f"\n  ... and {total_waiting - len(waiting_details)} more")
-
-        lines.append(f"\n\nDetached workers: {len(active_rows)}")
         text = "".join(lines) if lines else "No status info"
 
         keyboard = [[
