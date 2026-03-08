@@ -4,7 +4,8 @@
 """
 
 import asyncio
-from unittest.mock import patch, MagicMock
+from types import SimpleNamespace
+from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
 
@@ -15,31 +16,54 @@ class TestAppStartup:
     @pytest.mark.asyncio
     async def test_create_app_succeeds(self):
         """create_app이 에러 없이 실행되는지 검증."""
-        import os
         from src.main import create_app
 
-        # 환경 변수 설정 (pydantic settings 파싱 문제 방지)
-        original_env = os.environ.get("ALLOWED_CHAT_IDS")
-        os.environ["ALLOWED_CHAT_IDS"] = "[]"
+        settings = SimpleNamespace(
+            telegram_token="test-token",
+            base_dir="/tmp/test-bot",
+            effective_working_dir="/tmp/test-bot",
+            require_auth=False,
+            allowed_chat_ids=[],
+            admin_chat_id=0,
+        )
 
-        try:
-            # Mock telegram Application to avoid actual API calls
-            mock_app = MagicMock()
-            mock_app.job_queue = MagicMock()
-            mock_app.add_handler = MagicMock()
+        mock_app = MagicMock()
+        mock_app.job_queue = MagicMock()
+        mock_app.add_handler = MagicMock()
+        mock_app.add_error_handler = MagicMock()
+        mock_app.bot = MagicMock()
 
-            with patch("src.main.Application") as MockApplication:
-                MockApplication.builder.return_value.token.return_value.build.return_value = mock_app
+        handlers = MagicMock()
+        handlers.cleanup_detached_jobs = AsyncMock(return_value=0)
 
-                # Should not raise any exception
-                app = create_app()
-                assert app is not None
-        finally:
-            # 원래 값 복원
-            if original_env is not None:
-                os.environ["ALLOWED_CHAT_IDS"] = original_env
-            elif "ALLOWED_CHAT_IDS" in os.environ:
-                del os.environ["ALLOWED_CHAT_IDS"]
+        schedule_manager = MagicMock()
+        schedule_manager.set_scheduler_manager = MagicMock()
+        schedule_manager.set_executor = MagicMock()
+        schedule_manager.register_all_to_scheduler = MagicMock()
+
+        runtime = SimpleNamespace(
+            handlers=handlers,
+            plugin_loader=SimpleNamespace(plugins=[]),
+            schedule_manager=schedule_manager,
+            ai_registry=MagicMock(),
+            workspace_registry=MagicMock(),
+        )
+
+        mock_builder = MagicMock()
+        mock_builder.token.return_value = mock_builder
+        mock_builder.concurrent_updates.return_value = mock_builder
+        mock_builder.post_init.return_value = mock_builder
+        mock_builder.build.return_value = mock_app
+
+        with patch("src.main.Application") as MockApplication, \
+             patch("src.main.build_bot_runtime", return_value=runtime), \
+             patch("src.main.ScheduleExecutionService") as MockScheduleExecutionService, \
+             patch("src.main.scheduler_manager", MagicMock()):
+            MockApplication.builder.return_value = mock_builder
+            MockScheduleExecutionService.return_value.execute = MagicMock()
+
+            app = create_app(settings)
+            assert app is mock_app
 
     def test_scheduler_manager_has_no_scheduler_attribute(self):
         """SchedulerManager에 scheduler 속성이 없음을 확인.

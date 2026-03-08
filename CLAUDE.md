@@ -56,7 +56,9 @@
   - 예: 워크스페이스 스케줄 등록 (`ws:schedule` → 시간선택 → 분선택 → 모델선택 → 메시지입력 → 등록완료)
   - 예: 세션 삭제 (`sess:del` → 확인 → 삭제 실행)
   - 예: 스케줄러 시간 변경 (`sched:chtime` → 시간선택 → 분선택 → 완료`)
-- **테스트 파일 위치**: `tests/test_callback_flows.py` (멀티 스탭 콜백 플로우 전용)
+- **테스트 파일 위치**:
+  - `tests/test_callback_flows.py` (멀티 스텝 콜백 플로우)
+  - `tests/test_handler_decomposition.py` (모듈 분해, AI 디스패치, HTML escape, N+1 쿼리)
 
 ### 금지 패턴
 
@@ -115,12 +117,15 @@ def process():
 
 ### 실행 스크립트 (run.sh)
 ```bash
-./run.sh start    # 봇 시작
-./run.sh stop     # 봇 + detached worker 중지
-./run.sh restart  # 봇 재시작 (in-flight worker 유지)
-./run.sh status   # 상태 확인
-./run.sh log      # 로그 보기
-./run.sh test     # 테스트 실행
+./run.sh start          # 봇 시작
+./run.sh stop-soft      # supervisor/main만 중지, detached worker 유지 시도
+./run.sh stop-hard      # 봇 + detached worker 중지
+./run.sh restart-soft   # soft 재시작 (in-flight worker 유지 시도)
+./run.sh restart-hard   # hard 재시작 (detached worker 포함 종료)
+./run.sh status         # 상태 확인
+./run.sh log            # 앱 로그 보기
+./run.sh log boot       # 부팅/감시 로그 보기
+./run.sh test           # 테스트 실행
 ```
 
 ### 완료 루틴 (CRITICAL - 모든 단계 필수)
@@ -128,7 +133,7 @@ def process():
 ./run.sh test                             # 1. 테스트
 git add -A && git commit -m "type: msg"   # 2. 커밋
 git push origin main                      # 3. 푸시
-./run.sh restart                          # 4. 재시작
+./run.sh restart-soft                     # 4. soft 재시작
 source venv/bin/activate && \
   python -m src.notify "변경1" -- "file1" # 5. 리포트 (필수!)
 ```
@@ -176,9 +181,18 @@ src/
 │   └── client_types.py        # 공통 응답 타입/프로토콜
 │
 ├── bot/
-│   ├── handlers/              # 명령어/콜백/메시지 핸들러
+│   ├── handlers/              # 명령어/콜백/메시지 핸들러 (도메인별 믹스인)
+│   │   ├── base.py            # 공통 유틸리티, detached job, 인증
+│   │   ├── callback_handlers.py  # 콜백 라우터 + AI/플러그인 콜백
+│   │   ├── session_callbacks.py  # sess: 콜백 (목록/전환/삭제/이름변경/모델)
+│   │   ├── scheduler_callbacks.py # sched: 콜백 (추가/토글/시간변경/삭제)
+│   │   ├── session_queue_callbacks.py # sq: 콜백 (세션 충돌 해결)
+│   │   ├── session_handlers.py   # 세션 명령어 (/new, /sl, /session 등)
+│   │   ├── message_handlers.py   # 메시지 처리 + AI 디스패치
+│   │   ├── workspace_handlers.py # 워크스페이스 명령어/콜백
+│   │   └── admin_handlers.py     # 관리 명령어 (/tasks, /scheduler 등)
 │   ├── middleware.py           # 인증/권한 데코레이터
-│   ├── formatters.py          # 메시지 포맷팅 (마크다운→HTML, truncation)
+│   ├── formatters.py          # 메시지 포맷팅 (마크다운→HTML, truncation, escape_html)
 │   ├── session_queue.py       # 세션 큐 매니저
 │   ├── constants.py           # UI 상수 (이모지, 제한값)
 │   └── prompts/               # 시스템 프롬프트
@@ -258,9 +272,9 @@ src/
 
 | 상황 | 올바른 방법 | 금지 |
 |------|-------------|------|
-| 봇 재시작 | `./run.sh restart` | `kill -9 PID` |
-| 봇 중지 | `./run.sh stop` | `pkill -f src.main` |
-| 중복 프로세스 정리 | `./run.sh restart` | 수동 kill |
+| 봇 재시작 | `./run.sh restart-soft` | `kill -9 PID` |
+| 봇 중지 | `./run.sh stop-hard` | `pkill -f src.main` |
+| 중복 프로세스 정리 | `./run.sh restart-hard` | 수동 kill |
 
 ### 왜 수동 kill이 위험한가?
 
@@ -270,7 +284,7 @@ src/
 
 ### Detached Worker 아키텍처 (CRITICAL)
 
-자가 개발 중 AI agent가 `./run.sh restart`를 직접 실행할 수 있음을 전제로 설계한다.
+자가 개발 중 AI agent가 `./run.sh restart-soft`를 직접 실행할 수 있음을 전제로 설계한다.
 
 ```
 supervisor
@@ -280,7 +294,7 @@ supervisor
 
 | 프로세스 | 책임 |
 |---------|------|
-| `src.supervisor` | `src.main` 감시/재기동 |
+| `src.supervisor` | `src.main` 감시/재기동, startup preflight, crash-loop 차단 |
 | `src.main` | 텔레그램 요청 수신, 세션 결정, job 생성, worker spawn |
 | `src.worker_job` | provider CLI 실행 owner, Telegram 직접 응답, queue drain |
 
@@ -288,8 +302,10 @@ supervisor
 - 일반 채팅과 `/ai`의 AI 요청 owner는 `src.main`이 아니라 `src.worker_job`
 - `src.main`은 AI 응답을 기다리지 않고 `message_log` job 생성 후 즉시 반환
 - 처리 중 여부의 source of truth는 메모리가 아니라 `message_log`, `queued_messages`, `session_locks`
-- `./run.sh restart`는 `src.supervisor`/`src.main`만 재기동하고 in-flight `src.worker_job`는 유지
-- `./run.sh stop`은 `src.worker_job`까지 종료
+- `./run.sh restart-soft`는 `src.supervisor`/`src.main`만 재기동하고 in-flight `src.worker_job` 유지를 시도
+- `./run.sh stop-hard`/`restart-hard`는 `src.worker_job`까지 종료
+- `src.supervisor`는 durable app state를 들고 있지 않으며 control plane으로 확장하지 않는다
+- `src.supervisor`는 unrecoverable startup error와 crash-loop를 감지하면 자동 재시작을 중단한다
 - "봇 재부팅 후 AI에게 다시 물어보기" 방식은 주 복구 전략으로 사용하지 않음
 
 ### Multi-Provider 세션 규칙 (CRITICAL)
@@ -338,7 +354,7 @@ supervisor
 - `.env` 커밋 금지
 - `.data/` 커밋 금지
 - 토큰 하드코딩 금지
-- **수동 `kill -9` 사용 금지** → `./run.sh restart` 사용
+- **수동 `kill -9` 사용 금지** → `./run.sh restart-soft` 또는 `./run.sh restart-hard` 사용
 
 ---
 

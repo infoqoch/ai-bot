@@ -16,7 +16,7 @@ from src.ai import (
 )
 from src.logging_config import logger, clear_context
 from ..constants import MAX_SESSION_NAME_LENGTH, get_model_emoji, get_model_badge
-from ..formatters import truncate_message
+from ..formatters import escape_html, truncate_message
 from ..middleware import authorized_only, authenticated_only
 from .base import BaseHandler
 
@@ -160,7 +160,7 @@ class SessionHandlers(BaseHandler):
         )
         logger.info(f"New session created: {session_id[:8]}, provider={provider}, model={model}")
 
-        name_line = f"\n- Name: {session_name}" if session_name else ""
+        name_line = f"\n- Name: {escape_html(session_name)}" if session_name else ""
         await update.message.reply_text(
             f"✅ New session created!\n"
             f"- ID: <code>{session_id[:8]}</code>{name_line}\n"
@@ -282,7 +282,7 @@ class SessionHandlers(BaseHandler):
             f"- Path: <code>{expanded_path}</code>\n"
             f"- AI: {provider_label}\n"
             f"- Model: {model_label}\n"
-            f"- Name: {display_name}\n"
+            f"- Name: {escape_html(display_name)}\n"
             f"- Config: {config_status}\n\n"
             f"This session follows the workspace instructions in that project.",
             parse_mode="HTML"
@@ -440,11 +440,11 @@ class SessionHandlers(BaseHandler):
                 emoji = processor_emoji.get(processor, "")
 
             short_q = truncate_message(msg, 35)
-            history_lines.append(f"{i}. {emoji} {short_q}")
+            history_lines.append(f"{i}. {emoji} {escape_html(short_q)}")
 
         history_text = "\n".join(history_lines) if history_lines else "(empty)"
 
-        name_line = f"- Name: {session_name}\n" if session_name else ""
+        name_line = f"- Name: {escape_html(session_name)}\n" if session_name else ""
 
         model_buttons = [
             InlineKeyboardButton(
@@ -516,7 +516,7 @@ class SessionHandlers(BaseHandler):
                 is_locked = self._is_session_locked(sid)
                 lock_indicator = " 🔒" if is_locked else ""
                 lines.append(
-                    f"{is_current}{model_badge} <b>{name}</b> "
+                    f"{is_current}{model_badge} <b>{escape_html(name)}</b> "
                     f"({model_label}, <code>{short_id}</code>){lock_indicator}"
                 )
 
@@ -623,7 +623,7 @@ class SessionHandlers(BaseHandler):
                     await update.message.reply_text(
                         f"Session renamed!\n\n"
                         f"- Session: <code>{session_id[:8]}</code>\n"
-                        f"- Name: {new_name}",
+                        f"- Name: {escape_html(new_name)}",
                         parse_mode="HTML"
                     )
                 else:
@@ -676,7 +676,7 @@ class SessionHandlers(BaseHandler):
             await update.message.reply_text(
                 f"✅ Session renamed!\n\n"
                 f"- Session: <code>{session_id[:8]}</code>\n"
-                f"- Name: {new_name}",
+                f"- Name: {escape_html(new_name)}",
                 parse_mode="HTML"
             )
         else:
@@ -779,7 +779,7 @@ class SessionHandlers(BaseHandler):
         history_lines = []
         for i, q in enumerate(history, start=1):
             short_q = truncate_message(q, 60)
-            history_lines.append(f"{i}. {short_q}")
+            history_lines.append(f"{i}. {escape_html(short_q)}")
 
         history_text = "\n".join(history_lines)
 
@@ -822,7 +822,7 @@ class SessionHandlers(BaseHandler):
         self.sessions.set_previous_session_id(user_id, None)
 
         name = self.sessions.get_session_name(prev_session_id)
-        name_display = f" ({name})" if name else ""
+        name_display = f" ({escape_html(name)})" if name else ""
 
         await update.message.reply_text(
             f"✅ Switched back!\n\n"

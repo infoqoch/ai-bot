@@ -67,7 +67,7 @@ AI 응답은 느립니다(수십 초~수 분). 모든 요청을 CLI agent에 보
           - 세션 queue drain
 ```
 
-이 구조 덕분에 Claude나 Codex가 작업 중 `./run.sh restart`를 실행해도, in-flight worker는 살아남아 응답을 끝까지 전송할 수 있습니다.
+이 구조 덕분에 Claude나 Codex가 작업 중 `./run.sh restart-soft`를 실행해도, in-flight worker는 살아남아 응답을 끝까지 전송할 가능성이 높습니다. 다만 `stop-hard`/`restart-hard`, host reboot, worker 자체 크래시는 별도입니다.
 
 ### ACTION 패턴 시스템
 
@@ -117,12 +117,23 @@ pip install -e .
 cp .env.example .env
 # .env 수정: TELEGRAM_TOKEN, ALLOWED_CHAT_IDS
 
-./run.sh start     # 봇 시작
-./run.sh status    # 상태 확인
-./run.sh log       # 로그 보기
+./run.sh start          # 봇 시작
+./run.sh restart-soft   # soft 재시작 (in-flight worker 유지 시도)
+./run.sh restart-hard   # hard 재시작 (worker 포함 종료)
+./run.sh stop-soft      # supervisor/main만 중지
+./run.sh stop-hard      # bot + detached worker 전체 중지
+./run.sh status         # 상태 확인
+./run.sh log            # 앱 로그 보기
+./run.sh log boot       # 부팅/감시 로그 보기
 ```
 
 > **채팅 ID 확인**: 봇 시작 후 `/chatid` 입력
+
+운영 메모:
+- `src.supervisor`는 얇은 프로세스 관리자다. `src.main`만 감시하고 durable state는 들고 있지 않는다.
+- 시작 전 설정 preflight에 실패하면 자동 재시작 루프에 들어가지 않고 즉시 중단한다.
+- `src.main`이 `CONFIG_ERROR` 또는 `LOCK_HELD`로 종료하면 supervisor는 재시작하지 않는다.
+- 짧은 시간 안에 반복 크래시가 누적되면 crash-loop로 보고 자동 재시작을 중단한다.
 
 ---
 
@@ -186,6 +197,8 @@ AI 호출 없이 즉시 응답:
 | `REQUIRE_AUTH` | `true` | 인증 필요 여부 |
 | `AUTH_SECRET_KEY` | - | 인증 키 |
 | `SESSION_TIMEOUT_HOURS` | `24` | 세션 만료 시간 |
+| `SUPERVISOR_CRASH_LOOP_WINDOW_SECONDS` | `300` | crash-loop 판정 시간 창 |
+| `SUPERVISOR_CRASH_LOOP_MAX_CRASHES` | `5` | 시간 창 내 허용 크래시 횟수 |
 
 ---
 

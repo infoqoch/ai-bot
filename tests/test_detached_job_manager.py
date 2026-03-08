@@ -41,12 +41,22 @@ class TestDetachedJobManager:
         repo.get_message_log.return_value = {"id": 41, "processed": 1}
         manager = DetachedJobManager(repo)
 
-        with patch.object(manager, "_is_pid_alive", return_value=False):
+        with patch.object(manager, "_is_expected_worker_alive", return_value=False):
             lock = manager.get_live_session_lock("session-1")
 
         assert lock is None
         repo.release_session_lock.assert_called_once_with("session-1", 41)
         repo.complete_message.assert_called_once_with(41, error="worker_lost")
+
+    def test_is_expected_worker_alive_rejects_reused_pid(self):
+        manager = DetachedJobManager(MagicMock())
+
+        with patch.object(manager, "_is_pid_alive", return_value=True), patch.object(
+            manager,
+            "_get_pid_command",
+            return_value="/usr/bin/python -u -m src.worker_job --job-id 99",
+        ):
+            assert manager._is_expected_worker_alive(99123, 41) is False
 
     @pytest.mark.asyncio
     async def test_cleanup_orphaned_jobs_notifies_for_stale_locks(self):

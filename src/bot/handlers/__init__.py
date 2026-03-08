@@ -7,6 +7,9 @@ from .session_handlers import SessionHandlers
 from .message_handlers import MessageHandlers
 from .admin_handlers import AdminHandlers
 from .workspace_handlers import WorkspaceHandlers
+from .session_callbacks import SessionCallbackHandlers
+from .scheduler_callbacks import SchedulerCallbackHandlers
+from .session_queue_callbacks import SessionQueueCallbackHandlers
 from .callback_handlers import CallbackHandlers
 
 if TYPE_CHECKING:
@@ -23,6 +26,9 @@ class BotHandlers(
     MessageHandlers,
     AdminHandlers,
     WorkspaceHandlers,
+    SessionCallbackHandlers,
+    SchedulerCallbackHandlers,
+    SessionQueueCallbackHandlers,
     CallbackHandlers,
 ):
     """Container for all bot command handlers.
@@ -33,7 +39,10 @@ class BotHandlers(
     - MessageHandlers: Message intake and detached worker spawning
     - AdminHandlers: Admin commands (tasks, jobs, auth, etc.)
     - WorkspaceHandlers: Workspace management
-    - CallbackHandlers: Inline button callbacks
+    - SessionCallbackHandlers: Session inline button callbacks (sess: prefix)
+    - SchedulerCallbackHandlers: Scheduler inline button callbacks (sched: prefix)
+    - SessionQueueCallbackHandlers: Session queue callbacks (sq: prefix)
+    - CallbackHandlers: Callback router and small utility callbacks
     """
 
     def __init__(

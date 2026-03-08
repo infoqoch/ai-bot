@@ -4,6 +4,11 @@ import html
 import re
 
 
+def escape_html(text: str) -> str:
+    """Escape text for safe embedding in Telegram HTML messages."""
+    return html.escape(str(text)) if text else ""
+
+
 def markdown_to_telegram_html(text: str) -> str:
     """Convert markdown to Telegram HTML format."""
     # Save code blocks with unique markers
@@ -69,7 +74,7 @@ def format_session_list(sessions: list[dict], summaries: dict[str, str]) -> str:
 
         lines.append(
             f"<b>/s_{s['session_id']}</b> ({s['history_count']}){current_mark}\n"
-            f"{summary}"
+            f"{escape_html(summary)}"
         )
 
     return f"📋 <b>Saved Sessions ({len(sessions)})</b>\n\n" + "\n\n".join(lines)
@@ -90,11 +95,11 @@ def format_session_quick_list(sessions: list[dict], histories: dict[str, list[st
         model = s.get("model", "sonnet")
         emoji = model_emoji.get(model, "")
         name = s.get("name", "")
-        name_display = f" <b>{name}</b>" if name else ""
+        name_display = f" <b>{escape_html(name)}</b>" if name else ""
 
         lines.append(
             f"/s_{s['session_id']}{name_display} {emoji}{model} ({s['history_count']}){current_mark}\n"
-            f"   └ Recent: {last_msg}\n"
+            f"   └ Recent: {escape_html(last_msg)}\n"
             f"   └ /h_{s['session_id']} /r_{s['session_id']} /d_{s['session_id']}"
         )
 

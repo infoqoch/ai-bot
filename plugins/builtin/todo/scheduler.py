@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+from src.bot.formatters import escape_html
 from src.logging_config import logger
 from src.scheduler_manager import scheduler_manager
 
@@ -62,7 +63,7 @@ class TodoScheduler:
                 pending_count = 0
                 for todo in todos:
                     status = "✅" if todo.done else "⬜"
-                    lines.append(f"{status} {todo.text}")
+                    lines.append(f"{status} {escape_html(todo.text)}")
                     if not todo.done:
                         pending_count += 1
 
@@ -111,7 +112,7 @@ class TodoScheduler:
 
                     pending = self.repository.get_pending_todos(chat_id, today)
                     for todo in pending:
-                        lines.append(f"  ⬜ {todo.text}")
+                        lines.append(f"  ⬜ {escape_html(todo.text)}")
 
                     lines.append("\nAny items to move to tomorrow?")
 

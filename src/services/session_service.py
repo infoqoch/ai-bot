@@ -169,27 +169,28 @@ class SessionService:
     ) -> list[dict]:
         """List sessions for user."""
         provider = ai_provider or self.get_selected_ai_provider(user_id)
-        sessions = self._repo.list_sessions(user_id, ai_provider=provider, include_deleted=include_deleted, limit=limit)
+        rows = self._repo.list_sessions_with_counts(
+            user_id, ai_provider=provider, include_deleted=include_deleted, limit=limit,
+        )
         current_id = self._repo.get_current_session_id(user_id, provider)
 
-        result = []
-        for s in sessions:
-            history = self._repo.get_session_history_entries(s.id)
-            result.append({
+        return [
+            {
                 "id": s.id,
                 "full_session_id": s.id,
                 "session_id": s.id[:8],
                 "created_at": s.created_at,
                 "last_used": s.last_used,
-                "history_count": len(history),
+                "history_count": count,
                 "model": s.model,
                 "ai_provider": s.ai_provider,
                 "name": s.name,
                 "workspace_path": s.workspace_path,
                 "deleted": s.deleted,
                 "is_current": s.id == current_id,
-            })
-        return result
+            }
+            for s, count in rows
+        ]
 
     def get_session_info(self, session_id: str) -> str:
         """Get formatted session info."""
@@ -207,30 +208,28 @@ class SessionService:
 
     def get_session_by_prefix(self, user_id: str, prefix: str) -> Optional[dict]:
         """Find session by ID prefix."""
-        sessions = self._repo.list_sessions(user_id, ai_provider=None, include_deleted=False)
-        for s in sessions:
-            if s.id.startswith(prefix):
-                history = self._repo.get_session_history_entries(s.id)
-                return {
-                    "id": s.id,
-                    "full_session_id": s.id,
-                    "session_id": s.id[:8],
-                    "created_at": s.created_at[:19] if s.created_at else "",
-                    "last_used": s.last_used[:19] if s.last_used else "",
-                    "history_count": len(history),
-                    "name": s.name or "",
-                    "model": s.model or "sonnet",
-                    "ai_provider": s.ai_provider,
-                    "workspace_path": s.workspace_path or "",
-                }
-        return None
+        result = self._repo.get_session_by_id_prefix(user_id, prefix)
+        if not result:
+            return None
+        s, count = result
+        return {
+            "id": s.id,
+            "full_session_id": s.id,
+            "session_id": s.id[:8],
+            "created_at": s.created_at[:19] if s.created_at else "",
+            "last_used": s.last_used[:19] if s.last_used else "",
+            "history_count": count,
+            "name": s.name or "",
+            "model": s.model or "sonnet",
+            "ai_provider": s.ai_provider,
+            "workspace_path": s.workspace_path or "",
+        }
 
     def get_history_count(self, session_id: str) -> int:
         """Get message count in session history."""
         if not session_id:
             return 0
-        history = self._repo.get_session_history_entries(session_id)
-        return len(history)
+        return self._repo.count_session_history(session_id)
 
     def clear_session_history(self, session_id: str) -> int:
         """Clear session history."""
@@ -239,23 +238,20 @@ class SessionService:
     def get_all_sessions_summary(self, user_id: str) -> str:
         """Get all sessions summary for display."""
         provider = self.get_selected_ai_provider(user_id)
-        sessions = self._repo.list_sessions(user_id, ai_provider=provider, include_deleted=False)
+        rows = self._repo.list_sessions_with_counts(user_id, ai_provider=provider, include_deleted=False)
         current_id = self._repo.get_current_session_id(user_id, provider)
 
-        if not sessions:
+        if not rows:
             return "세션이 없습니다."
 
         lines = []
-        for s in sessions:
+        for s, msg_count in rows:
             emoji = "📍" if s.id == current_id else "💬"
             if s.workspace_path:
                 emoji = "📂" if s.id == current_id else "🗂"
 
             display_name = s.name or s.id[:8]
             model_badge = get_profile_badge(s.ai_provider, s.model)
-
-            history = self._repo.get_session_history_entries(s.id)
-            msg_count = len(history)
 
             lines.append(f"{emoji} {model_badge} <b>{display_name}</b> ({msg_count}개)")
 

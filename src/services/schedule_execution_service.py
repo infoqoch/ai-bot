@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from src.bot.formatters import escape_html
 from src.logging_config import logger
 
 if TYPE_CHECKING:
@@ -60,7 +61,7 @@ class ScheduleExecutionService:
             try:
                 await self._bot.send_message(
                     chat_id=chat_id,
-                    text=f"📅 <b>{schedule_name}</b>\n\n{chunk}",
+                    text=f"📅 <b>{escape_html(schedule_name)}</b>\n\n{chunk}",
                     parse_mode="HTML",
                 )
             except Exception:

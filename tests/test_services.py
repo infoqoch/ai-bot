@@ -98,20 +98,24 @@ class TestSessionService:
 
     def test_list_sessions(self, service, mock_repo):
         """Test list sessions."""
-        mock_repo.list_sessions.return_value = [
-            MagicMock(
-                id="session123",
-                created_at="2024-01-01T00:00:00",
-                last_used="2024-01-01T00:00:00",
-                model="sonnet",
-                name="Test",
-                workspace_path=None,
-                deleted=False,
+        mock_repo.list_sessions_with_counts.return_value = [
+            (
+                MagicMock(
+                    id="session123",
+                    created_at="2024-01-01T00:00:00",
+                    last_used="2024-01-01T00:00:00",
+                    model="sonnet",
+                    ai_provider="claude",
+                    name="Test",
+                    workspace_path=None,
+                    deleted=False,
+                ),
+                0,
             )
         ]
-        mock_repo.get_session_history_entries.return_value = []
 
         result = service.list_sessions("user1")
 
         assert len(result) == 1
         assert result[0]["id"] == "session123"
+        assert result[0]["history_count"] == 0

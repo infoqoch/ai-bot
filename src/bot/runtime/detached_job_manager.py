@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
+from src.bot.formatters import escape_html
 from src.logging_config import logger
 
 if TYPE_CHECKING:
@@ -31,7 +32,7 @@ class DetachedJobManager:
 
     @staticmethod
     def _is_pid_alive(pid: Optional[int]) -> bool:
-        """Return whether a local PID is still alive."""
+        """Return whether a local PID currently exists."""
         if not pid or pid <= 0:
             return False
 
@@ -40,6 +41,48 @@ class DetachedJobManager:
             return True
         except OSError:
             return False
+
+    @staticmethod
+    def _get_pid_command(pid: int) -> Optional[str]:
+        """Return the full command line for a PID when available."""
+        try:
+            result = subprocess.run(
+                ["ps", "-o", "command=", "-p", str(pid)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except Exception:
+            return None
+
+        if result.returncode != 0:
+            return None
+
+        command = result.stdout.strip()
+        return command or None
+
+    def _is_expected_worker_alive(self, pid: Optional[int], job_id: Optional[int]) -> bool:
+        """Return whether a PID still points at the expected detached worker."""
+        if not self._is_pid_alive(pid):
+            return False
+
+        command = self._get_pid_command(int(pid))
+        if not command:
+            return False
+
+        if "src.worker_job" not in command:
+            logger.warning(f"Detached worker PID mismatch: pid={pid}, command={command[:160]!r}")
+            return False
+
+        if job_id is None:
+            return True
+
+        job_flag = f"--job-id {job_id}"
+        if job_flag in command or f"--job-id={job_id}" in command:
+            return True
+
+        logger.warning(f"Detached worker job mismatch: pid={pid}, expected_job={job_id}, command={command[:160]!r}")
+        return False
 
     def get_live_session_lock(self, session_id: str) -> Optional[dict]:
         """Return a live detached-worker lock or clean it up if stale."""
@@ -52,7 +95,7 @@ class DetachedJobManager:
 
         worker_pid = lock.get("worker_pid")
         if worker_pid:
-            if self._is_pid_alive(int(worker_pid)):
+            if self._is_expected_worker_alive(int(worker_pid), lock.get("job_id")):
                 return lock
 
             logger.warning(f"Dead detached worker lock cleaned: session={session_id[:8]}, pid={worker_pid}")
@@ -191,7 +234,7 @@ class DetachedJobManager:
 
         for lock in self._repo.list_all_session_locks():
             worker_pid = lock.get("worker_pid")
-            if worker_pid and self._is_pid_alive(int(worker_pid)):
+            if worker_pid and self._is_expected_worker_alive(int(worker_pid), lock.get("job_id")):
                 continue
 
             cleaned += 1
@@ -215,7 +258,7 @@ class DetachedJobManager:
                 chat_id=job["chat_id"],
                 text=(
                     f"⚠️ {reason} 때문에 아래 메시지의 응답을 전달하지 못했습니다.\n"
-                    f"<code>{short_request}</code>\n\n"
+                    f"<code>{escape_html(short_request)}</code>\n\n"
                     f"다시 메시지를 보내주세요."
                 ),
                 parse_mode="HTML",

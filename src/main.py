@@ -26,6 +26,7 @@ _process_lock = ProcessLock(Path("/tmp/telegram-bot.lock"))
 
 from src.config import get_settings
 from src.logging_config import logger, setup_logging
+from src.runtime_exit_codes import RuntimeExitCode
 from src.bootstrap import build_bot_runtime
 from src.scheduler_manager import scheduler_manager
 from src.repository import shutdown_repository
@@ -47,9 +48,8 @@ def _setup_hourly_ping_scheduler(app, settings, plugin_loader) -> None:
 
 
 
-def create_app() -> Application:
+def create_app(settings) -> Application:
     """Create and configure the Telegram application."""
-    settings = get_settings()
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
 
     logger.info("=" * 60)
@@ -170,6 +170,15 @@ def create_app() -> Application:
     return app
 
 
+def _load_settings_or_exit():
+    """Load validated settings or exit with one unrecoverable config code."""
+    try:
+        return get_settings()
+    except Exception as exc:
+        logger.error(f"Startup settings invalid: {exc}")
+        raise SystemExit(int(RuntimeExitCode.CONFIG_ERROR))
+
+
 def main() -> None:
     """Run the bot."""
     # 로깅 초기화 (가장 먼저!)
@@ -184,7 +193,7 @@ def main() -> None:
     if not _process_lock.acquire():
         print("❌ Bot is already running.", file=sys.stderr)
         print("   ./run.sh stop && ./run.sh start", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(int(RuntimeExitCode.LOCK_HELD))
     logger.trace("싱글톤 락 획득 성공")
 
     # 종료 시 락 해제 및 Repository 정리
@@ -196,19 +205,19 @@ def main() -> None:
             pass
 
     atexit.register(cleanup)
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-    signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(int(RuntimeExitCode.OK)))
+    signal.signal(signal.SIGINT, lambda *_: sys.exit(int(RuntimeExitCode.OK)))
     logger.trace("종료 핸들러 등록 완료")
 
-    settings = get_settings()
+    settings = _load_settings_or_exit()
 
     if not settings.telegram_token:
         logger.error("TELEGRAM_TOKEN is not set")
-        sys.exit(1)
+        sys.exit(int(RuntimeExitCode.CONFIG_ERROR))
 
     logger.info("Starting Telegram CLI AI Bot...")
 
-    app = create_app()
+    app = create_app(settings)
 
     logger.info("=" * 60)
     logger.info("봇 시작 완료 - polling 모드")

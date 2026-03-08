@@ -17,6 +17,17 @@
 
 `main.py` should not own business logic. It should wire services, handlers, schedulers, and transport.
 
+### Process Supervision
+
+- [`src/supervisor.py`](/Users/bae/AiSandbox/telegram-claude-bot/src/supervisor.py): thin process manager for [`src/main.py`](/Users/bae/AiSandbox/telegram-claude-bot/src/main.py)
+
+Rules:
+
+- Supervisor owns process lifecycle only: startup preflight, child restart/backoff, crash-loop cut-off, and operator notifications.
+- Supervisor must not become a durable state owner for sessions, queues, or detached jobs.
+- Unrecoverable startup exits should be expressed through shared exit codes, not inferred from log text.
+- Job-level watchdogs stay in services that know the job/session context, not in supervisor.
+
 ### Handler Layer
 
 - [`src/bot/handlers/`](/Users/bae/AiSandbox/telegram-claude-bot/src/bot/handlers): Telegram command/callback/message entrypoints.

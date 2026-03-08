@@ -5,19 +5,23 @@
 """
 
 import atexit
+import html
 import os
 import signal
 import subprocess
 import sys
 import time
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
 
+from src.config import get_settings
 from src.logging_config import logger, setup_logging
 from src.lock import ProcessLock
+from src.runtime_exit_codes import RuntimeExitCode, describe_exit_code, is_restartable_exit_code
 
 # .env 파일 로드 (supervisor는 별도 프로세스라 직접 로드 필요)
 load_dotenv()
@@ -35,6 +39,23 @@ _telegram_token = None
 _admin_chat_id = None
 
 
+def _get_int_env(name: str, default: int) -> int:
+    """Return one integer env var with fallback logging."""
+    raw = os.getenv(name)
+    if raw is None or raw == "":
+        return default
+
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning(f"정수 환경변수 파싱 실패 - {name}={raw!r}, default={default}")
+        return default
+
+
+CRASH_LOOP_WINDOW_SECONDS = _get_int_env("SUPERVISOR_CRASH_LOOP_WINDOW_SECONDS", 300)
+CRASH_LOOP_MAX_CRASHES = _get_int_env("SUPERVISOR_CRASH_LOOP_MAX_CRASHES", 5)
+
+
 def _load_telegram_config():
     """환경변수에서 텔레그램 설정 로드."""
     global _telegram_token, _admin_chat_id
@@ -45,6 +66,47 @@ def _load_telegram_config():
             _admin_chat_id = int(_admin_chat_id)
         except ValueError:
             _admin_chat_id = None
+
+
+def _escape_html(text: str) -> str:
+    """Escape one operator-facing string for Telegram HTML."""
+    return html.escape(text or "")
+
+
+def _notify_startup_failure(summary: str, detail: str = "") -> None:
+    """Best-effort admin alert for startup failures before the bot is running."""
+    escaped_summary = _escape_html(summary)
+    message = f"❌ <b>봇 시작 실패</b>\n\n{escaped_summary}"
+    if detail:
+        escaped_detail = _escape_html(detail)
+        message += f"\n\n<code>{escaped_detail[:700]}</code>"
+    notify_admin(message)
+
+
+def _run_preflight() -> bool:
+    """Validate unrecoverable startup conditions before spawning main."""
+    try:
+        settings = get_settings()
+    except Exception as exc:
+        logger.error(f"Supervisor preflight failed: invalid settings: {exc}")
+        _notify_startup_failure("설정 오류로 시작하지 못했습니다.", str(exc))
+        return False
+
+    if not settings.telegram_token:
+        logger.error("Supervisor preflight failed: TELEGRAM_TOKEN is empty")
+        _notify_startup_failure("TELEGRAM_TOKEN is 비어 있어 시작하지 못했습니다.")
+        return False
+
+    return True
+
+
+def _record_crash_time(crash_times: deque[float], occurred_at: float, *, window_seconds: int = CRASH_LOOP_WINDOW_SECONDS) -> int:
+    """Append one crash timestamp and return the number still inside the window."""
+    crash_times.append(occurred_at)
+    cutoff = occurred_at - max(window_seconds, 1)
+    while crash_times and crash_times[0] < cutoff:
+        crash_times.popleft()
+    return len(crash_times)
 
 
 def notify_admin(message: str) -> bool:
@@ -156,6 +218,10 @@ def main():
     atexit.register(_process_lock.release)
     logger.trace("종료 핸들러 등록됨")
 
+    if not _run_preflight():
+        _process_lock.release()
+        sys.exit(int(RuntimeExitCode.CONFIG_ERROR))
+
     # 시그널 핸들러 등록
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
@@ -173,10 +239,11 @@ def main():
 
     restart_delay = INITIAL_RESTART_DELAY
     restart_count = 0
-    
-    global _shutdown_requested, _restart_requested
+    crash_times: deque[float] = deque()
+    shutdown_reason = "shutdown requested"
+
+    global _shutdown_requested
     _shutdown_requested = False
-    _restart_requested = False
 
     while not _shutdown_requested:
         start_time = time.time()
@@ -194,11 +261,18 @@ def main():
         # 종료 요청 확인
         if _shutdown_requested:
             logger.info("정상 종료 요청으로 supervisor 종료")
+            shutdown_reason = "shutdown requested"
             break
 
         # 정상 종료 (exit code 0)
         if exit_code == 0:
             logger.info("봇 정상 종료 (exit_code=0), supervisor 종료")
+            shutdown_reason = "main exited normally"
+            break
+
+        if not is_restartable_exit_code(exit_code):
+            shutdown_reason = f"main exited unrecoverably ({describe_exit_code(exit_code)})"
+            logger.error(f"봇 재시작 중단 - {shutdown_reason}")
             break
 
         # 비정상 종료 - 재시작
@@ -207,6 +281,15 @@ def main():
             f"봇 비정상 종료 (exit_code={exit_code}, "
             f"실행시간={run_duration:.1f}초, 재시작횟수={restart_count})"
         )
+
+        recent_crashes = _record_crash_time(crash_times, time.time())
+        if CRASH_LOOP_MAX_CRASHES > 0 and recent_crashes >= CRASH_LOOP_MAX_CRASHES:
+            shutdown_reason = (
+                f"crash loop detected ({recent_crashes} crashes within "
+                f"{CRASH_LOOP_WINDOW_SECONDS} seconds, last={describe_exit_code(exit_code)})"
+            )
+            logger.error(f"봇 재시작 중단 - {shutdown_reason}")
+            break
 
         # 충분히 오래 실행됐으면 딜레이 리셋
         if run_duration >= CRASH_RESET_TIME:
@@ -231,11 +314,16 @@ def main():
 
     # 종료 알림
     end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    notify_admin(f"🔴 <b>봇이 종료되었습니다</b>\n\n<code>{end_time}</code>")
+    notify_admin(
+        "🔴 <b>봇이 종료되었습니다</b>\n\n"
+        f"<code>{end_time}</code>\n"
+        f"<b>Reason:</b> {_escape_html(shutdown_reason)}"
+    )
 
     logger.info("=" * 60)
     logger.info("Supervisor 종료")
     logger.info(f"  총 재시작 횟수: {restart_count}")
+    logger.info(f"  종료 사유: {shutdown_reason}")
     logger.info("=" * 60)
 
 
