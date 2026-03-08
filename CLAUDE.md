@@ -80,6 +80,18 @@ def process():
 - **SQLite Repository** 단일 사용 (`.data/bot.db`)
 - JSON 파일 기반 저장 금지
 
+### SQLite 런타임 규칙 (CRITICAL)
+
+- 런타임 SQLite 커넥션은 **`autocommit` 기본값**으로 운영한다.
+- **조회 메서드(read path)는 DB write를 수행하지 않는다.**
+  - `get_*`, `list_*`, 상태 조회 계층에서 `INSERT OR IGNORE`, `get_or_create_*` 호출 금지
+- write는 **짧은 단건 SQL**로 끝내는 것을 기본 원칙으로 한다.
+- 여러 SQL을 반드시 함께 묶어야 하는 특별한 원자성 요구가 없다면, **명시적 transaction을 만들지 않는다.**
+- 드물게 명시적 transaction이 필요하면:
+  - 왜 atomicity가 필요한지 코드에 근거가 있어야 한다.
+  - 범위를 최소화한다.
+  - detached worker finalize 경로와 충돌 가능성을 먼저 검토한다.
+
 ### DDL 관리 (CRITICAL)
 
 - **`src/repository/schema.sql`** = DB 스키마의 **단일 소스 (Single Source of Truth)**
