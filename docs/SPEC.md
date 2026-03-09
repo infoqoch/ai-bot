@@ -39,36 +39,44 @@
 
 ## 전체 명령어 목록
 
-| 명령어 | 설명 | 단축 |
-|--------|------|------|
-| `/start` | 봇 시작 화면 (인증 상태, 현재 세션) | - |
-| `/help` | 전체 명령어 도움말 | - |
-| `/auth <key>` | 인증 (REQUIRE_AUTH=true 시) | - |
-| `/status` | 인증 상태 확인 | - |
-| `/new [model] [name]` | 새 세션 생성 | - |
-| `/new_opus`, `/new_sonnet`, `/new_haiku` | 모델별 세션 단축 생성 | - |
-| `/new_haiku_speedy` | Haiku + "Speedy" 이름 프리셋 | - |
-| `/new_opus_smarty` | Opus + "Smarty" 이름 프리셋 | - |
-| `/model [model]` | 현재 세션 모델 변경/확인 | - |
-| `/model_opus`, `/model_sonnet`, `/model_haiku` | 모델 변경 단축 | - |
-| `/session` | 현재 세션 정보 + 히스토리 | - |
-| `/session_list` | 세션 목록 | `/sl` |
-| `/s_{id}` | 세션 전환 | - |
-| `/h_{id}` | 세션 히스토리 | `/history_{id}` |
-| `/d_{id}` | 세션 삭제 | `/delete_{id}` |
-| `/rename_name` | 현재 세션 이름 변경 | - |
-| `/r_{id}_name` | 특정 세션 이름 변경 | - |
-| `/back` | 이전 세션으로 복귀 | - |
-| `/new_workspace path [model] [name]` | 워크스페이스 세션 생성 | `/nw` |
-| `/workspace` | 워크스페이스 관리 | `/ws` |
-| `/scheduler` | 스케줄 관리 | - |
-| `/tasks` | 활성 태스크/큐 현황 | - |
-| `/plugins` | 플러그인 목록 | - |
-| `/reload [name]` | 플러그인 리로드 (전체 또는 특정 플러그인) | - |
-| `/ai <question>` | 플러그인 우회, 현재 AI에 직접 질문 | - |
-| `/select_ai` | 현재 AI 제공자 선택 (`Claude` / `Codex`) | - |
-| `/chatid` | 내 Chat ID 확인 | - |
-| `/{plugin}` | 플러그인 사용법 (예: `/todo`, `/memo`) | - |
+Telegram slash command picker는 시작 시 API로 자동 동기화되며, 아래 5개만 노출한다.
+
+| 공개 picker 명령 | 설명 |
+|------------------|------|
+| `/menu` | 메인 서비스 런처 |
+| `/session` | 현재 세션 정보 |
+| `/new` | 새 세션 생성 |
+| `/sl` | 세션 목록 |
+| `/tasks` | 활성 태스크/큐 현황 |
+
+나머지 명령은 버튼 허브 또는 직접 입력으로 접근한다.
+
+| 직접 입력/버튼 명령 | 설명 |
+|---------------------|------|
+| `/start` | 시작 화면 (`/menu` / `/help` 진입) |
+| `/help` | 간단 도움말 + Back to Menu |
+| `/help_extend` | 확장 도움말 인덱스 |
+| `/help_{plugin}` | 개별 플러그인 상세 도움말 |
+| `/auth <key>` | 인증 (REQUIRE_AUTH=true 시) |
+| `/status` | 인증 상태 확인 |
+| `/select_ai` | 현재 AI 제공자 선택 (`Claude` / `Codex`) |
+| `/model [model]` | 현재 세션 모델 변경/확인 |
+| `/model_opus`, `/model_sonnet`, `/model_haiku` | 모델 변경 단축 |
+| `/new_opus`, `/new_sonnet`, `/new_haiku` | 모델별 세션 단축 생성 |
+| `/new_workspace path [model] [name]` | 워크스페이스 세션 생성 |
+| `/workspace` | 워크스페이스 관리 |
+| `/scheduler` | 스케줄 관리 |
+| `/plugins` | 플러그인 버튼 허브 |
+| `/ai <question>` | 플러그인 우회, 현재 AI에 직접 질문 |
+| `/chatid` | 내 Chat ID 확인 |
+| `/s_{id}` | 세션 전환 |
+| `/h_{id}` | 세션 히스토리 (`/history_{id}` 별칭 지원) |
+| `/d_{id}` | 세션 삭제 (`/delete_{id}` 별칭 지원) |
+| `/rename_name` | 현재 세션 이름 변경 |
+| `/r_{id}_name` | 특정 세션 이름 변경 |
+| `/back` | 이전 세션으로 복귀 |
+| `/{plugin}` | 사용법 본문 대신 `/help_{plugin}` 경로로 안내 |
+| `/reload [name]` | 플러그인 리로드 (admin only) |
 
 ---
 
@@ -115,16 +123,20 @@ CLI AI Bot
 Current AI: {provider}
 Session: [{세션정보}] ({N} messages)
 
-/help for commands
+/menu or /help
 ```
+
+- 하단에 `Menu`, `Help` 버튼 2개를 함께 표시한다.
 
 ### `/help`
 
-전체 명령어를 카테고리별로 표시. 인증 필요 시 Authentication 섹션 포함, 플러그인 있으면 Plugins 섹션 포함.
+간단 도움말만 보여준다. 상세 문서는 `/help_extend` 아래로 분리한다.
+
+- 하단에 `Back to Menu` 버튼 표시
 
 ### 알 수 없는 명령어
 
-등록되지 않은 `/xxx` 입력 시: `Unknown command: {command}` + `/help for command list`
+등록되지 않은 `/xxx` 입력 시: `Unknown command: {command}` + `/menu or /help`
 
 ### `/chatid`
 
@@ -141,15 +153,18 @@ Add this ID to ALLOWED_CHAT_IDS.
 ### `/plugins`
 
 ```
-Plugin List
+Plugins
 
-- /todo - 할일 관리
-- /memo - 메모 저장
-...
+Builtin: /memo /todo /weather
+Custom: /hourly_ping
 
-Use /plugin_name for usage details
+Tap a plugin button below.
+Docs: /help_extend
 ```
 
+- 플러그인 본문은 `Builtin` / `Custom` 한 줄 요약만 표시한다.
+- 실제 사용은 동적 버튼으로 연다. 플러그인 수가 늘어나면 버튼도 자동으로 늘어난다.
+- `/{plugin}` 직접 입력은 실행 설명 대신 `/help_{plugin}` 문서 경로로 안내한다.
 플러그인 없음: `No plugins loaded.`
 
 ---
@@ -176,7 +191,7 @@ Current AI: Claude
 
 - 선택 즉시 현재 AI가 바뀐다.
 - 세션 목록(`/sl`), 현재 세션(`/session`), 새 세션(`/new`), 모델 변경(`/model`)은 모두 현재 선택된 AI 기준으로 동작한다.
-- AI를 바꿔도 다른 AI의 세션은 삭제되지 않는다. 단지 화면에서 숨겨진다.
+- AI를 바꿔도 다른 AI의 세션은 삭제되지 않는다.
 - 각 AI는 별도의 current session 상태를 가진다. Claude에서 보던 현재 세션과 Codex에서 보던 현재 세션을 각각 기억한다.
 - 시작 화면, 도움말, 세션 화면에는 항상 `Current AI: {provider}`를 표시한다.
 
@@ -197,23 +212,25 @@ Current AI: Claude
 ### 세션 목록 화면
 
 ```
-Session List - Claude (HH:MM:SS)        ← 타임스탬프는 콜백 갱신 시에만 표시
+Session List (HH:MM:SS)                 ← 타임스탬프는 콜백 갱신 시에만 표시
+Current AI: Claude
 
-> [S] SessionName (abc12345)        ← 현재 세션에 > 표시
-[O] OtherSession (def67890) [locked]  ← 처리 중이면 [locked]
+🧠 Project Alpha ●
+🤖 ⚡ Research Bot 🔒
 
 [SessionName] [History] [Del]       ← 각 세션별 액션 버튼
 [OtherSess..] [History] [Del]
 
-[+ provider models]                 ← 현재 AI의 모델 버튼
-[Refresh] [Tasks]
+[New Session] [Refresh] [Tasks]
 [Switch AI]
+[Back]                              ← `/menu -> Sessions`로 진입한 경우만
 ```
 
 - 최대 10개 표시
 - 세션 이름은 버튼에서 10자 truncate
-- 현재 선택한 AI의 세션만 표시
-- Claude/Codex를 바꾸면 같은 `/sl` 명령어가 다른 목록을 보여준다
+- Claude/Codex 세션을 한 화면에 함께 표시한다
+- 현재 선택된 AI의 current session 하나만 `●`로 강조한다
+- 각 행에는 provider icon과 model badge를 함께 표시한다
 
 ### 세션 정보 화면 (`/session`)
 
@@ -352,7 +369,7 @@ Current session is processing
 
 - 세션 시작: 모델 선택 → 생성. 동일 워크스페이스 세션이 이미 있으면 자동 전환 (중복 생성 방지).
 - 현재 AI 기준 모델 선택 버튼을 사용한다. 같은 워크스페이스라도 Claude/Codex 세션은 각각 따로 가질 수 있다.
-- 스케줄 등록: 시간 → 분 → 모델 → 메시지 입력 → 등록 완료.
+- 스케줄 등록: 시간 → 분 → `Daily` 또는 `One-time` → 모델 → 메시지 입력 → 등록 완료.
 
 ---
 
@@ -360,37 +377,38 @@ Current session is processing
 
 ### 개념
 
-매일 지정 시간에 자동 실행되는 작업. 3가지 타입: AI (일반 대화), Workspace (프로젝트 컨텍스트), Plugin (플러그인 액션). 시간 범위: 06~22시 (새벽 알림 방지).
+지정 시간에 자동 실행되는 작업. 3가지 타입: Chat (일반 대화), Workspace (프로젝트 컨텍스트), Plugin (플러그인 액션). 앱 전체는 단일 로컬 시간대(`APP_TIMEZONE`, 기본 `Asia/Seoul`)를 사용한다.
 
 ### 사용자 시나리오
 
-**스케줄 확인:** `/scheduler` → 등록된 스케줄 목록 (시간순 정렬, 활성/비활성 표시).
+**스케줄 확인:** `/scheduler` → 등록된 스케줄 목록 (다음 실행 시각순 정렬, 활성/비활성 표시).
 
-**AI 스케줄 추가:** `+ Current AI` → 시간(06~22h) → 분(5분 간격) → 모델 → 메시지 입력 → 등록.
+**Chat 스케줄 추가:** `+ Chat` → 시간(00~23h) → 분(5분 간격) → `Daily` 또는 `One-time` → 모델 → 메시지 입력 → 등록.
 
 - 일반/워크스페이스 스케줄은 생성 시점의 현재 AI 제공자를 따른다.
 - Plugin 스케줄은 AI 제공자와 무관하다.
+- 복잡한 반복식은 기본 UI에서 직접 만들지 않고, 이후 AI/admin 경로로 `cron` 값을 업데이트하는 방식으로 처리한다.
 
-**Workspace 스케줄 추가:** `+ Workspace` → 워크스페이스 선택 → 시간 → 분 → 모델 → 메시지 → 등록.
+**Workspace 스케줄 추가:** `+ Workspace` → 워크스페이스 선택 → 시간 → 분 → `Daily` 또는 `One-time` → 모델 → 메시지 → 등록.
 
-**Plugin 스케줄 추가:** `+ Plugin` → 플러그인 선택 → 액션 선택 → 시간 → 분 → 등록. (모델/메시지 불필요)
+**Plugin 스케줄 추가:** `+ Plugin` → 플러그인 선택 → 액션 선택 → 시간 → 분 → `Daily` 또는 `One-time` → 등록. (모델/메시지 불필요)
 
 **스케줄 관리:** 목록에서 스케줄 클릭 → 상세 화면 → ON/OFF 토글, 시간 변경, 삭제.
 
 ### 스케줄 목록 화면
 
 ```
-{ON/OFF} {타입} ScheduleName - HH:MM
+{ON/OFF} {타입} ScheduleName - Next run
 
-[{ON/OFF} HH:MM {타입이모지} name]    ← 각 스케줄 버튼
-[+ Current AI] [+ Workspace] [+ Plugin]  ← 추가 버튼
+[{ON/OFF} MM-DD HH:MM {타입이모지} name]    ← 각 스케줄 버튼
+[+ Chat] [+ Workspace] [+ Plugin]  ← 추가 버튼
 [Refresh]
 
 System Jobs                            ← 시스템 잡 (hourly_ping 등)
   {schedule_info} - {job_name}
 ```
 
-- 타입 이모지: `💬` AI, `📂` Workspace, `🔌` Plugin
+- 타입 이모지: `💬` Chat, `📂` Workspace, `🔌` Plugin
 - 상태: `✅` 활성, `⏸` 비활성
 
 ### 스케줄 상세 화면
@@ -399,7 +417,9 @@ System Jobs                            ← 시스템 잡 (hourly_ping 등)
 {타입이모지} ScheduleName
 
 Status: ON/OFF
-Time: HH:MM (daily)
+Time: HH:MM 또는 YYYY-MM-DD HH:MM
+Schedule: Daily at HH:MM / Once at YYYY-MM-DD HH:MM
+Next run: YYYY-MM-DD HH:MM
 Model: model          ← Claude/Workspace만
 Path: /path           ← Workspace만
 Message: message...   ← Claude/Workspace만 (80자 truncate)
@@ -415,7 +435,7 @@ Runs: N
 
 ### 시간 선택 UI
 
-- 시간: 06h~22h (KST 기준), 4열 그리드 (17개 버튼)
+- 시간: 00h~23h (앱 로컬 시간대 기준), 4열 그리드 (24개 버튼)
 - 분: 00~55, 5분 간격, 4열 그리드 (12개 버튼)
 
 ### 스케줄 실행 결과
@@ -460,12 +480,13 @@ question_preview
 
 {Claude 응답 본문}
 
-/s_{id} switch
-/h_{id} history
+[Session]
 ```
 
 - 세션 정보와 히스토리 번호를 헤더에 표시 → 어느 세션에서의 응답인지 식별
-- 하단에 세션 전환/히스토리 링크 → 대화 후 바로 탐색 가능
+- 하단 shortcut은 `Session` 하나만 둔다
+- 이 shortcut 버튼은 원본 AI 응답을 수정하지 않는다. 클릭 결과는 새 메시지(follow-up)로 열려야 한다.
+- AI 응답용 shortcut callback과 화면 내비게이션 callback은 분리한다. 전자는 non-destructive follow-up, 후자는 동일 메시지 edit 기반을 사용한다.
 
 ### 에러 응답
 
@@ -517,6 +538,7 @@ question_preview
 5. 사용자가 `Wait in this session`을 누르면 요청이 persistent queue에 저장됨
 6. 현재 worker가 성공/실패/timeout으로 종료되면 lock을 유지한 채 다음 queued message를 이어 처리
 7. 마지막 queued message까지 끝나면 lock 해제
+8. worker가 보내는 최종 AI 응답 하단 shortcut은 `non-destructive follow-up` 규칙을 따른다. 현재는 `Session` 버튼 하나만 제공하고 원본 응답을 덮어쓰지 않는다.
 
 ### 시스템 프롬프트
 

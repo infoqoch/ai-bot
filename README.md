@@ -106,6 +106,11 @@ AI 응답은 느립니다(수십 초~수 분). 모든 요청을 CLI agent에 보
 1. [@BotFather](https://t.me/BotFather)에서 `/newbot`
 2. **API 토큰** 복사
 
+커맨드 메뉴는 봇 시작 시 `setMyCommands`로 자동 동기화됩니다.
+
+- 공개 slash command picker: `/menu`, `/session`, `/new`, `/sl`, `/tasks`
+- 나머지 기능은 `/menu` 버튼 허브 또는 직접 명령 입력으로 접근
+
 ### 3. 설치 및 실행
 
 ```bash
@@ -139,18 +144,41 @@ cp .env.example .env
 
 ## 사용법
 
+### 메인 진입점
+
+`/menu`가 기본 런처입니다.
+
+- 세션/AI 제어
+- 워크스페이스 허브
+- 스케줄러 허브
+- 플러그인 허브
+- `/help` 진입
+
+텔레그램 slash command picker에는 아래 5개만 노출됩니다.
+
+| 명령어 | 설명 |
+|--------|------|
+| `/menu` | 메인 서비스 메뉴 |
+| `/session` | 현재 세션 정보 |
+| `/new` | 새 세션 생성 |
+| `/sl` | 세션 목록 |
+| `/tasks` | 활성 태스크 확인 |
+
 ### 기본 대화
 
 메시지를 보내면 현재 선택된 AI가 응답합니다.
+
+AI 응답 하단에는 `Session` 버튼만 붙습니다. 세션 상세로 이동하는 최소 shortcut만 유지합니다.
 
 ### 세션 관리
 
 | 명령어 | 설명 |
 |--------|------|
+| `/menu` | 버튼 기반 허브 열기 |
 | `/select_ai` | Claude / Codex 선택 |
 | `/new opus 프로젝트명` | 새 Opus 세션 (이름 지정) |
 | `/session` | 현재 세션 정보 |
-| `/session_list` | 전체 세션 목록 |
+| `/sl` | 전체 세션 목록 |
 | `/s_abc123` | 세션 전환 |
 | `/model opus` | 모델 변경 |
 
@@ -166,15 +194,41 @@ cp .env.example .env
 
 ### 플러그인
 
-AI 호출 없이 즉시 응답:
+`/plugins` 또는 `/menu -> Plugins`로 버튼 기반 플러그인 허브를 엽니다.
+
+- 목록 본문은 `Builtin` / `Custom` 한 줄 요약으로 표시
+- 실제 실행은 동적 버튼으로 처리
+- 플러그인 상세 문서는 `/help_extend` 또는 `/help_<plugin>` 사용
+- `/memo` 같은 직접 명령은 실행 설명 대신 `/help_memo` 같은 문서 경로로 안내
+
+예시:
 
 ```
-메모해줘: 장보기 목록    → 저장 (즉시)
-메모 보여줘             → 조회 (즉시)
-서울 날씨               → Open-Meteo API (즉시)
+/plugins                → 플러그인 버튼 허브
+/help_extend            → 확장 도움말 인덱스
+/help_memo              → Memo 플러그인 상세 도움말
 ```
 
 > `plugins/custom/`에 직접 플러그인 추가 가능
+
+### 스케줄러
+
+`/scheduler`로 스케줄 허브를 엽니다.
+
+- `💬 Chat`: 현재 선택된 AI/provider 기준 일반 스케줄
+- `📂 Workspace`: 워크스페이스 컨텍스트 포함 스케줄
+- `🔌 Plugin`: 플러그인 액션 스케줄
+
+기본 UI 플로우:
+
+```text
+시간(00~23) → 분(5분 단위) → Daily / One-time → 나머지 입력 → 등록
+```
+
+- 목록은 `다음 실행 시각(next run)` 기준으로 정렬됩니다.
+- 기본 UI는 `Daily`와 `One-time`만 직접 노출합니다.
+- 더 복잡한 반복식은 나중에 AI/admin 경로에서 `cron` 값 업데이트로 처리하는 구조입니다.
+- 앱 전체 스케줄 시간 해석은 `APP_TIMEZONE` 하나만 사용합니다. 기본값은 `Asia/Seoul`입니다.
 
 ---
 
@@ -194,6 +248,7 @@ AI 호출 없이 즉시 응답:
 |------|--------|------|
 | `TELEGRAM_TOKEN` | (필수) | 봇 토큰 |
 | `ALLOWED_CHAT_IDS` | (전체허용) | 허용 채팅 ID |
+| `APP_TIMEZONE` | `Asia/Seoul` | 앱 전체 로컬 시간대. 스케줄/날짜 계산 공통 기준 |
 | `REQUIRE_AUTH` | `true` | 인증 필요 여부 |
 | `AUTH_SECRET_KEY` | - | 인증 키 |
 | `SESSION_TIMEOUT_HOURS` | `24` | 세션 만료 시간 |

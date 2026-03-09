@@ -41,6 +41,12 @@ Rules:
 - Shared handler state must stay small and operational, not business-heavy.
 - Protected command entrypoints should use `authorized_only` / `authenticated_only` unless the command is intentionally public.
 
+Callback interaction rule:
+
+- Stateful menu/navigation callbacks may edit the same message in place.
+- AI-response shortcut callbacks must use a dedicated prefix and send a follow-up message instead of editing the original AI response.
+- Do not reuse edit-based screen callbacks directly on detached AI result messages.
+
 ### Service Layer
 
 - [`src/services/session_service.py`](/Users/bae/AiSandbox/telegram-claude-bot/src/services/session_service.py): session business rules.
@@ -97,6 +103,10 @@ UX details for this flow belong in [`SPEC.md`](./SPEC.md).
 - Scheduler decides when to run.
 - [`ScheduleExecutionService`](/Users/bae/AiSandbox/telegram-claude-bot/src/services/schedule_execution_service.py) decides how to execute and deliver.
 - Schedule registration/storage belongs to repository adapters, not `main.py`.
+- Canonical trigger model is `cron | once`.
+- User-facing `Daily` / `One-time` buttons are UI sugar over that storage model.
+- Global scheduler time is owned by [`src/time_utils.py`](/Users/bae/AiSandbox/telegram-claude-bot/src/time_utils.py) and configured through `APP_TIMEZONE`.
+- Schedule list ordering belongs to adapter/view logic and should be based on `next run`, not legacy `hour/minute` sorting.
 
 ## SQLite Rules
 
