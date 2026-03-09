@@ -366,3 +366,62 @@ class TestCreateSession:
             session_id = await client.create_session()
 
             assert session_id is None
+
+
+class TestUsageSnapshot:
+    """Claude usage snapshot parsing tests."""
+
+    @pytest.mark.asyncio
+    async def test_get_usage_snapshot_parses_statusline(self, client):
+        """TTY status line should be parsed into a usage snapshot."""
+        with patch.object(
+            client,
+            "_get_auth_snapshot",
+            AsyncMock(return_value={"subscription_type": "max"}),
+        ), patch.object(
+            client,
+            "_get_usage_snapshot_from_omc",
+            AsyncMock(return_value=None),
+        ), patch.object(
+            client,
+            "_capture_usage_screen",
+            return_value="\x1b[0m[OMC] | 5h:2%(3h58m) wk:56%(3d21h) | session:0m",
+        ):
+            snapshot = await client.get_usage_snapshot()
+
+        assert snapshot == {
+            "subscription_type": "max",
+            "checked_at": snapshot["checked_at"],
+            "five_hour_percent": "2",
+            "five_hour_reset": "3h58m",
+            "weekly_percent": "56",
+            "weekly_reset": "3d21h",
+        }
+
+    @pytest.mark.asyncio
+    async def test_get_usage_snapshot_returns_partial_status_when_usage_missing(self, client):
+        """Auth plan should still be returned when usage details are unavailable."""
+        with patch.object(
+            client,
+            "_get_auth_snapshot",
+            AsyncMock(return_value={"subscription_type": "max"}),
+        ), patch.object(
+            client,
+            "_get_usage_snapshot_from_omc",
+            AsyncMock(return_value=None),
+        ), patch.object(
+            client,
+            "_get_usage_unavailable_reason",
+            AsyncMock(return_value="Rate limited. Please try again later. (429, rate_limit_error)"),
+        ), patch.object(
+            client,
+            "_capture_usage_screen",
+            return_value="",
+        ):
+            snapshot = await client.get_usage_snapshot()
+
+        assert snapshot == {
+            "subscription_type": "max",
+            "checked_at": snapshot["checked_at"],
+            "unavailable_reason": "Rate limited. Please try again later. (429, rate_limit_error)",
+        }
