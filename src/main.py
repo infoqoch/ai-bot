@@ -150,7 +150,7 @@ def create_app(settings) -> Application:
     app.add_handler(CommandHandler("reload", handlers.reload_command))
     app.add_handler(CommandHandler("ai", handlers.ai_command))
 
-    # 동적 플러그인 명령어 (예: /memo)
+    # 동적 플러그인 명령어
     if runtime.plugin_loader.plugins:
         plugin_names = [p.name for p in runtime.plugin_loader.plugins]
         for name in plugin_names:

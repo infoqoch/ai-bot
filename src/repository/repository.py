@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+import warnings
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -1141,68 +1142,59 @@ class Repository:
 
     # ========== Memo Operations ==========
 
-    def add_memo(self, chat_id: int, content: str) -> Memo:
-        """Add a memo."""
-        now = self._now()
-        cursor = self._conn.execute(
-            "INSERT INTO memos (chat_id, content, created_at) VALUES (?, ?, ?)",
-            (chat_id, content, now)
+    def _warn_legacy_plugin_api(self, method_name: str) -> None:
+        """Warn when legacy plugin-specific repository methods are used directly."""
+        warnings.warn(
+            (
+                f"Repository.{method_name} is a legacy plugin storage shim. "
+                "Use src.repository.adapters.plugin_storage instead."
+            ),
+            DeprecationWarning,
+            stacklevel=2,
         )
-        self._conn.commit()
 
-        return Memo(
-            id=cursor.lastrowid or 0,
-            chat_id=chat_id,
-            content=content,
-            created_at=now
-        )
+    def _plugin_memo_store(self):
+        """Return the bounded memo storage adapter."""
+        from src.repository.adapters import RepositoryMemoStore
+
+        return RepositoryMemoStore(self)
+
+    def _plugin_todo_store(self):
+        """Return the bounded todo storage adapter."""
+        from src.repository.adapters import RepositoryTodoStore
+
+        return RepositoryTodoStore(self)
+
+    def _plugin_weather_store(self):
+        """Return the bounded weather storage adapter."""
+        from src.repository.adapters import RepositoryWeatherLocationStore
+
+        return RepositoryWeatherLocationStore(self)
+
+    def add_memo(self, chat_id: int, content: str) -> Memo:
+        """Legacy shim: add a memo through the plugin storage adapter."""
+        self._warn_legacy_plugin_api("add_memo")
+        return self._plugin_memo_store().add(chat_id, content)
 
     def get_memo(self, memo_id: int) -> Optional[Memo]:
-        """Get memo by ID."""
-        cursor = self._conn.execute(
-            "SELECT * FROM memos WHERE id = ?", (memo_id,)
-        )
-        row = cursor.fetchone()
-        if not row:
-            return None
-        return Memo(
-            id=row["id"],
-            chat_id=row["chat_id"],
-            content=row["content"],
-            created_at=row["created_at"]
-        )
+        """Legacy shim: get a memo through the plugin storage adapter."""
+        self._warn_legacy_plugin_api("get_memo")
+        return self._plugin_memo_store().get(memo_id)
 
     def delete_memo(self, memo_id: int) -> bool:
-        """Delete memo."""
-        cursor = self._conn.execute(
-            "DELETE FROM memos WHERE id = ?", (memo_id,)
-        )
-        self._conn.commit()
-        return cursor.rowcount > 0
+        """Legacy shim: delete a memo through the plugin storage adapter."""
+        self._warn_legacy_plugin_api("delete_memo")
+        return self._plugin_memo_store().delete(memo_id)
 
     def list_memos(self, chat_id: int) -> list[Memo]:
-        """List memos for chat."""
-        cursor = self._conn.execute(
-            "SELECT * FROM memos WHERE chat_id = ? ORDER BY created_at DESC",
-            (chat_id,)
-        )
-        return [
-            Memo(
-                id=row["id"],
-                chat_id=row["chat_id"],
-                content=row["content"],
-                created_at=row["created_at"]
-            )
-            for row in cursor.fetchall()
-        ]
+        """Legacy shim: list memos through the plugin storage adapter."""
+        self._warn_legacy_plugin_api("list_memos")
+        return self._plugin_memo_store().list_by_chat(chat_id)
 
     def clear_memos(self, chat_id: int) -> int:
-        """Clear all memos for chat."""
-        cursor = self._conn.execute(
-            "DELETE FROM memos WHERE chat_id = ?", (chat_id,)
-        )
-        self._conn.commit()
-        return cursor.rowcount
+        """Legacy shim: clear memos through the plugin storage adapter."""
+        self._warn_legacy_plugin_api("clear_memos")
+        return self._plugin_memo_store().clear_by_chat(chat_id)
 
     # ========== Todo Operations ==========
 
@@ -1212,35 +1204,14 @@ class Repository:
         date: str,
         text: str
     ) -> Todo:
-        """Add a todo item."""
-        now = self._now()
-        cursor = self._conn.execute(
-            """INSERT INTO todos (chat_id, date, slot, text, created_at, updated_at)
-               VALUES (?, ?, 'default', ?, ?, ?)""",
-            (chat_id, date, text, now, now)
-        )
-        self._conn.commit()
-
-        return Todo(
-            id=cursor.lastrowid or 0,
-            chat_id=chat_id,
-            date=date,
-            slot="default",
-            text=text,
-            done=False,
-            created_at=now,
-            updated_at=now
-        )
+        """Legacy shim: add a todo through the plugin storage adapter."""
+        self._warn_legacy_plugin_api("add_todo")
+        return self._plugin_todo_store().add(chat_id, date, text)
 
     def get_todo(self, todo_id: int) -> Optional[Todo]:
-        """Get todo by ID."""
-        cursor = self._conn.execute(
-            "SELECT * FROM todos WHERE id = ?", (todo_id,)
-        )
-        row = cursor.fetchone()
-        if not row:
-            return None
-        return self._row_to_todo(row)
+        """Legacy shim: get a todo through the plugin storage adapter."""
+        self._warn_legacy_plugin_api("get_todo")
+        return self._plugin_todo_store().get(todo_id)
 
     def _row_to_todo(self, row: sqlite3.Row) -> Todo:
         """Convert database row to Todo object."""
@@ -1256,107 +1227,51 @@ class Repository:
         )
 
     def toggle_todo(self, todo_id: int) -> Optional[bool]:
-        """Toggle todo done state. Returns new state."""
-        todo = self.get_todo(todo_id)
-        if not todo:
-            return None
-
-        new_state = not todo.done
-        self._conn.execute(
-            "UPDATE todos SET done = ? WHERE id = ?",
-            (int(new_state), todo_id)
-        )
-        self._conn.commit()
-        return new_state
+        """Legacy shim: toggle a todo through the plugin storage adapter."""
+        self._warn_legacy_plugin_api("toggle_todo")
+        return self._plugin_todo_store().toggle(todo_id)
 
     def delete_todo(self, todo_id: int) -> bool:
-        """Delete todo."""
-        cursor = self._conn.execute(
-            "DELETE FROM todos WHERE id = ?", (todo_id,)
-        )
-        self._conn.commit()
-        return cursor.rowcount > 0
+        """Legacy shim: delete a todo through the plugin storage adapter."""
+        self._warn_legacy_plugin_api("delete_todo")
+        return self._plugin_todo_store().delete(todo_id)
 
     def list_todos_by_date(self, chat_id: int, date: str) -> list[Todo]:
-        """List todos for chat on specific date."""
-        cursor = self._conn.execute(
-            "SELECT * FROM todos WHERE chat_id = ? AND date = ? ORDER BY id",
-            (chat_id, date)
-        )
-        return [self._row_to_todo(row) for row in cursor.fetchall()]
+        """Legacy shim: list todos by date through the plugin storage adapter."""
+        self._warn_legacy_plugin_api("list_todos_by_date")
+        return self._plugin_todo_store().list_by_date(chat_id, date)
 
     def clear_todos_by_date(self, chat_id: int, date: str) -> int:
-        """Clear all todos for date."""
-        cursor = self._conn.execute(
-            "DELETE FROM todos WHERE chat_id = ? AND date = ?",
-            (chat_id, date)
-        )
-        self._conn.commit()
-        return cursor.rowcount
+        """Legacy shim: clear todos through the plugin storage adapter."""
+        self._warn_legacy_plugin_api("clear_todos_by_date")
+        return self._plugin_todo_store().clear_by_date(chat_id, date)
 
     def mark_todo_done(self, todo_id: int, done: bool = True) -> bool:
-        """Mark todo as done/undone."""
-        cursor = self._conn.execute(
-            "UPDATE todos SET done = ? WHERE id = ?",
-            (int(done), todo_id)
-        )
-        self._conn.commit()
-        return cursor.rowcount > 0
+        """Legacy shim: mark todo done through the plugin storage adapter."""
+        self._warn_legacy_plugin_api("mark_todo_done")
+        return self._plugin_todo_store().mark_done(todo_id, done)
 
     def get_pending_todos(self, chat_id: int, date: str) -> list[Todo]:
-        """Get incomplete todos for date."""
-        cursor = self._conn.execute(
-            "SELECT * FROM todos WHERE chat_id = ? AND date = ? AND done = 0 ORDER BY id",
-            (chat_id, date)
-        )
-        return [self._row_to_todo(row) for row in cursor.fetchall()]
+        """Legacy shim: get pending todos through the plugin storage adapter."""
+        self._warn_legacy_plugin_api("get_pending_todos")
+        return self._plugin_todo_store().pending_for_date(chat_id, date)
 
     def move_todos_to_date(self, todo_ids: list[int], new_date: str) -> int:
-        """Move todos to another date."""
-        if not todo_ids:
-            return 0
-        placeholders = ",".join("?" * len(todo_ids))
-        cursor = self._conn.execute(
-            f"UPDATE todos SET date = ? WHERE id IN ({placeholders})",
-            [new_date] + todo_ids
-        )
-        self._conn.commit()
-        return cursor.rowcount
+        """Legacy shim: move todos through the plugin storage adapter."""
+        self._warn_legacy_plugin_api("move_todos_to_date")
+        return self._plugin_todo_store().move_to_date(todo_ids, new_date)
 
     def get_todos_by_date_range(
         self, chat_id: int, start_date: str, end_date: str
     ) -> dict[str, list[Todo]]:
-        """Get todos for date range, grouped by date."""
-        cursor = self._conn.execute(
-            """SELECT * FROM todos
-               WHERE chat_id = ? AND date >= ? AND date <= ?
-               ORDER BY date, id""",
-            (chat_id, start_date, end_date)
-        )
-        result: dict[str, list[Todo]] = {}
-        for row in cursor.fetchall():
-            todo = self._row_to_todo(row)
-            if todo.date not in result:
-                result[todo.date] = []
-            result[todo.date].append(todo)
-        return result
+        """Legacy shim: list todos by range through the plugin storage adapter."""
+        self._warn_legacy_plugin_api("get_todos_by_date_range")
+        return self._plugin_todo_store().by_date_range(chat_id, start_date, end_date)
 
     def get_todo_stats(self, chat_id: int, date: str) -> dict[str, int]:
-        """Get todo statistics for date."""
-        cursor = self._conn.execute(
-            """SELECT
-                COUNT(*) as total,
-                SUM(CASE WHEN done = 1 THEN 1 ELSE 0 END) as done,
-                SUM(CASE WHEN done = 0 THEN 1 ELSE 0 END) as pending
-               FROM todos WHERE chat_id = ? AND date = ?""",
-            (chat_id, date)
-        )
-        row = cursor.fetchone()
-        return {
-            "total": row["total"] or 0,
-            "done": row["done"] or 0,
-            "pending": row["pending"] or 0
-        }
+        """Legacy shim: get todo stats through the plugin storage adapter."""
+        self._warn_legacy_plugin_api("get_todo_stats")
+        return self._plugin_todo_store().stats_for_date(chat_id, date)
 
     # ========== Weather Location Operations ==========
 
@@ -1368,47 +1283,19 @@ class Repository:
         lon: float,
         country: Optional[str] = None
     ) -> WeatherLocation:
-        """Set weather location for chat."""
-        self._conn.execute(
-            """INSERT OR REPLACE INTO weather_locations (chat_id, name, country, lat, lon, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (chat_id, name, country, lat, lon, self._now())
-        )
-        self._conn.commit()
-
-        return WeatherLocation(
-            chat_id=chat_id,
-            name=name,
-            country=country,
-            lat=lat,
-            lon=lon
-        )
+        """Legacy shim: set weather location through the plugin storage adapter."""
+        self._warn_legacy_plugin_api("set_weather_location")
+        return self._plugin_weather_store().set(chat_id, name, lat, lon, country)
 
     def get_weather_location(self, chat_id: int) -> Optional[WeatherLocation]:
-        """Get weather location for chat."""
-        cursor = self._conn.execute(
-            "SELECT * FROM weather_locations WHERE chat_id = ?",
-            (chat_id,)
-        )
-        row = cursor.fetchone()
-        if not row:
-            return None
-        return WeatherLocation(
-            chat_id=row["chat_id"],
-            name=row["name"],
-            country=row["country"],
-            lat=row["lat"],
-            lon=row["lon"]
-        )
+        """Legacy shim: get weather location through the plugin storage adapter."""
+        self._warn_legacy_plugin_api("get_weather_location")
+        return self._plugin_weather_store().get(chat_id)
 
     def delete_weather_location(self, chat_id: int) -> bool:
-        """Delete weather location for chat."""
-        cursor = self._conn.execute(
-            "DELETE FROM weather_locations WHERE chat_id = ?",
-            (chat_id,)
-        )
-        self._conn.commit()
-        return cursor.rowcount > 0
+        """Legacy shim: delete weather location through the plugin storage adapter."""
+        self._warn_legacy_plugin_api("delete_weather_location")
+        return self._plugin_weather_store().delete(chat_id)
 
     # ========== Message Log Operations ==========
 

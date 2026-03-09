@@ -65,6 +65,7 @@ class TestTodoPluginScheduledActions:
         from plugins.builtin.todo.plugin import TodoPlugin
         plugin = TodoPlugin()
         plugin.bind_runtime(MagicMock())
+        plugin._storage = MagicMock()
         return plugin
 
     def test_get_scheduled_actions(self, todo_plugin):
@@ -92,7 +93,7 @@ class TestTodoPluginScheduledActions:
         mock_todo_pending.done = False
         mock_todo_pending.text = "미완료 항목"
 
-        todo_plugin._repository.list_todos_by_date.return_value = [mock_todo_done, mock_todo_pending]
+        todo_plugin._storage.list_by_date.return_value = [mock_todo_done, mock_todo_pending]
 
         result = await todo_plugin.execute_scheduled_action("yesterday_report", 12345)
         assert "Yesterday" in result
@@ -106,7 +107,7 @@ class TestTodoPluginScheduledActions:
         mock_todo.done = True
         mock_todo.text = "완료 항목"
 
-        todo_plugin._repository.list_todos_by_date.return_value = [mock_todo]
+        todo_plugin._storage.list_by_date.return_value = [mock_todo]
 
         result = await todo_plugin.execute_scheduled_action("yesterday_report", 12345)
         assert "1/1 completed" in result
@@ -115,7 +116,7 @@ class TestTodoPluginScheduledActions:
     @pytest.mark.asyncio
     async def test_yesterday_report_no_todos(self, todo_plugin):
         """어제 리포트 - 할일 없음 → 빈 문자열."""
-        todo_plugin._repository.list_todos_by_date.return_value = []
+        todo_plugin._storage.list_by_date.return_value = []
 
         result = await todo_plugin.execute_scheduled_action("yesterday_report", 12345)
         assert result == ""

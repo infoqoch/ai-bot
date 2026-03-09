@@ -5,6 +5,7 @@
 
 import pytest
 
+from src.repository.adapters import RepositoryMemoStore, RepositoryTodoStore
 from tests.integration.conftest import (
     create_message_update,
     get_reply_text,
@@ -32,8 +33,9 @@ class TestMemoPlugin:
     async def test_memo_list(self, handlers, repository):
         """메모 목록 조회."""
         # 먼저 메모 추가
-        repository.add_memo(12345, "테스트 메모 1")
-        repository.add_memo(12345, "테스트 메모 2")
+        memo_store = RepositoryMemoStore(repository)
+        memo_store.add(12345, "테스트 메모 1")
+        memo_store.add(12345, "테스트 메모 2")
 
         # 정확한 키워드 "메모"로 트리거
         update, context = create_message_update("메모")
@@ -107,7 +109,8 @@ class TestTodoPlugin:
     async def test_todo_list_with_items(self, handlers, repository):
         """할일이 있을 때 리스트 표시."""
         from datetime import date
-        repository.add_todo(
+        todo_store = RepositoryTodoStore(repository)
+        todo_store.add(
             chat_id=12345,
             date=date.today().isoformat(),
             text="테스트 할일"

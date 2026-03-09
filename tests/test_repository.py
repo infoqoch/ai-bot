@@ -6,6 +6,12 @@ from pathlib import Path
 import pytest
 
 from src.ai import DEFAULT_PROVIDER
+from src.repository.adapters import (
+    RepositoryMemoStore,
+    RepositoryPluginDatabase,
+    RepositoryTodoStore,
+    RepositoryWeatherLocationStore,
+)
 from src.repository import init_repository, shutdown_repository, reset_connection
 from src.repository.repository import Repository
 from plugins.builtin.todo.plugin import TodoPlugin
@@ -26,12 +32,12 @@ def temp_db():
 def repo(temp_db):
     """Repository 인스턴스 생성."""
     repository = init_repository(temp_db)
+    plugin_db = RepositoryPluginDatabase(repository)
     # 플러그인 스키마 초기화
     for plugin_cls in [TodoPlugin, MemoPlugin, WeatherPlugin]:
         schema = plugin_cls().get_schema()
         if schema:
-            repository._conn.executescript(schema)
-    repository._conn.commit()
+            plugin_db.executescript(schema)
     yield repository
     shutdown_repository()
 
@@ -306,10 +312,11 @@ class TestMemoOperations:
 
     def test_add_and_list_memos(self, repo):
         """메모 추가 및 조회."""
-        memo1 = repo.add_memo(12345, "First memo")
-        memo2 = repo.add_memo(12345, "Second memo")
+        memo_store = RepositoryMemoStore(repo)
+        memo_store.add(12345, "First memo")
+        memo_store.add(12345, "Second memo")
 
-        memos = repo.list_memos(12345)
+        memos = memo_store.list_by_chat(12345)
         assert len(memos) == 2
         # 최신 순 정렬
         assert memos[0].content == "Second memo"
@@ -317,10 +324,11 @@ class TestMemoOperations:
 
     def test_delete_memo(self, repo):
         """메모 삭제."""
-        memo = repo.add_memo(12345, "To delete")
-        assert repo.delete_memo(memo.id) is True
+        memo_store = RepositoryMemoStore(repo)
+        memo = memo_store.add(12345, "To delete")
+        assert memo_store.delete(memo.id) is True
 
-        memos = repo.list_memos(12345)
+        memos = memo_store.list_by_chat(12345)
         assert len(memos) == 0
 
 
@@ -329,21 +337,23 @@ class TestTodoOperations:
 
     def test_add_and_list_todos(self, repo):
         """Todo 추가 및 조회."""
-        repo.add_todo(12345, "2024-01-15", "Wake up")
-        repo.add_todo(12345, "2024-01-15", "Lunch")
+        todo_store = RepositoryTodoStore(repo)
+        todo_store.add(12345, "2024-01-15", "Wake up")
+        todo_store.add(12345, "2024-01-15", "Lunch")
 
-        todos = repo.list_todos_by_date(12345, "2024-01-15")
+        todos = todo_store.list_by_date(12345, "2024-01-15")
         assert len(todos) == 2
 
     def test_toggle_todo(self, repo):
         """Todo 토글."""
-        todo = repo.add_todo(12345, "2024-01-15", "Task")
+        todo_store = RepositoryTodoStore(repo)
+        todo = todo_store.add(12345, "2024-01-15", "Task")
         assert todo.done is False
 
-        new_state = repo.toggle_todo(todo.id)
+        new_state = todo_store.toggle(todo.id)
         assert new_state is True
 
-        todo = repo.get_todo(todo.id)
+        todo = todo_store.get(todo.id)
         assert todo.done is True
 
 
@@ -352,7 +362,8 @@ class TestWeatherOperations:
 
     def test_set_and_get_location(self, repo):
         """위치 설정 및 조회."""
-        repo.set_weather_location(
+        weather_store = RepositoryWeatherLocationStore(repo)
+        weather_store.set(
             chat_id=12345,
             name="Seoul",
             lat=37.5665,
@@ -360,15 +371,35 @@ class TestWeatherOperations:
             country="South Korea"
         )
 
-        loc = repo.get_weather_location(12345)
+        loc = weather_store.get(12345)
         assert loc is not None
         assert loc.name == "Seoul"
         assert loc.lat == 37.5665
 
     def test_update_location(self, repo):
         """위치 업데이트."""
-        repo.set_weather_location(12345, "Seoul", 37.5665, 126.9780)
-        repo.set_weather_location(12345, "Busan", 35.1796, 129.0756)
+        weather_store = RepositoryWeatherLocationStore(repo)
+        weather_store.set(12345, "Seoul", 37.5665, 126.9780)
+        weather_store.set(12345, "Busan", 35.1796, 129.0756)
 
-        loc = repo.get_weather_location(12345)
+        loc = weather_store.get(12345)
         assert loc.name == "Busan"
+
+
+class TestLegacyPluginStorageApi:
+    """Legacy plugin-specific repository methods remain as deprecated shims."""
+
+    def test_legacy_memo_shim_warns_and_works(self, repo):
+        with pytest.deprecated_call(match="legacy plugin storage shim"):
+            memo = repo.add_memo(12345, "legacy memo")
+        assert memo.content == "legacy memo"
+
+    def test_legacy_todo_shim_warns_and_works(self, repo):
+        with pytest.deprecated_call(match="legacy plugin storage shim"):
+            todo = repo.add_todo(12345, "2024-01-15", "legacy todo")
+        assert todo.text == "legacy todo"
+
+    def test_legacy_weather_shim_warns_and_works(self, repo):
+        with pytest.deprecated_call(match="legacy plugin storage shim"):
+            loc = repo.set_weather_location(12345, "Seoul", 37.5665, 126.9780)
+        assert loc.name == "Seoul"
