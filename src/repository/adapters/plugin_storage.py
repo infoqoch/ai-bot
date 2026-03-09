@@ -2,10 +2,41 @@
 
 from __future__ import annotations
 
+import sqlite3
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
 
+from src.repository.repository import Memo, Todo, WeatherLocation
+
 if TYPE_CHECKING:
-    from src.repository.repository import Memo, Repository, Todo, WeatherLocation
+    from src.repository.repository import Repository
+
+
+def _now_utc() -> str:
+    """Return current UTC timestamp in ISO format."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _require_conn(repo: "Repository") -> sqlite3.Connection:
+    """Return the live SQLite connection from the repository."""
+    conn = getattr(repo, "_conn", None)
+    if conn is None:
+        raise RuntimeError("Repository connection is unavailable for plugin storage")
+    return conn
+
+
+def _row_to_todo(row: sqlite3.Row) -> Todo:
+    """Convert one SQLite row to the shared Todo dataclass."""
+    return Todo(
+        id=row["id"],
+        chat_id=row["chat_id"],
+        date=row["date"],
+        slot=row["slot"],
+        text=row["text"],
+        done=bool(row["done"]),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
 
 
 class RepositoryPluginDatabase:
@@ -19,10 +50,7 @@ class RepositoryPluginDatabase:
         if not schema:
             return
 
-        conn = getattr(self._repo, "_conn", None)
-        if conn is None:
-            raise RuntimeError("Repository connection is unavailable for plugin schema execution")
-
+        conn = _require_conn(self._repo)
         conn.executescript(schema)
         conn.commit()
 
@@ -33,20 +61,60 @@ class RepositoryMemoStore:
     def __init__(self, repo: "Repository"):
         self._repo = repo
 
-    def add(self, chat_id: int, content: str) -> "Memo":
-        return self._repo.add_memo(chat_id, content)
+    def add(self, chat_id: int, content: str) -> Memo:
+        now = _now_utc()
+        conn = _require_conn(self._repo)
+        cursor = conn.execute(
+            "INSERT INTO memos (chat_id, content, created_at) VALUES (?, ?, ?)",
+            (chat_id, content, now),
+        )
+        conn.commit()
+        return Memo(
+            id=cursor.lastrowid or 0,
+            chat_id=chat_id,
+            content=content,
+            created_at=now,
+        )
 
-    def get(self, memo_id: int) -> Optional["Memo"]:
-        return self._repo.get_memo(memo_id)
+    def get(self, memo_id: int) -> Optional[Memo]:
+        conn = _require_conn(self._repo)
+        row = conn.execute("SELECT * FROM memos WHERE id = ?", (memo_id,)).fetchone()
+        if not row:
+            return None
+        return Memo(
+            id=row["id"],
+            chat_id=row["chat_id"],
+            content=row["content"],
+            created_at=row["created_at"],
+        )
 
     def delete(self, memo_id: int) -> bool:
-        return self._repo.delete_memo(memo_id)
+        conn = _require_conn(self._repo)
+        cursor = conn.execute("DELETE FROM memos WHERE id = ?", (memo_id,))
+        conn.commit()
+        return cursor.rowcount > 0
 
-    def list_by_chat(self, chat_id: int) -> list["Memo"]:
-        return self._repo.list_memos(chat_id)
+    def list_by_chat(self, chat_id: int) -> list[Memo]:
+        conn = _require_conn(self._repo)
+        rows = conn.execute(
+            "SELECT * FROM memos WHERE chat_id = ? ORDER BY created_at DESC",
+            (chat_id,),
+        ).fetchall()
+        return [
+            Memo(
+                id=row["id"],
+                chat_id=row["chat_id"],
+                content=row["content"],
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
 
     def clear_by_chat(self, chat_id: int) -> int:
-        return self._repo.clear_memos(chat_id)
+        conn = _require_conn(self._repo)
+        cursor = conn.execute("DELETE FROM memos WHERE chat_id = ?", (chat_id,))
+        conn.commit()
+        return cursor.rowcount
 
 
 class RepositoryTodoStore:
@@ -55,43 +123,128 @@ class RepositoryTodoStore:
     def __init__(self, repo: "Repository"):
         self._repo = repo
 
-    def add(self, chat_id: int, date: str, text: str) -> "Todo":
-        return self._repo.add_todo(chat_id, date, text)
+    def add(self, chat_id: int, date: str, text: str) -> Todo:
+        now = _now_utc()
+        conn = _require_conn(self._repo)
+        cursor = conn.execute(
+            """INSERT INTO todos (chat_id, date, slot, text, created_at, updated_at)
+               VALUES (?, ?, 'default', ?, ?, ?)""",
+            (chat_id, date, text, now, now),
+        )
+        conn.commit()
+        return Todo(
+            id=cursor.lastrowid or 0,
+            chat_id=chat_id,
+            date=date,
+            slot="default",
+            text=text,
+            done=False,
+            created_at=now,
+            updated_at=now,
+        )
 
-    def get(self, todo_id: int) -> Optional["Todo"]:
-        return self._repo.get_todo(todo_id)
+    def get(self, todo_id: int) -> Optional[Todo]:
+        conn = _require_conn(self._repo)
+        row = conn.execute("SELECT * FROM todos WHERE id = ?", (todo_id,)).fetchone()
+        return _row_to_todo(row) if row else None
 
     def toggle(self, todo_id: int) -> Optional[bool]:
-        return self._repo.toggle_todo(todo_id)
+        todo = self.get(todo_id)
+        if not todo:
+            return None
+
+        new_state = not todo.done
+        conn = _require_conn(self._repo)
+        conn.execute("UPDATE todos SET done = ? WHERE id = ?", (int(new_state), todo_id))
+        conn.commit()
+        return new_state
 
     def delete(self, todo_id: int) -> bool:
-        return self._repo.delete_todo(todo_id)
+        conn = _require_conn(self._repo)
+        cursor = conn.execute("DELETE FROM todos WHERE id = ?", (todo_id,))
+        conn.commit()
+        return cursor.rowcount > 0
 
-    def list_by_date(self, chat_id: int, date: str) -> list["Todo"]:
-        return self._repo.list_todos_by_date(chat_id, date)
+    def list_by_date(self, chat_id: int, date: str) -> list[Todo]:
+        conn = _require_conn(self._repo)
+        rows = conn.execute(
+            "SELECT * FROM todos WHERE chat_id = ? AND date = ? ORDER BY id",
+            (chat_id, date),
+        ).fetchall()
+        return [_row_to_todo(row) for row in rows]
 
     def clear_by_date(self, chat_id: int, date: str) -> int:
-        return self._repo.clear_todos_by_date(chat_id, date)
+        conn = _require_conn(self._repo)
+        cursor = conn.execute(
+            "DELETE FROM todos WHERE chat_id = ? AND date = ?",
+            (chat_id, date),
+        )
+        conn.commit()
+        return cursor.rowcount
 
     def mark_done(self, todo_id: int, done: bool = True) -> bool:
-        return self._repo.mark_todo_done(todo_id, done)
+        conn = _require_conn(self._repo)
+        cursor = conn.execute(
+            "UPDATE todos SET done = ? WHERE id = ?",
+            (int(done), todo_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
-    def pending_for_date(self, chat_id: int, date: str) -> list["Todo"]:
-        return self._repo.get_pending_todos(chat_id, date)
+    def pending_for_date(self, chat_id: int, date: str) -> list[Todo]:
+        conn = _require_conn(self._repo)
+        rows = conn.execute(
+            "SELECT * FROM todos WHERE chat_id = ? AND date = ? AND done = 0 ORDER BY id",
+            (chat_id, date),
+        ).fetchall()
+        return [_row_to_todo(row) for row in rows]
 
     def move_to_date(self, todo_ids: list[int], new_date: str) -> int:
-        return self._repo.move_todos_to_date(todo_ids, new_date)
+        if not todo_ids:
+            return 0
+        conn = _require_conn(self._repo)
+        placeholders = ",".join("?" * len(todo_ids))
+        cursor = conn.execute(
+            f"UPDATE todos SET date = ? WHERE id IN ({placeholders})",
+            [new_date] + todo_ids,
+        )
+        conn.commit()
+        return cursor.rowcount
 
     def by_date_range(
         self,
         chat_id: int,
         start_date: str,
         end_date: str,
-    ) -> dict[str, list["Todo"]]:
-        return self._repo.get_todos_by_date_range(chat_id, start_date, end_date)
+    ) -> dict[str, list[Todo]]:
+        conn = _require_conn(self._repo)
+        rows = conn.execute(
+            """SELECT * FROM todos
+               WHERE chat_id = ? AND date >= ? AND date <= ?
+               ORDER BY date, id""",
+            (chat_id, start_date, end_date),
+        ).fetchall()
+        result: dict[str, list[Todo]] = {}
+        for row in rows:
+            todo = _row_to_todo(row)
+            result.setdefault(todo.date, []).append(todo)
+        return result
 
     def stats_for_date(self, chat_id: int, date: str) -> dict[str, int]:
-        return self._repo.get_todo_stats(chat_id, date)
+        conn = _require_conn(self._repo)
+        row = conn.execute(
+            """SELECT
+                COUNT(*) as total,
+                SUM(CASE WHEN done = 1 THEN 1 ELSE 0 END) as done,
+                SUM(CASE WHEN done = 0 THEN 1 ELSE 0 END) as pending
+               FROM todos WHERE chat_id = ? AND date = ?""",
+            (chat_id, date),
+        ).fetchone()
+        return {
+            "total": row["total"] or 0,
+            "done": row["done"] or 0,
+            "pending": row["pending"] or 0,
+        }
 
 
 class RepositoryWeatherLocationStore:
@@ -107,17 +260,43 @@ class RepositoryWeatherLocationStore:
         lat: float,
         lon: float,
         country: Optional[str] = None,
-    ) -> "WeatherLocation":
-        return self._repo.set_weather_location(
+    ) -> WeatherLocation:
+        conn = _require_conn(self._repo)
+        conn.execute(
+            """INSERT OR REPLACE INTO weather_locations (chat_id, name, country, lat, lon, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (chat_id, name, country, lat, lon, _now_utc()),
+        )
+        conn.commit()
+        return WeatherLocation(
             chat_id=chat_id,
             name=name,
+            country=country,
             lat=lat,
             lon=lon,
-            country=country,
         )
 
-    def get(self, chat_id: int) -> Optional["WeatherLocation"]:
-        return self._repo.get_weather_location(chat_id)
+    def get(self, chat_id: int) -> Optional[WeatherLocation]:
+        conn = _require_conn(self._repo)
+        row = conn.execute(
+            "SELECT * FROM weather_locations WHERE chat_id = ?",
+            (chat_id,),
+        ).fetchone()
+        if not row:
+            return None
+        return WeatherLocation(
+            chat_id=row["chat_id"],
+            name=row["name"],
+            country=row["country"],
+            lat=row["lat"],
+            lon=row["lon"],
+        )
 
     def delete(self, chat_id: int) -> bool:
-        return self._repo.delete_weather_location(chat_id)
+        conn = _require_conn(self._repo)
+        cursor = conn.execute(
+            "DELETE FROM weather_locations WHERE chat_id = ?",
+            (chat_id,),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
