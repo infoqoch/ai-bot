@@ -2,14 +2,27 @@
 
 import asyncio
 from contextlib import suppress
+from datetime import datetime, timezone
 import json
+import os
+import pty
 import re
+import select
 import shlex
+import signal
+import subprocess
+import time
 from pathlib import Path
 from typing import Optional
 
 _UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+)
+_ANSI_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+_USAGE_RE = re.compile(
+    r"5h:\s*(?P<five_hour_percent>\d+)%\s*\((?P<five_hour_reset>[^)]+)\).*?"
+    r"wk:\s*(?P<weekly_percent>\d+)%\s*\((?P<weekly_reset>[^)]+)\)",
+    re.IGNORECASE | re.DOTALL,
 )
 
 from src.ai.catalog import get_profile
@@ -213,6 +226,352 @@ class ClaudeClient:
         except Exception as e:
             logger.exception(f"Claude CLI 오류: {e}")
             return ChatResponse("", ChatError.CLI_ERROR, None)
+
+    async def get_usage_snapshot(self) -> Optional[dict[str, str]]:
+        """Return the current Claude Code subscription usage snapshot."""
+        auth_snapshot = await self._get_auth_snapshot()
+        if not auth_snapshot:
+            return None
+
+        snapshot = {
+            "subscription_type": auth_snapshot["subscription_type"],
+            "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+        omc_snapshot = await self._get_usage_snapshot_from_omc()
+        if omc_snapshot:
+            snapshot.update(omc_snapshot)
+            return snapshot
+
+        raw_screen = await asyncio.to_thread(self._capture_usage_screen)
+        if raw_screen:
+            cleaned = self._strip_ansi(raw_screen)
+            match = _USAGE_RE.search(cleaned)
+            if match:
+                snapshot.update({key: value.strip() for key, value in match.groupdict().items()})
+                return snapshot
+            logger.warning(f"Claude usage screen parse failed: {cleaned[:300]!r}")
+        else:
+            logger.warning("Claude usage screen capture returned empty output")
+
+        unavailable_reason = await self._get_usage_unavailable_reason()
+        snapshot["unavailable_reason"] = unavailable_reason or "Usage endpoint temporarily unavailable"
+        return snapshot
+
+    async def _get_auth_snapshot(self) -> Optional[dict[str, str]]:
+        """Read Claude auth status and return plan details."""
+        auth_stdout, auth_stderr, auth_returncode = await self._run_command(
+            [*self.command_parts, "auth", "status"],
+            timeout=10,
+        )
+        if auth_returncode != 0:
+            logger.warning(f"Claude auth status failed: {auth_stderr or auth_stdout}")
+            return None
+
+        subscription_type = "unknown"
+        try:
+            auth_data = json.loads(auth_stdout)
+            if not auth_data.get("loggedIn"):
+                logger.warning("Claude auth status reports loggedOut state")
+                return None
+            subscription_type = str(auth_data.get("subscriptionType") or "unknown")
+        except json.JSONDecodeError:
+            logger.debug("Claude auth status was not JSON; continuing without subscription_type")
+
+        return {"subscription_type": subscription_type}
+
+    async def _get_usage_snapshot_from_omc(self) -> Optional[dict[str, str]]:
+        """Best-effort usage lookup via oh-my-claudecode's usage API."""
+        usage_api_path = self._find_omc_usage_api_path()
+        if not usage_api_path:
+            logger.debug("OMC usage-api.js not found; skipping plugin usage lookup")
+            return None
+
+        script = """
+import { pathToFileURL } from "node:url";
+
+const usageApiPath = process.argv[1];
+
+try {
+  const mod = await import(pathToFileURL(usageApiPath).href);
+  const data = await mod.getUsage();
+  process.stdout.write(JSON.stringify({ data }));
+} catch (error) {
+  process.stdout.write(JSON.stringify({ error: String(error) }));
+}
+"""
+        try:
+            stdout, stderr, returncode = await self._run_command(
+                ["node", "--input-type=module", "-e", script, str(usage_api_path)],
+                timeout=15,
+            )
+        except Exception as exc:
+            logger.debug(f"OMC usage lookup failed to execute: {exc}")
+            return None
+
+        if returncode != 0:
+            logger.warning(f"OMC usage lookup failed: {stderr or stdout}")
+            return None
+
+        try:
+            payload = json.loads(stdout) if stdout else {}
+        except json.JSONDecodeError:
+            logger.warning(f"OMC usage lookup returned non-JSON: {stdout[:200]!r}")
+            return None
+
+        if payload.get("error"):
+            logger.warning(f"OMC usage lookup errored: {payload['error']}")
+            return None
+
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            return None
+
+        five_hour_percent = self._format_usage_percent(data.get("fiveHourPercent"))
+        weekly_percent = self._format_usage_percent(data.get("weeklyPercent"))
+        if five_hour_percent is None or weekly_percent is None:
+            return None
+
+        return {
+            "five_hour_percent": five_hour_percent,
+            "five_hour_reset": self._format_reset_window(data.get("fiveHourResetsAt")),
+            "weekly_percent": weekly_percent,
+            "weekly_reset": self._format_reset_window(data.get("weeklyResetsAt")),
+        }
+
+    async def _get_usage_unavailable_reason(self) -> Optional[str]:
+        """Best-effort detail for why usage data is currently unavailable."""
+        script = """
+import { execSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import https from "node:https";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+function readKeychainCredentials() {
+  if (process.platform !== "darwin") return null;
+  try {
+    const raw = execSync('/usr/bin/security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null', {
+      encoding: "utf8",
+      timeout: 2000,
+    }).trim();
+    const parsed = JSON.parse(raw);
+    const creds = parsed.claudeAiOauth || parsed;
+    return creds.accessToken ? creds : null;
+  } catch {
+    return null;
+  }
+}
+
+function readFileCredentials() {
+  try {
+    const credPath = join(homedir(), ".claude/.credentials.json");
+    if (!existsSync(credPath)) return null;
+    const parsed = JSON.parse(readFileSync(credPath, "utf8"));
+    const creds = parsed.claudeAiOauth || parsed;
+    return creds.accessToken ? creds : null;
+  } catch {
+    return null;
+  }
+}
+
+const creds = readKeychainCredentials() || readFileCredentials();
+if (!creds?.accessToken) {
+  process.stdout.write(JSON.stringify({ reason: "Claude credentials unavailable" }));
+  process.exit(0);
+}
+
+const req = https.request({
+  hostname: "api.anthropic.com",
+  path: "/api/oauth/usage",
+  method: "GET",
+  headers: {
+    Authorization: `Bearer ${creds.accessToken}`,
+    "anthropic-beta": "oauth-2025-04-20",
+    "Content-Type": "application/json",
+  },
+  timeout: 10000,
+}, (res) => {
+  let data = "";
+  res.on("data", (chunk) => { data += chunk; });
+  res.on("end", () => {
+    if (res.statusCode === 200) {
+      process.stdout.write(JSON.stringify({ reason: null }));
+      return;
+    }
+
+    let parsed = null;
+    try {
+      parsed = JSON.parse(data);
+    } catch {}
+
+    const error = parsed?.error || {};
+    process.stdout.write(JSON.stringify({
+      reason: error.message || `HTTP ${res.statusCode}`,
+      statusCode: res.statusCode,
+      errorType: error.type || null,
+    }));
+  });
+});
+
+req.on("error", (error) => {
+  process.stdout.write(JSON.stringify({ reason: String(error) }));
+});
+
+req.on("timeout", () => {
+  req.destroy(new Error("timeout"));
+});
+
+req.end();
+"""
+        try:
+            stdout, stderr, returncode = await self._run_command(
+                ["node", "--input-type=module", "-e", script],
+                timeout=15,
+            )
+        except Exception as exc:
+            logger.debug(f"Usage unavailable-reason lookup failed to execute: {exc}")
+            return None
+
+        if returncode != 0:
+            logger.warning(f"Usage unavailable-reason lookup failed: {stderr or stdout}")
+            return None
+
+        try:
+            payload = json.loads(stdout) if stdout else {}
+        except json.JSONDecodeError:
+            logger.warning(f"Usage unavailable-reason lookup returned non-JSON: {stdout[:200]!r}")
+            return None
+
+        reason = payload.get("reason")
+        if not reason:
+            return None
+
+        status_code = payload.get("statusCode")
+        error_type = payload.get("errorType")
+        suffix_parts = [str(part) for part in (status_code, error_type) if part]
+        if suffix_parts:
+            return f"{reason} ({', '.join(suffix_parts)})"
+        return str(reason)
+
+    @staticmethod
+    def _find_omc_usage_api_path() -> Optional[Path]:
+        """Return the newest installed oh-my-claudecode usage API path."""
+        cache_root = Path.home() / ".claude" / "plugins" / "cache" / "omc" / "oh-my-claudecode"
+        if not cache_root.exists():
+            return None
+
+        candidates = list(cache_root.glob("*/dist/hud/usage-api.js"))
+        if not candidates:
+            return None
+
+        return max(candidates, key=lambda path: path.stat().st_mtime)
+
+    @staticmethod
+    def _format_usage_percent(value) -> Optional[str]:
+        """Normalize one percentage value to a whole-number string."""
+        try:
+            return str(int(round(float(value))))
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _format_reset_window(value) -> str:
+        """Format an ISO reset timestamp as a compact relative window."""
+        if not value:
+            return "unknown"
+
+        try:
+            reset_at = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return str(value)
+
+        if reset_at.tzinfo is None:
+            reset_at = reset_at.replace(tzinfo=timezone.utc)
+
+        remaining = int((reset_at - datetime.now(timezone.utc)).total_seconds())
+        if remaining <= 0:
+            return "soon"
+
+        days, rem = divmod(remaining, 86400)
+        hours, rem = divmod(rem, 3600)
+        minutes, _ = divmod(rem, 60)
+
+        parts: list[str] = []
+        if days:
+            parts.append(f"{days}d")
+        if hours:
+            parts.append(f"{hours}h")
+        if minutes or not parts:
+            parts.append(f"{minutes}m")
+        return "".join(parts)
+
+    def _capture_usage_screen(self, startup_timeout: float = 3.0) -> str:
+        """Launch Claude in a PTY briefly and capture the startup status line."""
+        master_fd, slave_fd = pty.openpty()
+        process = subprocess.Popen(
+            self.command_parts,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            close_fds=True,
+        )
+        os.close(slave_fd)
+
+        chunks: list[bytes] = []
+        deadline = time.monotonic() + startup_timeout
+        try:
+            while time.monotonic() < deadline:
+                ready, _, _ = select.select([master_fd], [], [], 0.25)
+                if not ready:
+                    continue
+
+                try:
+                    chunk = os.read(master_fd, 4096)
+                except OSError:
+                    break
+
+                if not chunk:
+                    break
+
+                chunks.append(chunk)
+                if b"5h:" in chunk and b"wk:" in chunk:
+                    # Collect one extra frame so reset strings are included before shutdown.
+                    settle_deadline = time.monotonic() + 0.35
+                    while time.monotonic() < settle_deadline:
+                        ready, _, _ = select.select([master_fd], [], [], 0.05)
+                        if not ready:
+                            continue
+                        try:
+                            extra = os.read(master_fd, 4096)
+                        except OSError:
+                            extra = b""
+                        if not extra:
+                            break
+                        chunks.append(extra)
+                    break
+        finally:
+            for sig in (signal.SIGINT, signal.SIGINT, signal.SIGTERM):
+                if process.poll() is not None:
+                    break
+                with suppress(Exception):
+                    process.send_signal(sig)
+                time.sleep(0.05)
+
+            if process.poll() is None:
+                with suppress(Exception):
+                    process.kill()
+            with suppress(Exception):
+                process.wait(timeout=1)
+            with suppress(OSError):
+                os.close(master_fd)
+
+        return b"".join(chunks).decode("utf-8", errors="ignore")
+
+    @staticmethod
+    def _strip_ansi(text: str) -> str:
+        """Remove ANSI control codes from terminal output."""
+        return _ANSI_RE.sub("", text).replace("\r", "")
 
     def _build_command(
         self,

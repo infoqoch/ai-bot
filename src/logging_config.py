@@ -152,7 +152,7 @@ def setup_logging(
 
     log_dir = Path(os.getenv("BOT_LOG_DIR", "/tmp/telegram-bot-logs"))
     log_dir.mkdir(parents=True, exist_ok=True)
-    default_log_file = log_dir / "telegram-bot-loguru.log"
+    default_log_file = log_dir / "bot.log"
 
     # 콘솔 출력 (컬러)
     logger.add(

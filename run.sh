@@ -11,10 +11,10 @@ cd "$(dirname "$0")"
 PID_FILE="/tmp/telegram-bot.pid"
 LOCK_FILE="/tmp/telegram-bot.lock"
 SUPERVISOR_LOCK_FILE="/tmp/telegram-bot-supervisor.lock"
-APP_LOG_LINK="/tmp/telegram-bot-loguru.log"
-BOOT_LOG_LINK="/tmp/telegram-bot.log"
+APP_LOG_LINK="/tmp/telegram-bot.log"
+BOOT_LOG_LINK="/tmp/telegram-bot-boot.log"
 LOG_DIR="${BOT_LOG_DIR:-/tmp/telegram-bot-logs}"
-APP_LOG_FILE="$LOG_DIR/telegram-bot-loguru.log"
+APP_LOG_FILE="$LOG_DIR/bot.log"
 DEFAULT_LOG_LEVEL="${LOG_LEVEL:-DEBUG}"
 BOOT_LOG_RETENTION_DAYS="${BOOT_LOG_RETENTION_DAYS:-14}"
 
@@ -173,6 +173,51 @@ _prepare_app_log_link() {
     ln -sf "$APP_LOG_FILE" "$APP_LOG_LINK"
 }
 
+_preflight_startup() {
+    if [ ! -x "./venv/bin/python" ]; then
+        echo "❌ 시작 전 점검 실패: ./venv/bin/python 없음"
+        echo "   먼저 가상환경을 준비하세요."
+        return 1
+    fi
+
+    local check_output
+    if ! check_output=$(PYTHONPYCACHEPREFIX=.build ./venv/bin/python - <<'PY' 2>&1
+import src.main  # noqa: F401 - startup import validation only
+PY
+    ); then
+        echo "❌ 시작 전 점검 실패: 앱 import 단계에서 오류 발생"
+        echo "$check_output" | tail -20
+        echo "   의존성/환경을 먼저 확인하세요."
+        echo "   예: ./venv/bin/pip install -e ."
+        return 1
+    fi
+
+    return 0
+}
+
+_wait_for_main_start() {
+    local supervisor_pid="$1"
+    local timeout="${2:-5}"
+
+    while [ "$timeout" -gt 0 ]; do
+        local main_pids
+        main_pids=$(_get_main_pids)
+        if [ -n "$main_pids" ]; then
+            echo "$main_pids"
+            return 0
+        fi
+
+        if ! ps -p "$supervisor_pid" > /dev/null 2>&1; then
+            return 1
+        fi
+
+        sleep 1
+        timeout=$((timeout - 1))
+    done
+
+    return 1
+}
+
 _start_supervisor() {
     local level="$1"
     local boot_log
@@ -187,18 +232,22 @@ _start_supervisor() {
     local new_pid=$!
     echo "$new_pid" > "$PID_FILE"
 
-    sleep 2
-    if ps -p "$new_pid" > /dev/null 2>&1; then
+    local main_pids
+    if ps -p "$new_pid" > /dev/null 2>&1 && main_pids=$(_wait_for_main_start "$new_pid" 5); then
         echo "✅ 봇 시작됨 (Supervisor PID: $new_pid)"
+        echo "   Main PID   : $main_pids"
         echo "   크래시 시 자동 재시작 활성화"
         echo "   LOG_LEVEL: $level"
-        echo "   boot log: $boot_log"
-        echo "   app log : $APP_LOG_LINK"
+        echo "   log      : $APP_LOG_LINK"
         return 0
     fi
 
-    echo "❌ 봇 시작 실패. 로그 확인: $boot_log"
-    tail -10 "$boot_log"
+    echo "❌ 봇 시작 실패. 로그 확인:"
+    echo "   main log: $APP_LOG_LINK"
+    echo "   boot log: $boot_log"
+    _stop_bot_processes soft > /dev/null 2>&1 || true
+    tail -20 "$APP_LOG_LINK" 2>/dev/null || true
+    tail -10 "$boot_log" 2>/dev/null || true
     return 1
 }
 
@@ -234,18 +283,15 @@ _show_status() {
     echo "Supervisor/Main:"
     _print_process_table $supervisors $mains
 
-    echo ""
-    echo "Detached workers:"
-    _print_process_table $workers
-
-    echo ""
-    echo "락 파일:"
-    ls -la /tmp/telegram-bot*.lock 2>/dev/null || echo "  (없음)"
+    if [ -n "$workers" ]; then
+        echo ""
+        echo "Detached workers:"
+        _print_process_table $workers
+    fi
 
     echo ""
     echo "로그:"
-    echo "  boot: $(_get_boot_log_path)"
-    echo "  app : $APP_LOG_LINK (daily rotate at midnight)"
+    echo "  main: $APP_LOG_LINK (daily rotate at midnight)"
 }
 
 _tail_logs() {
@@ -261,13 +307,8 @@ _tail_logs() {
         boot_log=$(_prepare_boot_log)
         tail -f "$boot_log"
         ;;
-      all|both)
-        local boot_log
-        boot_log=$(_prepare_boot_log)
-        tail -f "$APP_LOG_LINK" "$boot_log"
-        ;;
       *)
-        echo "사용법: ./run.sh log [app|boot|all]"
+        echo "사용법: ./run.sh log [app|boot]"
         return 1
         ;;
     esac
@@ -282,6 +323,7 @@ case "$1" in
         echo "   상태 확인  : ./run.sh status"
         exit 1
     fi
+    _preflight_startup || exit 1
     _start_supervisor "$DEFAULT_LOG_LEVEL" || exit 1
     ;;
   stop-soft)
@@ -306,12 +348,14 @@ case "$1" in
     ;;
   restart-soft)
     echo "🔄 봇 soft 재시작 중 (in-flight worker 유지 시도)..."
+    _preflight_startup || exit 1
     _stop_bot_processes soft
     sleep 1
     _start_supervisor "$DEFAULT_LOG_LEVEL" || exit 1
     ;;
   restart-hard)
     echo "🔄 봇 hard 재시작 중 (detached worker 포함 종료)..."
+    _preflight_startup || exit 1
     _stop_bot_processes hard
     sleep 1
     _start_supervisor "$DEFAULT_LOG_LEVEL" || exit 1
@@ -332,6 +376,7 @@ case "$1" in
     ;;
   trace)
     echo "🔍 TRACE 모드로 시작"
+    _preflight_startup || exit 1
     if _is_running; then
         echo "⚠️  기존 supervisor/main soft stop 중..."
         _stop_bot_processes soft
@@ -341,6 +386,7 @@ case "$1" in
     ;;
   debug)
     echo "🐛 DEBUG 모드로 시작"
+    _preflight_startup || exit 1
     if _is_running; then
         echo "⚠️  기존 supervisor/main soft stop 중..."
         _stop_bot_processes soft
@@ -371,7 +417,7 @@ case "$1" in
     echo "  restart-soft  - soft 재시작 (in-flight worker 유지 시도)"
     echo "  restart-hard  - hard 재시작 (detached worker 포함 종료)"
     echo "  status        - 상태 확인"
-    echo "  log [target]  - 로그 보기 (app|boot|all)"
+    echo "  log [target]  - 로그 보기 (기본: app, 선택: boot)"
     echo "  trace         - TRACE 모드 soft 재시작"
     echo "  debug         - DEBUG 모드 soft 재시작"
     echo "  test          - 단위 테스트 실행"
