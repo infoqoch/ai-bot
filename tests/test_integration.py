@@ -53,6 +53,10 @@ class TestAppStartup:
         mock_builder.token.return_value = mock_builder
         mock_builder.concurrent_updates.return_value = mock_builder
         mock_builder.post_init.return_value = mock_builder
+        mock_builder.read_timeout.return_value = mock_builder
+        mock_builder.write_timeout.return_value = mock_builder
+        mock_builder.connect_timeout.return_value = mock_builder
+        mock_builder.pool_timeout.return_value = mock_builder
         mock_builder.build.return_value = mock_app
 
         with patch("src.main.Application") as MockApplication, \
