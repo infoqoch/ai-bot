@@ -1,6 +1,7 @@
 """Tests for provider-local session discovery."""
 
 import json
+import os
 
 from src.services.local_session_discovery import LocalSessionDiscoveryService
 
@@ -96,6 +97,147 @@ class TestLocalSessionDiscoveryService:
         assert sessions[0].provider_session_id == "019c18c5-8616-78e3-9730-49e989dc3f35"
         assert sessions[0].title == "Codex import target"
         assert sessions[0].workspace_path == "/tmp/codex-project"
+
+    def test_list_recent_claude_sessions_falls_back_to_raw_files(self, tmp_path):
+        """Claude raw session files are discovered even when no index entry exists."""
+        session_path = (
+            tmp_path
+            / ".claude"
+            / "projects"
+            / "demo-project"
+            / "550e8400-e29b-41d4-a716-446655440000.jsonl"
+        )
+        session_path.parent.mkdir(parents=True)
+        session_path.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+                            "cwd": "/tmp/raw-claude",
+                            "type": "progress",
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+                            "cwd": "/tmp/raw-claude",
+                            "type": "user",
+                            "message": {"role": "user", "content": "안녕 클로드~ raw fallback 확인"},
+                        }
+                    ),
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        service = LocalSessionDiscoveryService(home=tmp_path)
+        sessions = service.list_recent("claude", limit=5)
+
+        assert len(sessions) == 1
+        assert sessions[0].provider_session_id == "550e8400-e29b-41d4-a716-446655440000"
+        assert sessions[0].title == "안녕 클로드~ raw fallback 확인"
+        assert sessions[0].workspace_path == "/tmp/raw-claude"
+
+    def test_list_recent_codex_sessions_falls_back_to_raw_files(self, tmp_path):
+        """Codex raw rollout files are discovered even when no index entry exists."""
+        session_path = (
+            tmp_path
+            / ".codex"
+            / "sessions"
+            / "2026"
+            / "03"
+            / "11"
+            / "rollout-2026-03-11T08-28-14-019cda14-6040-7bf3-b4d3-1d21fd14560f.jsonl"
+        )
+        session_path.parent.mkdir(parents=True)
+        session_path.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "type": "session_meta",
+                            "payload": {
+                                "id": "019cda14-6040-7bf3-b4d3-1d21fd14560f",
+                                "cwd": "/tmp/raw-codex",
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "response_item",
+                            "payload": {
+                                "type": "message",
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "input_text",
+                                        "text": (
+                                            "# AGENTS.md instructions for /Users/test\n"
+                                            "<INSTRUCTIONS>ignored</INSTRUCTIONS>\n"
+                                            "<environment_context>\n"
+                                            "  <cwd>/tmp/raw-codex</cwd>\n"
+                                            "</environment_context>\n"
+                                            "하이 코덱스~ raw fallback 확인"
+                                        ),
+                                    }
+                                ],
+                            },
+                        }
+                    ),
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        service = LocalSessionDiscoveryService(home=tmp_path)
+        sessions = service.list_recent("codex", limit=5)
+
+        assert len(sessions) == 1
+        assert sessions[0].provider_session_id == "019cda14-6040-7bf3-b4d3-1d21fd14560f"
+        assert sessions[0].title == "하이 코덱스~ raw fallback 확인"
+        assert sessions[0].workspace_path == "/tmp/raw-codex"
+
+    def test_list_recent_dedupes_index_and_raw_sessions(self, tmp_path):
+        """Index sessions are merged with raw metadata instead of duplicated."""
+        claude_dir = tmp_path / ".claude" / "projects" / "demo-project"
+        claude_dir.mkdir(parents=True)
+        (claude_dir / "sessions-index.json").write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "entries": [
+                        {
+                            "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+                            "summary": "Indexed summary",
+                            "modified": "2026-03-09T09:00:00Z",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        raw_path = claude_dir / "550e8400-e29b-41d4-a716-446655440000.jsonl"
+        raw_path.write_text(
+            json.dumps(
+                {
+                    "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+                    "cwd": "/tmp/merged-claude",
+                    "type": "user",
+                    "message": {"role": "user", "content": "raw prompt"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        os.utime(raw_path, (1_783_161_600, 1_783_161_600))  # 2026-07-04T10:40:00Z
+
+        service = LocalSessionDiscoveryService(home=tmp_path)
+        sessions = service.list_recent("claude", limit=5)
+
+        assert len(sessions) == 1
+        assert sessions[0].provider_session_id == "550e8400-e29b-41d4-a716-446655440000"
+        assert sessions[0].workspace_path == "/tmp/merged-claude"
+        assert sessions[0].updated_at == "2026-07-04T10:40:00Z"
 
     def test_list_recent_merges_all_providers_and_supports_offset(self, tmp_path):
         """Merged listing returns all providers ordered by recency and paged by offset."""
