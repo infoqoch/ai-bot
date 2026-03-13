@@ -489,6 +489,23 @@ class Repository:
         session = self.get_session(session_id)
         return session.provider_session_id if session else None
 
+    def find_session_by_provider_session_id(self, provider_session_id: str) -> Optional[dict]:
+        """Find a session by its provider-native session ID."""
+        row = self._conn.execute(
+            "SELECT * FROM sessions WHERE provider_session_id = ? AND deleted = 0",
+            (provider_session_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def update_message_log_session(self, log_id: int, session_id: str) -> bool:
+        """Link a message_log entry to a session after lazy creation."""
+        cursor = self._conn.execute(
+            "UPDATE message_log SET session_id = ? WHERE id = ?",
+            (session_id, log_id),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
     def update_session_last_used(self, session_id: str) -> None:
         """Update session last_used timestamp."""
         self._conn.execute(
@@ -1355,6 +1372,32 @@ class Repository:
             """INSERT INTO message_log (chat_id, session_id, model, workspace_path, request, request_at, processed)
                VALUES (?, ?, ?, ?, ?, ?, 0)""",
             (chat_id, session_id, model, workspace_path, request, self._now())
+        )
+        self._conn.commit()
+        return cursor.lastrowid or 0
+
+    def insert_schedule_message_log(
+        self,
+        chat_id: int,
+        schedule_id: str,
+        request: str,
+        response: str,
+        model: str = "sonnet",
+        workspace_path: Optional[str] = None,
+        provider_session_id: Optional[str] = None,
+        error: Optional[str] = None,
+    ) -> int:
+        """Insert a completed schedule execution into message_log. Returns log ID."""
+        now = self._now()
+        cursor = self._conn.execute(
+            """INSERT INTO message_log
+               (chat_id, session_id, schedule_id, model, workspace_path,
+                provider_session_id, request, request_at,
+                processed, processed_at, response, error,
+                delivery_status)
+               VALUES (?, NULL, ?, ?, ?, ?, ?, ?, 2, ?, ?, ?, 'sent')""",
+            (chat_id, schedule_id, model, workspace_path,
+             provider_session_id, request, now, now, response, error),
         )
         self._conn.commit()
         return cursor.lastrowid or 0

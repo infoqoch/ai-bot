@@ -293,6 +293,11 @@ class SessionCallbackHandlers(BaseHandler):
                 )
                 return
 
+            if action == "sched":
+                log_id_str = parts[2] if len(parts) > 2 else ""
+                await self._handle_schedule_to_session(query, user_id, log_id_str)
+                return
+
             await self._reply_to_callback_origin(query, text="Unknown command")
 
         except BadRequest as e:
@@ -309,6 +314,69 @@ class SessionCallbackHandlers(BaseHandler):
                 )
             except Exception:
                 pass
+
+    async def _handle_schedule_to_session(self, query, user_id: str, log_id_str: str) -> None:
+        """Create a session from a schedule execution's message_log entry."""
+        repo = self._repository
+        if not repo:
+            await self._reply_to_callback_origin(query, text="❌ Repository not available.")
+            return
+
+        try:
+            log_id = int(log_id_str)
+        except (ValueError, TypeError):
+            await self._reply_to_callback_origin(query, text="❌ Invalid log ID.")
+            return
+
+        log_entry = repo.get_message_log(log_id)
+        if not log_entry:
+            await self._reply_to_callback_origin(query, text="❌ Log entry not found.")
+            return
+
+        provider_session_id = log_entry.get("provider_session_id")
+        if not provider_session_id:
+            await self._reply_to_callback_origin(query, text="❌ No provider session available.")
+            return
+
+        # Check if a session already exists for this provider_session_id
+        existing = repo.find_session_by_provider_session_id(provider_session_id)
+        if existing:
+            full_session_id = existing["id"]
+            self.sessions.switch_session(user_id, full_session_id)
+            session = self.sessions.get_session(full_session_id)
+            text, reply_markup = self._build_session_detail_message(user_id, session, full_session_id)
+            await self._reply_to_callback_origin(query, text=text, reply_markup=reply_markup)
+            return
+
+        # Resolve provider from schedule or fallback
+        schedule_id = log_entry.get("schedule_id")
+        ai_provider = "claude"
+        if schedule_id and repo.get_schedule(schedule_id):
+            schedule = repo.get_schedule(schedule_id)
+            ai_provider = schedule.ai_provider or "claude"
+
+        model = log_entry.get("model") or "sonnet"
+        workspace_path = log_entry.get("workspace_path")
+
+        session_id = self.sessions.create_session(
+            user_id=user_id,
+            ai_provider=ai_provider,
+            provider_session_id=provider_session_id,
+            model=model,
+            workspace_path=workspace_path,
+            first_message=log_entry.get("request", ""),
+        )
+
+        # Update message_log to link to the new session
+        repo.update_message_log_session(log_id, session_id)
+
+        session = self.sessions.get_session(session_id)
+        text, reply_markup = self._build_session_detail_message(user_id, session, session_id)
+        await self._reply_to_callback_origin(
+            query,
+            text=f"✅ Session created from schedule\n\n{text}",
+            reply_markup=reply_markup,
+        )
 
     async def _handle_new_session_name_prompt(self, query, chat_id: int, model: str) -> None:
         """Prompt for new session name."""

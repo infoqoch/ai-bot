@@ -47,6 +47,7 @@ class TestAppStartup:
             schedule_manager=schedule_manager,
             ai_registry=MagicMock(),
             workspace_registry=MagicMock(),
+            repo=MagicMock(),
         )
 
         mock_builder = MagicMock()
