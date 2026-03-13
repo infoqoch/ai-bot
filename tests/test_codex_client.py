@@ -1,6 +1,7 @@
 """Codex CLI client tests."""
 
 import asyncio
+import signal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -23,14 +24,21 @@ class TestCodexClient:
         """Timeout must terminate the subprocess before returning."""
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_process = AsyncMock()
-            mock_process.communicate = AsyncMock(side_effect=asyncio.TimeoutError)
+            mock_process.pid = 12345
+            mock_process.communicate = AsyncMock(
+                side_effect=[
+                    asyncio.TimeoutError(),
+                    (b"", b""),
+                ]
+            )
             mock_process.kill = MagicMock()
             mock_exec.return_value = mock_process
 
-            with pytest.raises(asyncio.TimeoutError):
-                await client._run_command(["codex", "exec"], timeout=1)
+            with patch("src.codex.client.os.killpg") as mock_killpg:
+                with pytest.raises(asyncio.TimeoutError):
+                    await client._run_command(["codex", "exec"], timeout=1)
 
-            assert mock_process.kill.call_count == 1
+            mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
             assert mock_process.communicate.await_count >= 1
 
     @pytest.mark.asyncio

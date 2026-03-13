@@ -7,6 +7,7 @@ ClaudeClient 클래스의 핵심 기능 검증:
 """
 
 import asyncio
+import signal
 import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -206,14 +207,21 @@ class TestRunCommand:
         """타임아웃 발생 시 subprocess를 종료한다."""
         with patch('asyncio.create_subprocess_exec') as mock_exec:
             mock_process = AsyncMock()
-            mock_process.communicate = AsyncMock(side_effect=asyncio.TimeoutError)
+            mock_process.pid = 12345
+            mock_process.communicate = AsyncMock(
+                side_effect=[
+                    asyncio.TimeoutError(),
+                    (b"", b""),
+                ]
+            )
             mock_process.kill = MagicMock()
             mock_exec.return_value = mock_process
 
-            with pytest.raises(asyncio.TimeoutError):
-                await client._run_command(["claude", "--print"], timeout=1)
+            with patch("src.claude.client.os.killpg") as mock_killpg:
+                with pytest.raises(asyncio.TimeoutError):
+                    await client._run_command(["claude", "--print"], timeout=1)
 
-            assert mock_process.kill.call_count == 1
+            mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
             assert mock_process.communicate.await_count >= 1
 
 

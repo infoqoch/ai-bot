@@ -33,6 +33,8 @@ from src.logging_config import logger
 class ClaudeClient:
     """Async wrapper for Claude Code CLI."""
 
+    _DRAIN_TIMEOUT_SECONDS = 5
+
     def __init__(
         self,
         command: str = "claude",
@@ -54,6 +56,33 @@ class ClaudeClient:
             return content
         logger.trace("시스템 프롬프트 없음")
         return None
+
+    @classmethod
+    async def _drain_process(
+        cls,
+        process: asyncio.subprocess.Process,
+    ) -> tuple[bytes, bytes]:
+        return await asyncio.wait_for(
+            process.communicate(),
+            timeout=cls._DRAIN_TIMEOUT_SECONDS,
+        )
+
+    @staticmethod
+    def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
+        pid = process.pid
+        if not pid:
+            return
+
+        try:
+            os.killpg(pid, signal.SIGKILL)
+            return
+        except ProcessLookupError:
+            return
+        except Exception:
+            pass
+
+        with suppress(ProcessLookupError):
+            process.kill()
 
     async def _run_command(
         self,
@@ -79,6 +108,7 @@ class ClaudeClient:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
+            start_new_session=True,
         )
         logger.trace(f"subprocess 생성됨 - pid={process.pid}")
 
@@ -93,16 +123,14 @@ class ClaudeClient:
                 # 타임아웃 없이 무제한 대기
                 stdout, stderr = await process.communicate()
         except asyncio.CancelledError:
-            with suppress(ProcessLookupError):
-                process.kill()
+            self._kill_process_tree(process)
             with suppress(Exception):
-                await process.communicate()
+                await self._drain_process(process)
             raise
         except asyncio.TimeoutError:
-            with suppress(ProcessLookupError):
-                process.kill()
+            self._kill_process_tree(process)
             with suppress(Exception):
-                await process.communicate()
+                await self._drain_process(process)
             raise
         stdout_str = stdout.decode("utf-8").strip()
         stderr_str = stderr.decode("utf-8").strip()
