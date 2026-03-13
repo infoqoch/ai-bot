@@ -22,7 +22,7 @@ class TestScheduleExecutionService:
     def mock_ai_registry(self):
         registry = MagicMock()
         client = MagicMock()
-        client.chat = AsyncMock(return_value=("응답 텍스트", None, None))
+        client.chat = AsyncMock(return_value=("응답 텍스트", None, "provider-sess-uuid"))
         registry.get_client.return_value = client
         return registry
 
@@ -39,12 +39,19 @@ class TestScheduleExecutionService:
         return MagicMock()
 
     @pytest.fixture
-    def service(self, mock_bot, mock_ai_registry, mock_plugins, mock_schedule_manager):
+    def mock_repo(self):
+        repo = MagicMock()
+        repo.insert_schedule_message_log.return_value = 42
+        return repo
+
+    @pytest.fixture
+    def service(self, mock_bot, mock_ai_registry, mock_plugins, mock_schedule_manager, mock_repo):
         return ScheduleExecutionService(
             bot=mock_bot,
             ai_registry=mock_ai_registry,
             plugin_loader=mock_plugins,
             schedule_manager=mock_schedule_manager,
+            repo=mock_repo,
         )
 
     @pytest.mark.asyncio
@@ -170,3 +177,82 @@ class TestScheduleExecutionService:
         mock_schedule_manager.update_run.assert_called_once()
         assert "timed out" in mock_schedule_manager.update_run.call_args.kwargs["last_error"]
         mock_bot.send_message.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_inserts_message_log_for_ai_schedule(
+        self, service, mock_repo, mock_bot, mock_schedule_manager
+    ):
+        """AI 스케줄 실행 시 message_log에 INSERT하고 Session 버튼을 포함한다."""
+        schedule = MagicMock()
+        schedule.id = "schedule-1"
+        schedule.type = "chat"
+        schedule.ai_provider = "claude"
+        schedule.message = "안녕"
+        schedule.model = "sonnet"
+        schedule.chat_id = 12345
+        schedule.name = "테스트"
+        schedule.workspace_path = None
+
+        await service.execute(schedule)
+
+        mock_repo.insert_schedule_message_log.assert_called_once_with(
+            chat_id=12345,
+            schedule_id="schedule-1",
+            request="안녕",
+            response="응답 텍스트",
+            model="sonnet",
+            workspace_path=None,
+            provider_session_id="provider-sess-uuid",
+        )
+        # Session button should be in the response
+        send_call = mock_bot.send_message.call_args
+        markup = send_call.kwargs.get("reply_markup")
+        assert markup is not None
+        callbacks = [btn.callback_data for row in markup.inline_keyboard for btn in row]
+        assert "resp:sched:42" in callbacks
+
+    @pytest.mark.asyncio
+    async def test_execute_plugin_schedule_no_message_log(
+        self, service, mock_repo, mock_schedule_manager
+    ):
+        """플러그인 스케줄은 message_log에 INSERT하지 않는다."""
+        schedule = MagicMock()
+        schedule.id = "schedule-1"
+        schedule.type = "plugin"
+        schedule.plugin_name = "todo"
+        schedule.action_name = "daily_wrap"
+        schedule.chat_id = 12345
+        schedule.name = "플러그인"
+
+        await service.execute(schedule)
+
+        mock_repo.insert_schedule_message_log.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_no_repo_still_sends_response(
+        self, mock_bot, mock_ai_registry, mock_plugins, mock_schedule_manager
+    ):
+        """repo 없이도 응답은 정상 전송된다."""
+        service = ScheduleExecutionService(
+            bot=mock_bot,
+            ai_registry=mock_ai_registry,
+            plugin_loader=mock_plugins,
+            schedule_manager=mock_schedule_manager,
+            repo=None,
+        )
+
+        schedule = MagicMock()
+        schedule.id = "schedule-1"
+        schedule.type = "chat"
+        schedule.ai_provider = "claude"
+        schedule.message = "안녕"
+        schedule.model = "sonnet"
+        schedule.chat_id = 12345
+        schedule.name = "테스트"
+        schedule.workspace_path = None
+
+        await service.execute(schedule)
+
+        mock_bot.send_message.assert_called_once()
+        send_call = mock_bot.send_message.call_args
+        assert send_call.kwargs.get("reply_markup") is None

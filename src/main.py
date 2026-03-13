@@ -113,6 +113,7 @@ def create_app(settings) -> Application:
         ai_registry=runtime.ai_registry,
         plugin_loader=runtime.plugin_loader,
         schedule_manager=_schedule_manager,
+        repo=runtime.repo,
     )
 
     _schedule_manager.set_scheduler_manager(scheduler_manager)

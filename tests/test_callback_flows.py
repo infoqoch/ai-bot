@@ -1082,3 +1082,109 @@ class TestSchedulerForceReplyFlows:
         call_kwargs = handlers._schedule_manager.add.call_args[1]
         assert call_kwargs["schedule_type"] == "chat"
         assert call_kwargs["trigger_type"] == "once"
+
+
+# =============================================================================
+# 7. Schedule → Session 콜백 (resp:sched)
+# =============================================================================
+
+class TestScheduleToSessionCallbackFlows:
+    """스케줄 결과에서 세션 생성 콜백 플로우 테스트."""
+
+    @pytest.fixture
+    def handlers(self):
+        h = make_handlers()
+        repo = MagicMock()
+        repo.get_message_log.return_value = {
+            "id": 42,
+            "provider_session_id": "cli-uuid-1234",
+            "schedule_id": "sched-001",
+            "model": "sonnet",
+            "workspace_path": "/Users/test/project",
+            "request": "매일 코드 리뷰",
+        }
+        schedule_mock = MagicMock()
+        schedule_mock.ai_provider = "claude"
+        repo.get_schedule.return_value = schedule_mock
+        repo.find_session_by_provider_session_id.return_value = None
+        repo.update_message_log_session.return_value = True
+        h.sessions._repo = repo
+        h.sessions.create_session.return_value = "new-session-id"
+        h.sessions.get_session.return_value = {
+            "id": "new-session-id",
+            "name": None,
+            "model": "sonnet",
+            "ai_provider": "claude",
+            "workspace_path": "/Users/test/project",
+        }
+        return h
+
+    @pytest.mark.asyncio
+    async def test_resp_sched_creates_session_from_log(self, handlers):
+        """resp:sched:{log_id} — message_log에서 세션을 생성하고 전환한다."""
+        query = make_query()
+        await handlers._handle_response_session_callback(query, 12345, "resp:sched:42")
+
+        query.message.reply_text.assert_called_once()
+        reply_text = query.message.reply_text.call_args.kwargs["text"]
+        assert "Session created from schedule" in reply_text
+
+        handlers.sessions.create_session.assert_called_once_with(
+            user_id="12345",
+            ai_provider="claude",
+            provider_session_id="cli-uuid-1234",
+            model="sonnet",
+            workspace_path="/Users/test/project",
+            first_message="매일 코드 리뷰",
+        )
+
+    @pytest.mark.asyncio
+    async def test_resp_sched_switches_existing_session(self, handlers):
+        """이미 import된 provider_session_id면 기존 세션으로 전환한다."""
+        repo = handlers.sessions._repo
+        repo.find_session_by_provider_session_id.return_value = {
+            "id": "existing-session-id",
+            "name": "Existing",
+            "model": "sonnet",
+            "ai_provider": "claude",
+        }
+        handlers.sessions.get_session.return_value = {
+            "id": "existing-session-id",
+            "name": "Existing",
+            "model": "sonnet",
+            "ai_provider": "claude",
+        }
+
+        query = make_query()
+        await handlers._handle_response_session_callback(query, 12345, "resp:sched:42")
+
+        handlers.sessions.switch_session.assert_called_once_with("12345", "existing-session-id")
+        handlers.sessions.create_session.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_resp_sched_invalid_log_id(self, handlers):
+        """잘못된 log_id는 에러 메시지."""
+        query = make_query()
+        await handlers._handle_response_session_callback(query, 12345, "resp:sched:invalid")
+
+        reply_text = query.message.reply_text.call_args.kwargs["text"]
+        assert "Invalid log ID" in reply_text
+
+    @pytest.mark.asyncio
+    async def test_resp_sched_missing_provider_session(self, handlers):
+        """provider_session_id 없으면 에러."""
+        repo = handlers.sessions._repo
+        repo.get_message_log.return_value = {
+            "id": 42,
+            "provider_session_id": None,
+            "schedule_id": "sched-001",
+            "model": "sonnet",
+            "workspace_path": None,
+            "request": "test",
+        }
+
+        query = make_query()
+        await handlers._handle_response_session_callback(query, 12345, "resp:sched:42")
+
+        reply_text = query.message.reply_text.call_args.kwargs["text"]
+        assert "No provider session" in reply_text

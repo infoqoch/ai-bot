@@ -120,9 +120,11 @@ CREATE INDEX IF NOT EXISTS idx_workspaces_path ON workspaces(path);
 CREATE TABLE IF NOT EXISTS message_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     chat_id INTEGER NOT NULL,
-    session_id TEXT NOT NULL,
+    session_id TEXT,
     model TEXT NOT NULL DEFAULT 'sonnet',
     workspace_path TEXT,
+    provider_session_id TEXT,
+    schedule_id TEXT,
 
     -- request
     request TEXT NOT NULL,
@@ -142,9 +144,7 @@ CREATE TABLE IF NOT EXISTS message_log (
     delivery_status TEXT NOT NULL DEFAULT 'not_ready',
     delivery_attempts INTEGER NOT NULL DEFAULT 0,
     delivery_error TEXT,
-    delivered_at TEXT,
-
-    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    delivered_at TEXT
 );
 
 -- auth_sessions: 인증 세션 영속화
