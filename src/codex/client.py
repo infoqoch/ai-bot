@@ -3,7 +3,9 @@
 import asyncio
 from contextlib import suppress
 import json
+import os
 import shlex
+import signal
 from pathlib import Path
 from typing import Optional
 
@@ -14,6 +16,8 @@ from src.logging_config import logger
 
 class CodexClient:
     """Async wrapper for Codex CLI."""
+
+    _DRAIN_TIMEOUT_SECONDS = 5
 
     def __init__(
         self,
@@ -30,6 +34,33 @@ class CodexClient:
             return path.read_text(encoding="utf-8")
         return None
 
+    @classmethod
+    async def _drain_process(
+        cls,
+        process: asyncio.subprocess.Process,
+    ) -> tuple[bytes, bytes]:
+        return await asyncio.wait_for(
+            process.communicate(),
+            timeout=cls._DRAIN_TIMEOUT_SECONDS,
+        )
+
+    @staticmethod
+    def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
+        pid = process.pid
+        if not pid:
+            return
+
+        try:
+            os.killpg(pid, signal.SIGKILL)
+            return
+        except ProcessLookupError:
+            return
+        except Exception:
+            pass
+
+        with suppress(ProcessLookupError):
+            process.kill()
+
     async def _run_command(
         self,
         cmd: list[str],
@@ -41,24 +72,26 @@ class CodexClient:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
+            start_new_session=True,
         )
 
         try:
             if timeout:
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=timeout,
+                )
             else:
                 stdout, stderr = await process.communicate()
         except asyncio.CancelledError:
-            with suppress(ProcessLookupError):
-                process.kill()
+            self._kill_process_tree(process)
             with suppress(Exception):
-                await process.communicate()
+                await self._drain_process(process)
             raise
         except asyncio.TimeoutError:
-            with suppress(ProcessLookupError):
-                process.kill()
+            self._kill_process_tree(process)
             with suppress(Exception):
-                await process.communicate()
+                await self._drain_process(process)
             raise
 
         return stdout.decode("utf-8").strip(), stderr.decode("utf-8").strip(), process.returncode
