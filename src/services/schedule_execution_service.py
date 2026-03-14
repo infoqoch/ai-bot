@@ -44,6 +44,12 @@ class ScheduleExecutionService:
             provider_session_id = result[1] if isinstance(result, tuple) else None
             is_ai = isinstance(result, tuple)
 
+            if self._bot and schedule.chat_id and not response:
+                logger.warning(
+                    f"Schedule {schedule.id} ({schedule.name}) returned empty response, sending fallback"
+                )
+                response = "(응답 내용 없음)"
+
             if self._bot and schedule.chat_id and response:
                 log_id = None
                 if is_ai and self._repo:

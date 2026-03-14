@@ -49,12 +49,12 @@ class SchedulerManager:
         self._initialized = True
         self._app: Optional["Application"] = None
         self._jobs: dict[str, ScheduledJob] = {}
-        logger.debug("[SchedulerManager] 초기화됨")
+        logger.debug("[SchedulerManager] initialized")
 
     def set_app(self, app: "Application") -> None:
         """Connect the application so the shared JobQueue can be used."""
         self._app = app
-        logger.info("[SchedulerManager] Application 연결됨")
+        logger.info("[SchedulerManager] Application connected")
 
     @property
     def job_queue(self):
@@ -76,7 +76,7 @@ class SchedulerManager:
     ) -> bool:
         """Register one daily job."""
         if name in self._jobs:
-            logger.warning(f"[SchedulerManager] 작업 '{name}' 이미 존재 - 덮어쓰기")
+            logger.warning(f"[SchedulerManager] job '{name}' already exists - overwriting")
             self.unregister(name)
 
         try:
@@ -113,10 +113,10 @@ class SchedulerManager:
                 metadata=metadata or {},
                 next_run_time=getattr(job, "next_t", None),
             )
-            logger.info(f"[SchedulerManager] 작업 등록: {name} ({schedule_info}, owner={owner})")
+            logger.info(f"[SchedulerManager] job registered: {name} ({schedule_info}, owner={owner})")
             return True
         except Exception as exc:
-            logger.error(f"[SchedulerManager] 작업 등록 실패: {name} - {exc}")
+            logger.error(f"[SchedulerManager] job registration failed: {name} - {exc}")
             return False
 
     def register_repeating(
@@ -132,7 +132,7 @@ class SchedulerManager:
     ) -> bool:
         """Register one repeating job."""
         if name in self._jobs:
-            logger.warning(f"[SchedulerManager] 작업 '{name}' 이미 존재 - 덮어쓰기")
+            logger.warning(f"[SchedulerManager] job '{name}' already exists - overwriting")
             self.unregister(name)
 
         try:
@@ -161,10 +161,10 @@ class SchedulerManager:
                 metadata=metadata or {},
                 next_run_time=getattr(job, "next_t", None),
             )
-            logger.info(f"[SchedulerManager] 작업 등록: {name} ({schedule_info}, owner={owner})")
+            logger.info(f"[SchedulerManager] job registered: {name} ({schedule_info}, owner={owner})")
             return True
         except Exception as exc:
-            logger.error(f"[SchedulerManager] 작업 등록 실패: {name} - {exc}")
+            logger.error(f"[SchedulerManager] job registration failed: {name} - {exc}")
             return False
 
     def register_once(
@@ -179,7 +179,7 @@ class SchedulerManager:
     ) -> bool:
         """Register one one-shot job using a relative delay."""
         if name in self._jobs:
-            logger.warning(f"[SchedulerManager] 작업 '{name}' 이미 존재 - 덮어쓰기")
+            logger.warning(f"[SchedulerManager] job '{name}' already exists - overwriting")
             self.unregister(name)
 
         try:
@@ -201,10 +201,10 @@ class SchedulerManager:
                 metadata=metadata or {},
                 next_run_time=getattr(job, "next_t", None),
             )
-            logger.info(f"[SchedulerManager] 작업 등록: {name} ({schedule_info}, owner={owner})")
+            logger.info(f"[SchedulerManager] job registered: {name} ({schedule_info}, owner={owner})")
             return True
         except Exception as exc:
-            logger.error(f"[SchedulerManager] 작업 등록 실패: {name} - {exc}")
+            logger.error(f"[SchedulerManager] job registration failed: {name} - {exc}")
             return False
 
     def register_once_at(
@@ -219,7 +219,7 @@ class SchedulerManager:
     ) -> bool:
         """Register one one-shot job using an absolute local datetime."""
         if name in self._jobs:
-            logger.warning(f"[SchedulerManager] 작업 '{name}' 이미 존재 - 덮어쓰기")
+            logger.warning(f"[SchedulerManager] job '{name}' already exists - overwriting")
             self.unregister(name)
 
         try:
@@ -242,10 +242,10 @@ class SchedulerManager:
                 metadata=metadata or {},
                 next_run_time=target,
             )
-            logger.info(f"[SchedulerManager] 작업 등록: {name} ({schedule_info}, owner={owner})")
+            logger.info(f"[SchedulerManager] job registered: {name} ({schedule_info}, owner={owner})")
             return True
         except Exception as exc:
-            logger.error(f"[SchedulerManager] 작업 등록 실패: {name} - {exc}")
+            logger.error(f"[SchedulerManager] job registration failed: {name} - {exc}")
             return False
 
     def register_cron(
@@ -260,7 +260,7 @@ class SchedulerManager:
     ) -> bool:
         """Register one cron-style job."""
         if name in self._jobs:
-            logger.warning(f"[SchedulerManager] 작업 '{name}' 이미 존재 - 덮어쓰기")
+            logger.warning(f"[SchedulerManager] job '{name}' already exists - overwriting")
             self.unregister(name)
 
         try:
@@ -283,16 +283,16 @@ class SchedulerManager:
                 metadata=metadata or {},
                 next_run_time=trigger.get_next_fire_time(None, now),
             )
-            logger.info(f"[SchedulerManager] 작업 등록: {name} ({self._jobs[name].schedule_info}, owner={owner})")
+            logger.info(f"[SchedulerManager] job registered: {name} ({self._jobs[name].schedule_info}, owner={owner})")
             return True
         except Exception as exc:
-            logger.error(f"[SchedulerManager] 작업 등록 실패: {name} - {exc}")
+            logger.error(f"[SchedulerManager] job registration failed: {name} - {exc}")
             return False
 
     def unregister(self, name: str) -> bool:
         """Remove one job by name."""
         if name not in self._jobs:
-            logger.warning(f"[SchedulerManager] 작업 '{name}' 없음")
+            logger.warning(f"[SchedulerManager] job '{name}' not found")
             return False
 
         job_info = self._jobs[name]
@@ -300,10 +300,10 @@ class SchedulerManager:
             try:
                 job_info.job.schedule_removal()
             except JobLookupError:
-                logger.warning(f"[SchedulerManager] 작업 '{name}'는 이미 scheduler에서 제거됨")
+                logger.warning(f"[SchedulerManager] job '{name}' already removed from scheduler")
 
         del self._jobs[name]
-        logger.info(f"[SchedulerManager] 작업 해제: {name}")
+        logger.info(f"[SchedulerManager] job unregistered: {name}")
         return True
 
     def unregister_by_owner(self, owner: str) -> int:

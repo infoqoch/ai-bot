@@ -156,7 +156,7 @@ END;
         yesterday = (app_today() - timedelta(days=1)).isoformat()
         todos = self.store.list_by_date(chat_id, yesterday)
         if not todos:
-            return ""
+            return f"📋 <b>Yesterday's Todos ({yesterday})</b>\n\nNo todos yesterday."
 
         lines = [f"📋 <b>Yesterday's Todos ({yesterday})</b>\n"]
         pending_count = 0
@@ -178,12 +178,12 @@ END;
         """Generate daily wrap-up report text."""
         today = self._today()
         stats = self.store.stats_for_date(chat_id, today)
-        if stats["total"] == 0:
-            return ""
 
         lines = ["🌙 <b>Daily Wrap-up</b>\n"]
 
-        if stats["pending"] == 0:
+        if stats["total"] == 0:
+            lines.append("No todos today. Add some for tomorrow!")
+        elif stats["pending"] == 0:
             lines.append("🎉 All todos completed today!")
         else:
             lines.append(f"📊 Today's progress: {stats['done']}/{stats['total']} completed\n")

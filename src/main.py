@@ -62,13 +62,13 @@ def create_app(settings) -> Application:
     configure_app_timezone(app_timezone)
 
     logger.info("=" * 60)
-    logger.info("Telegram CLI AI Bot 초기화 시작")
+    logger.info("Telegram CLI AI Bot initialization started")
     logger.info(f"  LOG_LEVEL: {log_level}")
     logger.info(f"  base_dir: {settings.base_dir}")
     logger.info(f"  working_dir: {settings.effective_working_dir}")
     logger.info(f"  app_timezone: {app_timezone}")
     logger.info(f"  require_auth: {settings.require_auth}")
-    logger.info(f"  allowed_chat_ids: {settings.allowed_chat_ids or '(모두 허용)'}")
+    logger.info(f"  allowed_chat_ids: {settings.allowed_chat_ids or '(all allowed)'}")
     logger.info("=" * 60)
 
     runtime = build_bot_runtime(settings)
@@ -85,7 +85,7 @@ def create_app(settings) -> Application:
             logger.warning(f"Telegram command sync skipped: {exc}")
 
     # Create application (concurrent_updates=True로 동시 메시지 처리 활성화)
-    logger.trace("Application 빌드 시작")
+    logger.trace("Application build started")
     app = (
         Application.builder()
         .token(settings.telegram_token)
@@ -97,10 +97,10 @@ def create_app(settings) -> Application:
         .pool_timeout(5)
         .build()
     )
-    logger.trace("Application 빌드 완료 - concurrent_updates=True")
+    logger.trace("Application build complete - concurrent_updates=True")
 
     scheduler_manager.set_app(app)
-    logger.info("SchedulerManager 초기화 완료")
+    logger.info("SchedulerManager initialized")
 
     if hasattr(runtime.plugin_loader, "register_system_jobs"):
         runtime.plugin_loader.register_system_jobs(app, settings.admin_chat_id)
@@ -119,13 +119,13 @@ def create_app(settings) -> Application:
     _schedule_manager.set_scheduler_manager(scheduler_manager)
     _schedule_manager.set_executor(schedule_execution_service.execute)
     _schedule_manager.register_all_to_scheduler()
-    logger.info("예약 스케줄러 executor 설정 완료")
+    logger.info("Schedule executor configured")
 
     handlers.set_schedule_manager(_schedule_manager)
     handlers.set_workspace_registry(runtime.workspace_registry)
 
     # Register handlers
-    logger.trace("핸들러 등록 시작")
+    logger.trace("Registering handlers")
     app.add_handler(CommandHandler("start", handlers.start))
     app.add_handler(CommandHandler("menu", handlers.menu_command))
     app.add_handler(CommandHandler("help", handlers.help_command))
@@ -160,7 +160,7 @@ def create_app(settings) -> Application:
         plugin_names = [p.name for p in runtime.plugin_loader.plugins]
         for name in plugin_names:
             app.add_handler(CommandHandler(name, handlers.plugin_help_command))
-        logger.trace(f"플러그인 명령어 등록: {plugin_names}")
+        logger.trace(f"Plugin commands registered: {plugin_names}")
 
     app.add_handler(CommandHandler("rename", handlers.rename_command))
     app.add_handler(MessageHandler(filters.Regex(r'^/rename_'), handlers.rename_command))
@@ -180,7 +180,7 @@ def create_app(settings) -> Application:
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.handle_message))
 
     app.add_error_handler(handlers.error_handler)
-    logger.trace("핸들러 등록 완료")
+    logger.trace("Handlers registered")
 
     return app
 
@@ -201,15 +201,15 @@ def main() -> None:
     log_file = os.getenv("LOG_FILE")  # 옵션: 파일 로깅
     setup_logging(level=log_level, log_file=log_file)
 
-    logger.trace("main() 시작")
+    logger.trace("main() started")
 
     # 싱글톤 락 획득 (다른 인스턴스 실행 방지)
-    logger.trace("싱글톤 락 획득 시도")
+    logger.trace("Acquiring singleton lock")
     if not _process_lock.acquire():
         print("❌ Bot is already running.", file=sys.stderr)
         print("   ./run.sh stop && ./run.sh start", file=sys.stderr)
         sys.exit(int(RuntimeExitCode.LOCK_HELD))
-    logger.trace("싱글톤 락 획득 성공")
+    logger.trace("Singleton lock acquired")
 
     # 종료 시 락 해제 및 Repository 정리
     def cleanup():
@@ -222,7 +222,7 @@ def main() -> None:
     atexit.register(cleanup)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(int(RuntimeExitCode.OK)))
     signal.signal(signal.SIGINT, lambda *_: sys.exit(int(RuntimeExitCode.OK)))
-    logger.trace("종료 핸들러 등록 완료")
+    logger.trace("Shutdown handlers registered")
 
     settings = _load_settings_or_exit()
 
@@ -235,11 +235,11 @@ def main() -> None:
     app = create_app(settings)
 
     logger.info("=" * 60)
-    logger.info("봇 시작 완료 - polling 모드")
-    logger.info("  Ctrl+C로 종료")
+    logger.info("Bot started - polling mode")
+    logger.info("  Press Ctrl+C to stop")
     logger.info("=" * 60)
 
-    logger.trace("run_polling() 호출")
+    logger.trace("run_polling() called")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 

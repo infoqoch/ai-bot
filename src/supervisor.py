@@ -48,7 +48,7 @@ def _get_int_env(name: str, default: int) -> int:
     try:
         return int(raw)
     except ValueError:
-        logger.warning(f"정수 환경변수 파싱 실패 - {name}={raw!r}, default={default}")
+        logger.warning(f"integer env var parse failed - {name}={raw!r}, default={default}")
         return default
 
 
@@ -119,7 +119,7 @@ def notify_admin(message: str) -> bool:
         성공 여부
     """
     if not _telegram_token or not _admin_chat_id:
-        logger.trace("관리자 알림 스킵 - 설정 없음")
+        logger.trace("admin notification skipped - no config")
         return False
 
     try:
@@ -134,14 +134,14 @@ def notify_admin(message: str) -> bool:
             response = client.post(url, json=data)
 
         if response.status_code == 200:
-            logger.info(f"관리자 알림 전송 성공")
+            logger.info(f"admin notification sent successfully")
             return True
         else:
-            logger.warning(f"관리자 알림 실패: {response.status_code}")
+            logger.warning(f"admin notification failed: {response.status_code}")
             return False
 
     except Exception as e:
-        logger.warning(f"관리자 알림 오류: {e}")
+        logger.warning(f"admin notification error: {e}")
         return False
 
 
@@ -150,19 +150,19 @@ def signal_handler(signum, frame):
     global _shutdown_requested, _child_process
 
     sig_name = signal.Signals(signum).name
-    logger.info(f"시그널 수신: {sig_name}")
+    logger.info(f"signal received: {sig_name}")
     logger.trace(f"signum={signum}, frame={frame}")
     _shutdown_requested = True
 
     if _child_process and _child_process.poll() is None:
-        logger.info("자식 프로세스에 SIGTERM 전달...")
+        logger.info("forwarding SIGTERM to child process...")
         logger.trace(f"child_pid={_child_process.pid}")
         _child_process.terminate()
         try:
             _child_process.wait(timeout=10)
-            logger.trace("자식 프로세스 정상 종료됨")
+            logger.trace("child process terminated normally")
         except subprocess.TimeoutExpired:
-            logger.warning("자식 프로세스 강제 종료 (SIGKILL)")
+            logger.warning("child process force killed (SIGKILL)")
             _child_process.kill()
 
 
@@ -173,10 +173,10 @@ def run_bot() -> int:
     cmd = [sys.executable, "-u", "-m", "src.main"]
     cwd = Path(__file__).parent.parent
 
-    logger.info(f"봇 시작: {' '.join(cmd)}")
-    logger.trace(f"작업 디렉토리: {cwd}")
+    logger.info(f"bot starting: {' '.join(cmd)}")
+    logger.trace(f"working directory: {cwd}")
     logger.trace(f"Python: {sys.executable}")
-    logger.trace(f"환경변수 LOG_LEVEL: {os.getenv('LOG_LEVEL', 'INFO')}")
+    logger.trace(f"env LOG_LEVEL: {os.getenv('LOG_LEVEL', 'INFO')}")
 
     _child_process = subprocess.Popen(
         cmd,
@@ -186,13 +186,13 @@ def run_bot() -> int:
     )
 
     child_pid = _child_process.pid
-    logger.trace(f"자식 프로세스 생성됨 - PID: {child_pid}")
+    logger.trace(f"child process spawned - PID: {child_pid}")
 
-    logger.trace("자식 프로세스 종료 대기 중...")
+    logger.trace("waiting for child process to exit...")
     exit_code = _child_process.wait()
     _child_process = None
 
-    logger.trace(f"자식 프로세스 종료 - PID={child_pid}, exit_code={exit_code}")
+    logger.trace(f"child process exited - PID={child_pid}, exit_code={exit_code}")
     return exit_code
 
 
@@ -205,7 +205,7 @@ def main():
     log_file = os.getenv("LOG_FILE")
     setup_logging(level=log_level, log_file=log_file)
 
-    logger.trace("main() 시작")
+    logger.trace("main() started")
 
     # 텔레그램 설정 로드
     _load_telegram_config()
@@ -216,7 +216,7 @@ def main():
         sys.exit(1)
 
     atexit.register(_process_lock.release)
-    logger.trace("종료 핸들러 등록됨")
+    logger.trace("exit handler registered")
 
     if not _run_preflight():
         _process_lock.release()
@@ -225,17 +225,17 @@ def main():
     # 시그널 핸들러 등록
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
-    logger.trace("시그널 핸들러 등록됨")
+    logger.trace("signal handlers registered")
 
     logger.info("=" * 60)
-    logger.info("Telegram Bot Supervisor 시작")
+    logger.info("Telegram Bot Supervisor started")
     logger.info(f"  PID: {os.getpid()}")
     logger.info(f"  LOG_LEVEL: {log_level}")
     logger.info("=" * 60)
 
     # 시작 알림
     start_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    notify_admin(f"🟢 <b>봇이 시작되었습니다</b>\n\n<code>{start_time_str}</code>")
+    notify_admin(f"🟢 <b>Bot started</b>\n\n<code>{start_time_str}</code>")
 
     restart_delay = INITIAL_RESTART_DELAY
     restart_count = 0
@@ -247,39 +247,39 @@ def main():
 
     while not _shutdown_requested:
         start_time = time.time()
-        logger.trace(f"메인 루프 반복 - restart_count={restart_count}, delay={restart_delay}")
+        logger.trace(f"main loop iteration - restart_count={restart_count}, delay={restart_delay}")
 
         try:
             exit_code = run_bot()
         except Exception as e:
-            logger.exception(f"봇 실행 오류: {e}")
+            logger.exception(f"bot run error: {e}")
             exit_code = 1
 
         run_duration = time.time() - start_time
-        logger.trace(f"봇 종료 - exit_code={exit_code}, duration={run_duration:.1f}s")
+        logger.trace(f"bot exited - exit_code={exit_code}, duration={run_duration:.1f}s")
 
         # 종료 요청 확인
         if _shutdown_requested:
-            logger.info("정상 종료 요청으로 supervisor 종료")
+            logger.info("shutdown requested, stopping supervisor")
             shutdown_reason = "shutdown requested"
             break
 
         # 정상 종료 (exit code 0)
         if exit_code == 0:
-            logger.info("봇 정상 종료 (exit_code=0), supervisor 종료")
+            logger.info("bot exited normally (exit_code=0), stopping supervisor")
             shutdown_reason = "main exited normally"
             break
 
         if not is_restartable_exit_code(exit_code):
             shutdown_reason = f"main exited unrecoverably ({describe_exit_code(exit_code)})"
-            logger.error(f"봇 재시작 중단 - {shutdown_reason}")
+            logger.error(f"bot restart aborted - {shutdown_reason}")
             break
 
-        # 비정상 종료 - 재시작
+        # abnormal exit - restart
         restart_count += 1
         logger.warning(
-            f"봇 비정상 종료 (exit_code={exit_code}, "
-            f"실행시간={run_duration:.1f}초, 재시작횟수={restart_count})"
+            f"bot exited abnormally (exit_code={exit_code}, "
+            f"duration={run_duration:.1f}s, restart_count={restart_count})"
         )
 
         recent_crashes = _record_crash_time(crash_times, time.time())
@@ -288,42 +288,42 @@ def main():
                 f"crash loop detected ({recent_crashes} crashes within "
                 f"{CRASH_LOOP_WINDOW_SECONDS} seconds, last={describe_exit_code(exit_code)})"
             )
-            logger.error(f"봇 재시작 중단 - {shutdown_reason}")
+            logger.error(f"bot restart aborted - {shutdown_reason}")
             break
 
-        # 충분히 오래 실행됐으면 딜레이 리셋
+        # reset delay if ran long enough
         if run_duration >= CRASH_RESET_TIME:
             restart_delay = INITIAL_RESTART_DELAY
-            logger.info("안정 실행 확인, 재시작 딜레이 리셋")
+            logger.info("stable run confirmed, restart delay reset")
             logger.trace(f"run_duration({run_duration:.1f}) >= CRASH_RESET_TIME({CRASH_RESET_TIME})")
 
-        logger.info(f"{restart_delay}초 후 재시작...")
+        logger.info(f"restarting in {restart_delay}s...")
 
-        # 대기 (중간에 종료 요청 체크)
-        logger.trace("재시작 대기 시작")
+        # wait (check for shutdown request in between)
+        logger.trace("restart wait started")
         for i in range(restart_delay):
             if _shutdown_requested:
-                logger.trace("대기 중 종료 요청 감지")
+                logger.trace("shutdown requested during wait")
                 break
             time.sleep(1)
 
-        # 지수 백오프 (최대 5분)
+        # exponential backoff (max 5 min)
         old_delay = restart_delay
         restart_delay = min(restart_delay * 2, MAX_RESTART_DELAY)
-        logger.trace(f"지수 백오프: {old_delay} -> {restart_delay}")
+        logger.trace(f"exponential backoff: {old_delay} -> {restart_delay}")
 
-    # 종료 알림
+    # shutdown notification
     end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     notify_admin(
-        "🔴 <b>봇이 종료되었습니다</b>\n\n"
+        "🔴 <b>Bot stopped</b>\n\n"
         f"<code>{end_time}</code>\n"
         f"<b>Reason:</b> {_escape_html(shutdown_reason)}"
     )
 
     logger.info("=" * 60)
-    logger.info("Supervisor 종료")
-    logger.info(f"  총 재시작 횟수: {restart_count}")
-    logger.info(f"  종료 사유: {shutdown_reason}")
+    logger.info("Supervisor stopped")
+    logger.info(f"  total restarts: {restart_count}")
+    logger.info(f"  shutdown reason: {shutdown_reason}")
     logger.info("=" * 60)
 
 

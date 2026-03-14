@@ -60,5 +60,5 @@ class PendingRequestStore:
             restored += 1
 
         if restored:
-            logger.info(f"DB에서 pending message {restored}개 복원")
+            logger.info(f"Restored {restored} pending messages from DB")
         return restored

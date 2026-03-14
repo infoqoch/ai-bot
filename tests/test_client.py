@@ -89,7 +89,7 @@ class TestClaudeClient:
     async def test_summarize_empty_questions(self, client):
         """빈 질문 목록 요약."""
         result = await client.summarize([])
-        assert result == "(내용 없음)"
+        assert result == "(no content)"
 
 
 class TestChatError:

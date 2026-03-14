@@ -320,12 +320,14 @@ class TestTodoPlugin:
 
     @pytest.mark.asyncio
     async def test_scheduled_yesterday_report_empty(self, repo_and_plugin):
-        """스케줄: 어제 할일 없으면 빈 문자열."""
+        """스케줄: 어제 할일 없어도 안내 메시지 반환."""
         _, plugin = repo_and_plugin
 
         result = await plugin.execute_scheduled_action("yesterday_report", 123)
 
-        assert result == ""
+        assert result != ""
+        assert "Yesterday" in result
+        assert "No todos" in result
 
     @pytest.mark.asyncio
     async def test_scheduled_daily_wrap(self, repo_and_plugin):
@@ -357,9 +359,11 @@ class TestTodoPlugin:
 
     @pytest.mark.asyncio
     async def test_scheduled_daily_wrap_empty(self, repo_and_plugin):
-        """스케줄: 하루 마무리 - 할일 없으면 빈 문자열."""
+        """스케줄: 하루 마무리 - 할일 없어도 안내 메시지 반환."""
         _, plugin = repo_and_plugin
 
         result = await plugin.execute_scheduled_action("daily_wrap", 123)
 
-        assert result == ""
+        assert result != ""
+        assert "Daily Wrap-up" in result
+        assert "No todos today" in result
