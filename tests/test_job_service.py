@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.claude.client import ChatResponse
+from src.claude.client import ChatError, ChatResponse
 from src.repository.database import init_schema
 from src.repository.repository import Repository
 from src.services.job_service import JobService
@@ -223,6 +223,47 @@ async def test_run_job_escapes_session_and_message_metadata(repo, session_servic
     assert "&lt;/code&gt;&lt;i&gt;x&lt;/i&gt;" in sent_text
     assert "unsafe <tag>" not in sent_text
     assert "</code><i>x</i>" not in sent_text
+
+
+@pytest.mark.asyncio
+async def test_run_job_surfaces_usage_limit_message(repo, session_service):
+    """Usage-limit failures should be delivered as a concrete user-facing message."""
+    session_service.create_session("12345", "sess1", model="sonnet", name="테스트")
+    job_id = repo.enqueue_message(
+        chat_id=12345,
+        session_id="sess1",
+        request="질문",
+        model="sonnet",
+    )
+    repo.reserve_session_lock("sess1", job_id)
+
+    claude = MagicMock()
+    claude.chat = AsyncMock(return_value=ChatResponse(
+        text="You've hit your limit · resets 4pm (Asia/Seoul)",
+        error=ChatError.USAGE_LIMIT,
+        session_id="sess1",
+    ))
+
+    fake_bot = MagicMock()
+    fake_bot.send_message = AsyncMock()
+
+    service = JobService(
+        repo=repo,
+        session_service=session_service,
+        claude_client=claude,
+        telegram_token="test-token",
+    )
+
+    with patch("src.services.job_service.Bot", return_value=fake_bot):
+        result = await service.run_job(job_id)
+
+    assert result is True
+    saved = repo.get_message_log(job_id)
+    assert saved["processed"] == 2
+    assert saved["error"] == "usage_limit"
+    assert "You&#x27;ve hit your limit · resets 4pm (Asia/Seoul)" in saved["response"]
+    sent_text = fake_bot.send_message.await_args_list[0].kwargs["text"]
+    assert "You&#x27;ve hit your limit · resets 4pm (Asia/Seoul)" in sent_text
 
 
 @pytest.mark.asyncio

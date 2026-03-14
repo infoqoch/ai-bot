@@ -268,7 +268,13 @@ class JobService:
             return f"⏱️ Task exceeded {timeout_label} and was stopped. Please try again.", "watchdog_timeout"
         if error == "TIMEOUT":
             return "⏱️ Response timed out. Please try again.", "provider_timeout"
+        if error == "USAGE_LIMIT":
+            detail = (response or "Claude usage limit reached").strip()
+            return self._escape_html(detail), "usage_limit"
         if error and error != "SESSION_NOT_FOUND":
+            detail = (response or "").strip()
+            if detail and detail != error:
+                return self._escape_html(detail), error
             return f"❌ Error: {self._escape_html(error)}", error
         if not response or not response.strip():
             return f"⚠️ <code>{escaped_short_message}</code>\nResponse is empty. Please try again.", "empty_response"

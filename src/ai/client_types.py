@@ -10,6 +10,7 @@ class ChatError(Enum):
 
     TIMEOUT = "TIMEOUT"
     SESSION_NOT_FOUND = "SESSION_NOT_FOUND"
+    USAGE_LIMIT = "USAGE_LIMIT"
     CLI_ERROR = "CLI_ERROR"
 
 
@@ -38,4 +39,3 @@ class AIClient(Protocol):
         workspace_path: Optional[str] = None,
     ) -> ChatResponse:
         """Send one message to the provider."""
-

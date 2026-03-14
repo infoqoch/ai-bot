@@ -99,6 +99,7 @@ class TestChatError:
         """ChatError enum 값 검증."""
         assert ChatError.TIMEOUT.value == "TIMEOUT"
         assert ChatError.SESSION_NOT_FOUND.value == "SESSION_NOT_FOUND"
+        assert ChatError.USAGE_LIMIT.value == "USAGE_LIMIT"
         assert ChatError.CLI_ERROR.value == "CLI_ERROR"
 
 
@@ -299,6 +300,37 @@ class TestChatMethod:
 
             assert response.error == ChatError.CLI_ERROR
             assert "Some error" in response.text or response.text == "(오류)"
+
+    @pytest.mark.asyncio
+    async def test_chat_usage_limit_from_nonzero_json(self, client):
+        """Claude quota 초과 JSON은 usage-limit 에러로 구조화한다."""
+        payload = (
+            '{"type":"result","subtype":"success","is_error":true,'
+            '"result":"You\'ve hit your limit · resets 4pm (Asia/Seoul)",'
+            '"session_id":"2a9db095-991e-4e26-a749-2243c802bb52"}'
+        )
+
+        with patch.object(client, "_run_command", AsyncMock(return_value=(payload, "", 1))):
+            response = await client.chat("Hello")
+
+        assert response.error == ChatError.USAGE_LIMIT
+        assert response.text == "You've hit your limit · resets 4pm (Asia/Seoul)"
+        assert response.session_id == "2a9db095-991e-4e26-a749-2243c802bb52"
+
+    @pytest.mark.asyncio
+    async def test_chat_nonzero_json_error_uses_result_text(self, client):
+        """Claude JSON 에러 payload의 result를 사용자 메시지로 사용한다."""
+        payload = (
+            '{"type":"result","subtype":"success","is_error":true,'
+            '"result":"Permission denied by policy","session_id":"sess-123"}'
+        )
+
+        with patch.object(client, "_run_command", AsyncMock(return_value=(payload, "", 1))):
+            response = await client.chat("Hello")
+
+        assert response.error == ChatError.CLI_ERROR
+        assert response.text == "Permission denied by policy"
+        assert response.session_id == "sess-123"
 
     @pytest.mark.asyncio
     async def test_chat_json_parse_success(self, client):

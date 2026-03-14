@@ -124,9 +124,12 @@ class ClaudeClient(BaseCLIClient):
                     logger.warning(f"session not found: {error[:100]}")
                     return ChatResponse("", ChatError.SESSION_NOT_FOUND, None)
 
-                # combine error messages (merge if both present)
-                error_detail = error or output or "(no error content)"
-                return ChatResponse(error_detail, ChatError.CLI_ERROR, None)
+                parsed_error = self._parse_structured_error(output, error, session_id=session_id)
+                if parsed_error is not None:
+                    return parsed_error
+
+                error_detail = error or self._summarize_cli_output(output)
+                return ChatResponse(error_detail, ChatError.CLI_ERROR, session_id)
 
             # JSON parsing
             logger.trace("JSON parse attempt")
@@ -135,6 +138,19 @@ class ClaudeClient(BaseCLIClient):
                 data = json.loads(output)
                 result = data.get("result", "")
                 new_session_id = data.get("session_id")
+
+                if data.get("is_error"):
+                    logger.warning(
+                        f"Claude CLI returned JSON error payload - session_id={new_session_id or session_id or 'None'}"
+                    )
+                    parsed_error = self._parse_structured_error(
+                        output,
+                        "",
+                        session_id=new_session_id or session_id,
+                    )
+                    if parsed_error is not None:
+                        return parsed_error
+                    return ChatResponse(result or "Claude CLI error", ChatError.CLI_ERROR, new_session_id or session_id)
 
                 logger.trace(f"parse success - session_id={new_session_id}")
                 logger.debug(f"[PARSED] result type={type(result)}, length={len(result) if result else 0}")
@@ -166,6 +182,69 @@ class ClaudeClient(BaseCLIClient):
         except Exception as e:
             logger.exception(f"Claude CLI error: {e}")
             return ChatResponse("", ChatError.CLI_ERROR, None)
+
+    @classmethod
+    def _parse_structured_error(
+        cls,
+        output: str,
+        error: str,
+        *,
+        session_id: Optional[str],
+    ) -> Optional[ChatResponse]:
+        """Convert one Claude JSON/text failure into a structured ChatResponse."""
+        payload = cls._parse_result_payload(output)
+        if not payload:
+            return None
+
+        detail = str(payload.get("result") or error or "Claude CLI error").strip()
+        payload_session_id = payload.get("session_id")
+        effective_session_id = payload_session_id or session_id
+
+        if detail and cls._is_usage_limit_message(detail):
+            return ChatResponse(detail, ChatError.USAGE_LIMIT, effective_session_id)
+
+        if detail:
+            return ChatResponse(detail, ChatError.CLI_ERROR, effective_session_id)
+        return None
+
+    @staticmethod
+    def _parse_result_payload(output: str) -> Optional[dict]:
+        """Parse Claude JSON output when it follows the result payload schema."""
+        if not output:
+            return None
+
+        try:
+            payload = json.loads(output)
+        except json.JSONDecodeError:
+            return None
+
+        return payload if isinstance(payload, dict) else None
+
+    @classmethod
+    def _is_usage_limit_message(cls, message: str) -> bool:
+        """Detect provider limit/quota failures from one Claude result string."""
+        normalized = cls._strip_ansi(message).lower()
+        return any(
+            token in normalized
+            for token in (
+                "hit your limit",
+                "usage limit",
+                "rate limit",
+                "quota",
+                "credit balance",
+            )
+        )
+
+    @staticmethod
+    def _summarize_cli_output(output: str) -> str:
+        """Return one non-JSON fallback message for a Claude CLI failure."""
+        if not output:
+            return "Claude CLI error"
+
+        stripped = output.strip()
+        if stripped.startswith("{") and stripped.endswith("}"):
+            return "Claude CLI error"
+        return stripped
 
     async def get_usage_snapshot(self) -> Optional[dict[str, str]]:
         """Return the current Claude Code subscription usage snapshot."""
