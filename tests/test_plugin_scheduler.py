@@ -115,11 +115,13 @@ class TestTodoPluginScheduledActions:
 
     @pytest.mark.asyncio
     async def test_yesterday_report_no_todos(self, todo_plugin):
-        """어제 리포트 - 할일 없음 → 빈 문자열."""
+        """어제 리포트 - 할일 없어도 안내 메시지 반환."""
         todo_plugin._storage.list_by_date.return_value = []
 
         result = await todo_plugin.execute_scheduled_action("yesterday_report", 12345)
-        assert result == ""
+        assert result != ""
+        assert "Yesterday" in result
+        assert "No todos" in result
 
     @pytest.mark.asyncio
     async def test_invalid_action_raises(self, todo_plugin):

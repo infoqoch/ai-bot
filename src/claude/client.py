@@ -52,9 +52,9 @@ class ClaudeClient:
         logger.trace(f"_load_system_prompt() - path={path}")
         if path and path.exists():
             content = path.read_text(encoding="utf-8")
-            logger.trace(f"시스템 프롬프트 로드됨 - length={len(content)}")
+            logger.trace(f"system prompt loaded - length={len(content)}")
             return content
-        logger.trace("시스템 프롬프트 없음")
+        logger.trace("system prompt none")
         return None
 
     @classmethod
@@ -99,10 +99,10 @@ class ClaudeClient:
         """
         cmd_preview = " ".join(cmd[:5]) + f" ... ({len(cmd)} parts)"
         logger.trace(f"_run_command() - cmd={cmd_preview}")
-        logger.trace(f"timeout={timeout}초" if timeout else "timeout=None (무제한)")
-        logger.trace(f"cwd={cwd or '(현재 디렉토리)'}")
+        logger.trace(f"timeout={timeout}s" if timeout else "timeout=None (unlimited)")
+        logger.trace(f"cwd={cwd or '(current directory)'}")
 
-        logger.trace("subprocess 생성 중")
+        logger.trace("creating subprocess")
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -110,9 +110,9 @@ class ClaudeClient:
             cwd=cwd,
             start_new_session=True,
         )
-        logger.trace(f"subprocess 생성됨 - pid={process.pid}")
+        logger.trace(f"subprocess created - pid={process.pid}")
 
-        logger.trace("프로세스 실행 대기 중")
+        logger.trace("waiting for process")
         try:
             if timeout:
                 stdout, stderr = await asyncio.wait_for(
@@ -120,7 +120,7 @@ class ClaudeClient:
                     timeout=timeout,
                 )
             else:
-                # 타임아웃 없이 무제한 대기
+                # wait indefinitely without timeout
                 stdout, stderr = await process.communicate()
         except asyncio.CancelledError:
             self._kill_process_tree(process)
@@ -135,12 +135,12 @@ class ClaudeClient:
         stdout_str = stdout.decode("utf-8").strip()
         stderr_str = stderr.decode("utf-8").strip()
 
-        logger.trace(f"프로세스 완료 - returncode={process.returncode}")
+        logger.trace(f"process complete - returncode={process.returncode}")
         logger.trace(f"stdout length={len(stdout_str)}")
         logger.trace(f"stderr length={len(stderr_str)}")
 
         if stderr_str:
-            logger.trace(f"stderr 내용: {stderr_str[:200]}")
+            logger.trace(f"stderr content: {stderr_str[:200]}")
 
         return (stdout_str, stderr_str, process.returncode)
 
@@ -150,17 +150,17 @@ class ClaudeClient:
         Args:
             workspace_path: Workspace directory path (for workspace sessions)
         """
-        logger.trace(f"create_session() 시작 - workspace_path={workspace_path or '(없음)'}")
-        logger.info("새 Claude 세션 생성 중")
+        logger.trace(f"create_session() start - workspace_path={workspace_path or 'none'}")
+        logger.info("creating new Claude session")
 
         response = await self.chat("answer 'hi'", None, workspace_path=workspace_path)
 
         if response.error:
-            logger.error(f"세션 생성 실패: {response.error.value}")
+            logger.error(f"session creation failed: {response.error.value}")
             return None
 
-        logger.info(f"새 세션 생성됨: {response.session_id}")
-        logger.trace(f"응답: {response.text[:100] if response.text else '(없음)'}")
+        logger.info(f"new session created: {response.session_id}")
+        logger.trace(f"response: {response.text[:100] if response.text else 'none'}")
         return response.session_id
 
     async def chat(
@@ -183,67 +183,67 @@ class ClaudeClient:
             ChatResponse with text, error, and session_id
         """
         short_msg = message[:50] + "..." if len(message) > 50 else message
-        logger.trace(f"chat() 시작 - msg='{short_msg}'")
-        logger.trace(f"session_id={session_id[:8] if session_id else 'None'}, model={model}, workspace={workspace_path or '(없음)'}")
+        logger.trace(f"chat() start - msg='{short_msg}'")
+        logger.trace(f"session_id={session_id[:8] if session_id else 'None'}, model={model}, workspace={workspace_path or 'none'}")
 
         normalized_model = get_profile("claude", model).key if model else None
         cmd = self._build_command(message, session_id, normalized_model, workspace_path)
-        logger.trace(f"명령어 생성됨 - {len(cmd)} parts")
+        logger.trace(f"command built - {len(cmd)} parts")
 
         try:
-            logger.trace("CLI 실행 시작")
+            logger.trace("CLI execution start")
             output, error, returncode = await self._run_command(cmd, timeout=self.timeout, cwd=workspace_path)
 
-            logger.trace(f"CLI 결과 - returncode={returncode}")
+            logger.trace(f"CLI result - returncode={returncode}")
 
             if returncode != 0:
-                # 에러 상세 로깅 - stdout, stderr 둘 다 출력
-                logger.error(f"Claude CLI 비정상 종료 - returncode={returncode}")
-                logger.error(f"  stderr: {error if error else '(비어있음)'}")
-                logger.error(f"  stdout: {output[:500] if output else '(비어있음)'}")
+                # detailed error logging - both stdout and stderr
+                logger.error(f"Claude CLI abnormal exit - returncode={returncode}")
+                logger.error(f"  stderr: {error if error else '(empty)'}")
+                logger.error(f"  stdout: {output[:500] if output else '(empty)'}")
                 logger.error(f"  session_id: {session_id[:8] if session_id else 'None'}")
                 logger.error(f"  message: {short_msg}")
 
-                # 실행한 명령어 (메시지 내용 제외)
-                cmd_preview = " ".join(cmd[:-1])  # 마지막 인자(메시지) 제외
+                # command used (excluding message content)
+                cmd_preview = " ".join(cmd[:-1])  # exclude last arg (message)
                 logger.debug(f"  command: {cmd_preview} <message>")
 
                 if error and ("not found" in error.lower() or "no conversation found" in error.lower() or "invalid" in error.lower()):
-                    logger.warning(f"세션을 찾을 수 없음: {error[:100]}")
+                    logger.warning(f"session not found: {error[:100]}")
                     return ChatResponse("", ChatError.SESSION_NOT_FOUND, None)
 
-                # 에러 메시지 결합 (둘 다 있으면 합침)
-                error_detail = error or output or "(오류 내용 없음)"
+                # combine error messages (merge if both present)
+                error_detail = error or output or "(no error content)"
                 return ChatResponse(error_detail, ChatError.CLI_ERROR, None)
 
-            # JSON 파싱
-            logger.trace("JSON 파싱 시도")
+            # JSON parsing
+            logger.trace("JSON parse attempt")
             logger.debug(f"[RAW OUTPUT] length={len(output)}, preview={repr(output[:300]) if output else 'EMPTY'}")
             try:
                 data = json.loads(output)
                 result = data.get("result", "")
                 new_session_id = data.get("session_id")
 
-                logger.trace(f"파싱 성공 - session_id={new_session_id}")
+                logger.trace(f"parse success - session_id={new_session_id}")
                 logger.debug(f"[PARSED] result type={type(result)}, length={len(result) if result else 0}")
                 logger.debug(f"[PARSED] result preview={repr(result[:200]) if result else 'EMPTY/NONE'}")
                 logger.debug(f"[PARSED] all keys={list(data.keys())}")
 
-                # 빈 result 감지 - 원인 추적
+                # detect empty result - trace cause
                 if not result or not result.strip():
                     logger.warning(f"[EMPTY RESULT] Claude returned empty result!")
                     logger.warning(f"  raw data keys: {list(data.keys())}")
                     logger.warning(f"  raw data: {json.dumps(data, ensure_ascii=False)[:500]}")
 
-                logger.info(f"Claude 응답 - session_id={new_session_id}")
+                logger.info(f"Claude response - session_id={new_session_id}")
 
                 return ChatResponse(result, None, new_session_id)
 
             except json.JSONDecodeError as e:
-                # JSON 파싱 실패 시 원본 반환
-                logger.warning(f"JSON 파싱 실패: {e}")
-                logger.warning(f"[JSON ERROR] 원본 output: {repr(output[:500]) if output else 'EMPTY'}")
-                return ChatResponse(output or "(응답 없음)", None, None)
+                # return raw output on JSON parse failure
+                logger.warning(f"JSON parse failed: {e}")
+                logger.warning(f"[JSON ERROR] raw output: {repr(output[:500]) if output else 'EMPTY'}")
+                return ChatResponse(output or "(no response)", None, None)
 
         except asyncio.TimeoutError:
             logger.warning(
@@ -252,7 +252,7 @@ class ClaudeClient:
             )
             return ChatResponse("", ChatError.TIMEOUT, session_id)
         except Exception as e:
-            logger.exception(f"Claude CLI 오류: {e}")
+            logger.exception(f"Claude CLI error: {e}")
             return ChatResponse("", ChatError.CLI_ERROR, None)
 
     async def get_usage_snapshot(self) -> Optional[dict[str, str]]:
@@ -609,35 +609,35 @@ req.end();
         workspace_path: Optional[str] = None,
     ) -> list[str]:
         """Build Claude CLI command."""
-        logger.trace(f"_build_command() - session={session_id[:8] if session_id else 'None'}, model={model}, workspace={workspace_path or '(없음)'}")
+        logger.trace(f"_build_command() - session={session_id[:8] if session_id else 'None'}, model={model}, workspace={workspace_path or 'none'}")
 
         cmd = list(self.command_parts)
 
-        # 모델 지정
+        # model selection
         if model:
             cmd.extend(["--model", model])
-            logger.trace(f"--model {model} 옵션 추가됨")
+            logger.trace(f"--model {model} option added")
 
-        # 세션이 있으면 resume 사용 (유효한 UUID만)
+        # use resume if session exists (valid UUID only)
         if session_id and _UUID_RE.match(session_id):
             cmd.extend(["--resume", session_id])
-            logger.trace("--resume 옵션 추가됨")
+            logger.trace("--resume option added")
         elif session_id:
             logger.warning(f"Invalid UUID for --resume, starting new session: {session_id[:16]}")
 
-        # JSON 출력 (session_id 파싱용)
+        # JSON output (for session_id parsing)
         cmd.extend(["--print", "--output-format", "json"])
-        logger.trace("JSON 출력 옵션 추가됨")
+        logger.trace("JSON output option added")
 
-        # 도구 권한 자동 승인 (WebSearch 등 스케줄러에서 필요)
+        # auto-approve tool permissions (needed by scheduler for WebSearch etc.)
         cmd.append("--dangerously-skip-permissions")
-        logger.trace("--dangerously-skip-permissions 옵션 추가됨")
+        logger.trace("--dangerously-skip-permissions option added")
 
         if self.system_prompt:
             cmd.extend(["--system-prompt", self.system_prompt])
-            logger.trace("시스템 프롬프트 옵션 추가됨")
+            logger.trace("system prompt option added")
 
-        # 워크스페이스 세션: 텔레그램 응답 포맷 추가 (워크스페이스 CLAUDE.md + 텔레그램 포맷)
+        # workspace session: append telegram response format (workspace CLAUDE.md + telegram format)
         if workspace_path:
             telegram_format_prompt = (
                 "응답 포맷 규칙: "
@@ -647,10 +647,10 @@ req.end();
                 "4) 한국어로 응답"
             )
             cmd.extend(["--append-system-prompt", telegram_format_prompt])
-            logger.trace("워크스페이스 세션 - 텔레그램 포맷 프롬프트 추가됨")
+            logger.trace("workspace session - telegram format prompt added")
 
         cmd.append(message)
-        logger.trace(f"최종 명령어 길이: {len(cmd)} parts")
+        logger.trace(f"final command length: {len(cmd)} parts")
 
         return cmd
 
@@ -659,11 +659,11 @@ req.end();
         logger.trace(f"summarize() - questions={len(questions)}, max={max_questions}")
 
         if not questions:
-            logger.trace("질문 없음")
-            return "(내용 없음)"
+            logger.trace("no questions")
+            return "(no content)"
 
         history_text = "\n".join(f"- {q[:100]}" for q in questions[:max_questions])
-        logger.trace(f"히스토리 텍스트 생성됨 - length={len(history_text)}")
+        logger.trace(f"history text built - length={len(history_text)}")
 
         prompt = f"""다음 질문들을 보고 이 대화 세션을 2-3문장으로 요약해주세요.
 - 무엇을 하려고 했는지
@@ -679,16 +679,16 @@ req.end();
             "-p", prompt,
         ]
 
-        logger.trace("요약 명령어 실행")
+        logger.trace("running summarize command")
 
         try:
             output, _, _ = await self._run_command(cmd, timeout=60)
-            result = output[:300] if output else "(요약 실패)"
-            logger.trace(f"요약 완료 - length={len(result)}")
+            result = output[:300] if output else "(summarize failed)"
+            logger.trace(f"summarize complete - length={len(result)}")
             return result
 
         except Exception as e:
-            logger.warning(f"요약 실패: {e}")
+            logger.warning(f"summarize failed: {e}")
             first_q = questions[0][:50]
             return f'"{first_q}..."'
 
@@ -702,9 +702,9 @@ req.end();
             ChatResponse with compact result
         """
         logger.trace(f"compact() - session_id={session_id[:8]}")
-        logger.info(f"세션 compact 시작: {session_id[:8]}")
+        logger.info(f"session compact start: {session_id[:8]}")
 
-        # Claude CLI compact 명령어: claude --resume <session_id> /compact
+        # Claude CLI compact command: claude --resume <session_id> /compact
         cmd = list(self.command_parts) + [
             "--resume", session_id,
             "--print",
@@ -716,23 +716,23 @@ req.end();
             output, error, returncode = await self._run_command(cmd, timeout=120)
 
             if returncode != 0:
-                logger.error(f"Compact 실패 - returncode={returncode}, error={error}")
-                return ChatResponse(error or "(compact 실패)", ChatError.CLI_ERROR, session_id)
+                logger.error(f"Compact failed - returncode={returncode}, error={error}")
+                return ChatResponse(error or "(compact failed)", ChatError.CLI_ERROR, session_id)
 
-            # JSON 파싱 시도
+            # JSON parse attempt
             try:
                 data = json.loads(output)
-                result = data.get("result", "(응답 없음)")
-                logger.info(f"Compact 완료: {session_id[:8]}")
+                result = data.get("result", "(no response)")
+                logger.info(f"Compact complete: {session_id[:8]}")
                 return ChatResponse(result, None, session_id)
             except json.JSONDecodeError:
-                # JSON 파싱 실패 시 원본 반환
-                logger.info(f"Compact 완료 (raw): {session_id[:8]}")
-                return ChatResponse(output or "(compact 완료)", None, session_id)
+                # return raw output on JSON parse failure
+                logger.info(f"Compact complete (raw): {session_id[:8]}")
+                return ChatResponse(output or "(compact complete)", None, session_id)
 
         except asyncio.TimeoutError:
-            logger.error(f"Compact 타임아웃: {session_id[:8]}")
+            logger.error(f"Compact timeout: {session_id[:8]}")
             return ChatResponse("", ChatError.TIMEOUT, session_id)
         except Exception as e:
-            logger.exception(f"Compact 오류: {e}")
+            logger.exception(f"Compact error: {e}")
             return ChatResponse(str(e), ChatError.CLI_ERROR, session_id)

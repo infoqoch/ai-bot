@@ -161,11 +161,7 @@ class CodexClient:
         common.append(message)
 
         logger.debug(
-            "Codex command built: resume=%s model=%s effort=%s cwd=%s",
-            bool(session_id),
-            profile.provider_model,
-            profile.reasoning_effort,
-            workspace_path or "(default)",
+            f"Codex command built: resume={bool(session_id)} model={profile.provider_model} effort={profile.reasoning_effort} cwd={workspace_path or '(default)'}"
         )
         return common
 

@@ -264,4 +264,4 @@ class DetachedJobManager:
                 parse_mode="HTML",
             )
         except Exception as exc:
-            logger.error(f"유실 알림 전송 실패 (id={job['id']}): {exc}")
+            logger.error(f"Failed to send loss notification (id={job['id']}): {exc}")

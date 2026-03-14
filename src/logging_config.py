@@ -202,7 +202,7 @@ def setup_logging(
             else:
                 lib_logger.setLevel(logging.WARNING)
 
-    logger.info(f"로깅 초기화 완료 - level={level}, file={log_file or 'None'}")
+    logger.info(f"Logging initialized - level={level}, file={log_file or 'None'}")
 
 
 # Re-export logger for convenience
