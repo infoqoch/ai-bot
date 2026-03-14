@@ -609,12 +609,16 @@ class TestSchedulerCallbackMultiStep:
         callbacks2 = get_callback_data(q2)
         assert any("chtime_min" in c for c in callbacks2)
 
-        # Step 3: minute (apply)
+        # Step 3: minute → trigger type selection
         q3 = make_query()
-        with patch("src.scheduler_manager.scheduler_manager") as mock_sm:
-            mock_sm.get_system_jobs_text.return_value = ""
-            await handlers._handle_scheduler_callback(q3, 12345, "sched:chtime_min:sched-001:14:30")
-        handlers._schedule_manager.update_time.assert_called_once_with("sched-001", 14, 30)
+        await handlers._handle_scheduler_callback(q3, 12345, "sched:chtime_min:sched-001:14:30")
+        callbacks3 = get_callback_data(q3)
+        assert any("chtime_trigger" in c for c in callbacks3)
+
+        # Step 4: trigger type → apply
+        q4 = make_query()
+        await handlers._handle_scheduler_callback(q4, 12345, "sched:chtime_trigger:sched-001:14:30:cron")
+        handlers._schedule_manager.update_time.assert_called_once_with("sched-001", 14, 30, trigger_type="cron")
 
     @pytest.mark.asyncio
     async def test_delete_schedule(self, handlers):

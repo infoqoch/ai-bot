@@ -143,13 +143,13 @@ class ScheduleManagerAdapter:
             self._unregister_schedule(schedule_id)
         return new_state
 
-    def update_time(self, schedule_id: str, hour: int, minute: int) -> bool:
-        """Update the visible time fields while preserving the trigger type."""
+    def update_time(self, schedule_id: str, hour: int, minute: int, *, trigger_type: str | None = None) -> bool:
+        """Update the visible time fields, optionally changing trigger type."""
         current = self._repo.get_schedule(schedule_id)
         if not current:
             return False
 
-        trigger_type = normalize_trigger_type(current.trigger_type)
+        trigger_type = normalize_trigger_type(trigger_type or current.trigger_type)
         cron_expr = build_daily_cron(hour, minute) if trigger_type == "cron" else None
         run_at_local = next_occurrence(hour, minute).isoformat() if trigger_type == "once" else None
 

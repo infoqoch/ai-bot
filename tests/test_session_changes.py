@@ -201,8 +201,37 @@ class TestScheduleTimeChange:
         assert "08:00" in text
 
     @pytest.mark.asyncio
-    async def test_chtime_min_callback_applies_change(self):
-        """sched:chtime_min: 콜백이 시간 변경 적용."""
+    async def test_chtime_min_callback_shows_trigger_selection(self):
+        """sched:chtime_min: 콜백이 트리거 타입 선택 화면을 보여준다."""
+        from src.bot.handlers import BotHandlers
+
+        handlers = BotHandlers(
+            session_service=MagicMock(),
+            claude_client=MagicMock(),
+            auth_manager=MagicMock(),
+            require_auth=False,
+            allowed_chat_ids=[],
+        )
+        handlers._schedule_manager = MagicMock()
+        mock_schedule = MagicMock()
+        mock_schedule.trigger_type = "cron"
+        mock_schedule.run_at_local = None
+        handlers._schedule_manager.get.return_value = mock_schedule
+
+        query = MagicMock()
+        query.answer = AsyncMock()
+        query.edit_message_text = AsyncMock()
+
+        await handlers._handle_scheduler_callback(query, 12345, "sched:chtime_min:abc123:14:30")
+
+        text = query.edit_message_text.call_args[0][0]
+        assert "14:30" in text
+        assert "Daily" in text
+        handlers._schedule_manager.update_time.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_chtime_trigger_callback_applies_change(self):
+        """sched:chtime_trigger: 콜백이 시간+트리거 변경 적용."""
         from src.bot.handlers import BotHandlers
 
         handlers = BotHandlers(
@@ -214,20 +243,31 @@ class TestScheduleTimeChange:
         )
         handlers._schedule_manager = MagicMock()
         handlers._schedule_manager.update_time.return_value = True
-        handlers._schedule_manager.get_status_text.return_value = "스케줄 목록"
+        mock_schedule = MagicMock()
+        mock_schedule.name = "테스트"
+        mock_schedule.time_str = "14:30"
+        mock_schedule.type_emoji = "💬"
+        mock_schedule.enabled = True
+        mock_schedule.trigger_type = "once"
+        mock_schedule.run_at_local = "2026-03-14T14:30:00+09:00"
+        mock_schedule.cron_expr = None
+        mock_schedule.next_run_text = "14:30"
+        mock_schedule.schedule_type = "chat"
+        mock_schedule.ai_provider = "claude"
+        mock_schedule.model = "sonnet"
+        mock_schedule.message = "test"
+        mock_schedule.run_count = 0
+        mock_schedule.workspace_path = None
+        handlers._schedule_manager.get.return_value = mock_schedule
 
         query = MagicMock()
         query.answer = AsyncMock()
         query.edit_message_text = AsyncMock()
 
-        with patch("src.scheduler_manager.scheduler_manager") as mock_sm:
-            mock_sm.get_system_jobs_text.return_value = ""
-            await handlers._handle_scheduler_callback(query, 12345, "sched:chtime_min:abc123:14:30")
+        await handlers._handle_scheduler_callback(query, 12345, "sched:chtime_trigger:abc123:14:30:once")
 
-        handlers._schedule_manager.update_time.assert_called_once_with("abc123", 14, 30)
+        handlers._schedule_manager.update_time.assert_called_once_with("abc123", 14, 30, trigger_type="once")
         assert query.answer.called
-        answer_text = query.answer.call_args[0][0]
-        assert "14:30" in answer_text
 
 
 # =============================================================================
@@ -589,17 +629,21 @@ class TestSchedulerInteractionFlow:
         min_callbacks = [c for c in callbacks2 if "chtime_min:" in c]
         assert len(min_callbacks) == 12  # 00,05,10,...,55
 
-        # Step 3: minute 30 선택 → apply
+        # Step 3: minute 30 선택 → trigger type selection
         q3 = self._make_query()
-        with patch("src.scheduler_manager.scheduler_manager") as mock_sm:
-            mock_sm.get_system_jobs_text.return_value = ""
-            await handlers._handle_scheduler_callback(q3, 12345, "sched:chtime_min:abc123:14:30")
+        await handlers._handle_scheduler_callback(q3, 12345, "sched:chtime_min:abc123:14:30")
 
-        handlers._schedule_manager.update_time.assert_called_once_with("abc123", 14, 30)
-        # answer에 새 시간 포함
-        q3.answer.assert_called()
-        answer_text = q3.answer.call_args[0][0]
-        assert "14:30" in answer_text
+        text3 = self._get_text(q3)
+        assert "14:30" in text3
+        callbacks3 = self._get_callback_data(q3)
+        trigger_callbacks = [c for c in callbacks3 if "chtime_trigger:" in c]
+        assert len(trigger_callbacks) == 2  # daily, once
+
+        # Step 4: trigger 선택 → apply
+        q4 = self._make_query()
+        await handlers._handle_scheduler_callback(q4, 12345, "sched:chtime_trigger:abc123:14:30:cron")
+
+        handlers._schedule_manager.update_time.assert_called_once_with("abc123", 14, 30, trigger_type="cron")
 
     # --- Flow 3: 상세 → 삭제 ---
 

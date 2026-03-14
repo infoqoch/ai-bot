@@ -224,16 +224,35 @@ class SchedulerCallbackHandlers(BaseHandler):
 
         if action.startswith("chtime_min:"):
             schedule_id, hour, minute = action[11:].split(":")
-            result = self._schedule_manager.update_time(schedule_id, int(hour), int(minute))
-            if result:
-                await query.answer(f"Changed to {int(hour):02d}:{int(minute):02d}")
-            else:
-                await query.answer("Update failed")
+            schedule = self._schedule_manager.get(schedule_id)
+            current_trigger = normalize_trigger_type(schedule.trigger_type) if schedule else "cron"
+            current_label = "Daily" if current_trigger == "cron" else "One-time"
             await query.edit_message_text(
-                self._build_scheduler_screen_text(user_id),
-                reply_markup=InlineKeyboardMarkup(self._build_scheduler_keyboard(user_id)),
+                f"<b>Change Time</b>\n\n"
+                f"New time: <b>{int(hour):02d}:{int(minute):02d}</b>\n"
+                f"Current mode: <b>{current_label}</b>\n\n"
+                f"Choose schedule mode:",
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("Daily", callback_data=f"sched:chtime_trigger:{schedule_id}:{hour}:{minute}:cron"),
+                        InlineKeyboardButton("One-time", callback_data=f"sched:chtime_trigger:{schedule_id}:{hour}:{minute}:once"),
+                    ],
+                    [InlineKeyboardButton(BUTTON_CANCEL, callback_data=f"sched:detail:{schedule_id}")],
+                ]),
                 parse_mode="HTML",
             )
+            await query.answer()
+            return
+
+        if action.startswith("chtime_trigger:"):
+            schedule_id, hour, minute, trigger = action[15:].split(":")
+            result = self._schedule_manager.update_time(schedule_id, int(hour), int(minute), trigger_type=trigger)
+            if result:
+                trigger_label = "Daily" if trigger == "cron" else "One-time"
+                await query.answer(f"{int(hour):02d}:{int(minute):02d} ({trigger_label})")
+            else:
+                await query.answer("Update failed")
+            await self._handle_scheduler_callback(query, chat_id, f"sched:detail:{schedule_id}")
             return
 
         if action in ("add:ai", "add:claude", "add:chat"):
