@@ -402,18 +402,19 @@ class TestDiaryPlugin:
 
     @pytest.mark.asyncio
     async def test_scheduled_action_no_entry(self):
-        """daily_diary 스케줄 - 오늘 일기 없음 → 작성 유도 메시지 반환."""
+        """daily_diary 스케줄 - 오늘 일기 없음 → 쓰기 버튼 포함 dict 반환."""
         plugin, mock_store = _make_plugin()
         mock_store.get_by_date.return_value = None
 
         result = await plugin.execute_scheduled_action("daily_diary", 1)
 
-        assert result != ""
-        assert "일기" in result
+        assert isinstance(result, dict)
+        assert "일기" in result["text"]
+        assert result["reply_markup"] is not None
 
     @pytest.mark.asyncio
     async def test_scheduled_action_already_written(self):
-        """daily_diary 스케줄 - 오늘 일기 이미 있음 → 완료 메시지 반환."""
+        """daily_diary 스케줄 - 오늘 일기 이미 있음 → 수정/보기 버튼 포함 dict 반환."""
         plugin, mock_store = _make_plugin()
         today = date.today().isoformat()
         existing = Diary(
@@ -424,8 +425,9 @@ class TestDiaryPlugin:
 
         result = await plugin.execute_scheduled_action("daily_diary", 1)
 
-        assert result != ""
-        assert "이미 작성" in result
+        assert isinstance(result, dict)
+        assert "이미 작성" in result["text"]
+        assert result["reply_markup"] is not None
 
     # ---- handle_callback: write_yesterday ------------------------------------
 

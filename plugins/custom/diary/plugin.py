@@ -151,13 +151,46 @@ END;
             ScheduledAction(name="daily_diary", description="📓 오늘의 일기 작성 알림"),
         ]
 
-    async def execute_scheduled_action(self, action_name: str, chat_id: int) -> str:
+    async def execute_scheduled_action(self, action_name: str, chat_id: int) -> str | dict:
         if action_name == "daily_diary":
-            today = app_today().isoformat()
-            existing = self.store.get_by_date(chat_id, today)
+            today = app_today()
+            date = today.isoformat()
+            existing = self.store.get_by_date(chat_id, date)
+
             if existing:
-                return "📓 오늘의 일기는 이미 작성되었습니다."
-            return "📓 오늘 하루는 어땠나요? 일기를 작성해보세요.\n/diary 또는 <code>일기 쓰기</code>로 시작하세요."
+                buttons = [
+                    [
+                        InlineKeyboardButton("✏️ 수정", callback_data=f"diary:edit:{existing.id}"),
+                        InlineKeyboardButton("👁 보기", callback_data=f"diary:view:{existing.id}"),
+                    ],
+                    [InlineKeyboardButton("📄 목록", callback_data="diary:list")],
+                ]
+                return {
+                    "text": (
+                        f"🔔 <i>오늘의 일기 작성 알림</i>\n\n"
+                        f"📓 오늘의 일기는 이미 작성되었습니다.\n\n"
+                        f"<b>{_format_date_display(date)}</b>\n"
+                        f"{escape_html(existing.content[:100])}{'...' if len(existing.content) > 100 else ''}"
+                    ),
+                    "reply_markup": InlineKeyboardMarkup(buttons),
+                }
+
+            buttons = [
+                [
+                    InlineKeyboardButton("📝 쓰기", callback_data="diary:write"),
+                    InlineKeyboardButton("⏪ 어제 쓰기", callback_data="diary:write_yesterday"),
+                ],
+                [InlineKeyboardButton("📄 목록", callback_data="diary:list")],
+            ]
+            return {
+                "text": (
+                    f"🔔 <i>오늘의 일기 작성 알림</i>\n\n"
+                    f"📓 <b>일기 쓰기</b>\n\n"
+                    f"{_format_date_display(date)}\n\n"
+                    f"오늘 하루를 기록해보세요."
+                ),
+                "reply_markup": InlineKeyboardMarkup(buttons),
+            }
         raise NotImplementedError(f"Action '{action_name}' not implemented")
 
     def handle_interaction(

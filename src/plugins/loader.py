@@ -123,8 +123,8 @@ class Plugin(ABC):
         """스케줄 가능한 액션 목록. 오버라이드하여 사용."""
         return []
 
-    async def execute_scheduled_action(self, action_name: str, chat_id: int) -> str:
-        """스케줄된 액션 실행. 결과 텍스트(HTML) 반환."""
+    async def execute_scheduled_action(self, action_name: str, chat_id: int) -> str | dict:
+        """스케줄된 액션 실행. str(HTML) 또는 dict(text, reply_markup) 반환."""
         raise NotImplementedError(f"Action '{action_name}' not implemented")
 
     def register_system_jobs(self, context: PluginSystemJobContext) -> None:

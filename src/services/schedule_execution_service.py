@@ -44,6 +44,12 @@ class ScheduleExecutionService:
             provider_session_id = result[1] if isinstance(result, tuple) else None
             is_ai = isinstance(result, tuple)
 
+            # Plugin rich responses are already sent directly
+            if response == "__plugin_rich_sent__":
+                self._schedule_manager.update_run(schedule.id)
+                logger.info(f"Schedule {schedule.id} executed successfully (plugin rich response)")
+                return
+
             if self._bot and schedule.chat_id and not response:
                 logger.warning(
                     f"Schedule {schedule.id} ({schedule.name}) returned empty response, sending fallback"
@@ -95,7 +101,12 @@ class ScheduleExecutionService:
             plugin = self._plugin_loader.get_plugin_by_name(schedule.plugin_name)
             if not plugin:
                 raise RuntimeError(f"Plugin '{schedule.plugin_name}' not found")
-            return await plugin.execute_scheduled_action(schedule.action_name, schedule.chat_id)
+            result = await plugin.execute_scheduled_action(schedule.action_name, schedule.chat_id)
+            if isinstance(result, dict):
+                # Plugin returned rich response (text + reply_markup)
+                await self._send_plugin_rich_response(schedule.chat_id, schedule.name, result)
+                return "__plugin_rich_sent__"
+            return result
 
         workspace_path = schedule.workspace_path if schedule_type == "workspace" and schedule.workspace_path else None
         provider = resolve_provider(schedule)
@@ -138,6 +149,31 @@ class ScheduleExecutionService:
                     text=f"{header_plain}{chunk}",
                     reply_markup=chunk_markup,
                 )
+
+    async def _send_plugin_rich_response(
+        self,
+        chat_id: int,
+        schedule_name: str,
+        result: dict,
+    ) -> None:
+        """Send a plugin rich response (text + reply_markup) with schedule header."""
+        header = f"📅 <b>{escape_html(schedule_name)}</b>\n\n"
+        text = result.get("text", "")
+        reply_markup = result.get("reply_markup")
+
+        try:
+            await self._bot.send_message(
+                chat_id=chat_id,
+                text=f"{header}{text}",
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
+        except Exception:
+            await self._bot.send_message(
+                chat_id=chat_id,
+                text=f"📅 {schedule_name}\n\n{text}",
+                reply_markup=reply_markup,
+            )
 
     @staticmethod
     def _build_session_button(log_id: int) -> InlineKeyboardMarkup:
