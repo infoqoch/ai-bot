@@ -93,9 +93,6 @@ class DiaryStore(Protocol):
     def delete(self, diary_id: int) -> bool:
         """Delete one diary entry."""
 
-    def list_by_chat(self, chat_id: int, limit: int = 10, offset: int = 0) -> list[Diary]:
-        """List diary entries for one chat, ordered by date descending."""
-
     def count_by_chat(self, chat_id: int) -> int:
         """Return total diary count for one chat."""
 

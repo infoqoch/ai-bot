@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from src.bot.formatters import split_message
+from src.bot.formatters import escape_html, split_message
 from src.logging_config import logger
 
 if TYPE_CHECKING:
@@ -41,6 +41,7 @@ class DeliveryRetryService:
                 continue
 
             try:
+                # Increment before send: counts attempt even if send fails (reset to 'failed' on error)
                 self._repo.increment_delivery_attempts(job_id)
                 chunks = split_message(delivery_text)
 
@@ -51,8 +52,8 @@ class DeliveryRetryService:
                             text=chunk,
                             parse_mode="HTML",
                         )
-                    except Exception:
-                        # HTML failed, try plain text
+                    except Exception as html_err:
+                        logger.debug(f"[DeliveryRetry] HTML send failed, trying plain: {html_err}")
                         await bot.send_message(
                             chat_id=chat_id,
                             text=chunk,
@@ -73,7 +74,9 @@ class DeliveryRetryService:
                     logger.warning(f"[DeliveryRetry] Abandoned job_id={job_id} after {attempts + 1} attempts")
                     # Try to notify user about abandoned message
                     try:
-                        preview = (delivery_text[:100] + "...") if len(delivery_text) > 100 else delivery_text
+                        preview = escape_html(
+                            (delivery_text[:100] + "...") if len(delivery_text) > 100 else delivery_text
+                        )
                         await bot.send_message(
                             chat_id=chat_id,
                             text=f"⚠️ 메시지 전달에 실패했습니다 (시도 {attempts + 1}회).\n\n"

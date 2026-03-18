@@ -1,8 +1,8 @@
-# Telegram CLI AI Bot
+# Telegram Agent Relay
 
-**Claude/Codex CLI를 텔레그램에서. API 키 없이.**
+**로컬 AI coding agent를 텔레그램으로 원격 제어하세요.**
 
-터미널 없이 스마트폰으로 Claude 또는 Codex와 대화하세요.
+Claude Code와 Codex 같은 로컬 AI coding agent를 스마트폰에서 관리합니다. 기존 CLI 로그인/구독을 재사용하고, API를 직접 붙이지 않아도 세션 관리, 빠른 플러그인 작업, 장기 실행 작업 추적까지 이어갈 수 있습니다.
 
 ---
 
@@ -10,11 +10,12 @@
 
 | | |
 |---|---|
-| **API 키 불필요** | Claude CLI / Codex CLI 로그인만 되어 있으면 바로 동작 |
-| **어디서든** | 출퇴근길, 카페, 침대에서 텔레그램으로 코딩 대화 |
-| **멀티 세션** | 프로젝트별 독립 대화, AI/provider별 세션 분리 |
-| **AI 매니저** | 자연어로 세션 관리 - "주식돌이 오푸스로 만들어줘" |
-| **플러그인** | AI 호출 없이 빠른 응답 - 메모, 날씨 등 확장 가능 |
+| **기존 CLI 재사용** | Claude Code / Codex CLI 로그인 상태만 있으면 바로 동작 |
+| **API 직접 연동 부담 감소** | API 키, 별도 과금 흐름, 프록시 레이어 없이 시작 가능 |
+| **원격 제어** | 출퇴근길, 카페, 침대에서 텔레그램으로 로컬 AI agent 세션 관리 |
+| **멀티 세션** | 프로젝트별 독립 대화, agent/provider별 세션 분리 |
+| **장기 작업 대응** | detached worker로 오래 걸리는 코딩 작업도 끝까지 전달 |
+| **플러그인 fast-path** | AI 호출 없이 메모, 날씨 등 즉시 응답 작업 처리 |
 | **보안** | 허용된 ID만 접근 + 선택적 인증 |
 
 ---
@@ -23,7 +24,7 @@
 
 ### 2-Track 응답 시스템
 
-AI 응답은 느립니다(수십 초~수 분). 모든 요청을 CLI agent에 보내면 사용자 경험이 나빠집니다.
+AI coding agent 응답은 느립니다(수십 초~수 분). 모든 요청을 agent에 보내면 사용자 경험이 나빠집니다.
 
 ```
 사용자 메시지
@@ -32,11 +33,11 @@ AI 응답은 느립니다(수십 초~수 분). 모든 요청을 CLI agent에 보
     │       "메모해줘: 장보기"  → 저장 완료
     │       "서울 날씨"        → Open-Meteo API
     │
-    └─▶ [Track 2] Claude/Codex CLI → detached worker 처리 (수십 초)
+    └─▶ [Track 2] AI coding agent (Claude Code / Codex CLI) → detached worker 처리 (수십 초)
             "코드 리뷰해줘"    → bot은 즉시 반환, worker가 끝까지 실행
 ```
 
-플러그인이 처리 가능하면 AI를 호출하지 않아 빠르고, 처리 불가하면 현재 선택된 provider로 넘깁니다.
+플러그인이 처리 가능하면 AI agent를 호출하지 않아 빠르고, 처리 불가하면 현재 선택된 provider로 넘깁니다.
 
 ### 세션별 커스터마이징
 
@@ -95,9 +96,9 @@ AI 응답은 느립니다(수십 초~수 분). 모든 요청을 CLI agent에 보
 ### 1. 사전 준비
 
 - **Python 3.11+**
-- **Claude CLI** 또는 **Codex CLI** 설치 및 로그인
+- **Claude Code** 또는 **Codex CLI** 설치 및 로그인
   ```bash
-  claude --version  # Claude 설치 확인
+  claude --version  # Claude Code 설치 확인
   codex --version   # Codex 설치 확인
   ```
 

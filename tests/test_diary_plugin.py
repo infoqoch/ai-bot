@@ -131,45 +131,6 @@ class TestDiaryRepository:
         assert success is True
         assert store.get(diary.id) is None
 
-    def test_list_by_chat(self):
-        """페이지네이션(offset/limit) 검증."""
-        store, _ = _make_store()
-        base = date.today()
-
-        # 5개 추가 (날짜 내림차순으로 저장됨)
-        for i in range(5):
-            d = (base - timedelta(days=i)).isoformat()
-            store.add(chat_id=1, date=d, content=f"일기 {i}")
-
-        # 처음 3개
-        page1 = store.list_by_chat(chat_id=1, limit=3, offset=0)
-        assert len(page1) == 3
-
-        # 다음 2개
-        page2 = store.list_by_chat(chat_id=1, limit=3, offset=3)
-        assert len(page2) == 2
-
-        # 전체 ID 중복 없음
-        ids_p1 = {d.id for d in page1}
-        ids_p2 = {d.id for d in page2}
-        assert ids_p1.isdisjoint(ids_p2)
-
-    def test_list_by_chat_date_desc_order(self):
-        """목록이 날짜 내림차순으로 반환됨."""
-        store, _ = _make_store()
-        base = date.today()
-
-        dates = []
-        for i in range(3):
-            d = (base - timedelta(days=i)).isoformat()
-            dates.append(d)
-            store.add(chat_id=1, date=d, content=f"일기 {i}")
-
-        entries = store.list_by_chat(chat_id=1, limit=10, offset=0)
-
-        returned_dates = [e.date for e in entries]
-        assert returned_dates == sorted(returned_dates, reverse=True)
-
     def test_count_by_chat(self):
         """chat_id별 일기 수 집계."""
         store, _ = _make_store()
@@ -467,36 +428,6 @@ class TestDiaryPlugin:
         assert "이미 작성" in result
 
     # ---- handle_callback: write_yesterday ------------------------------------
-
-    def test_menu_shows_yesterday_status(self):
-        """메뉴에 어제 상태 표시 및 '⏪ 어제 쓰기' 버튼 확인."""
-        plugin, mock_store = _make_plugin()
-        today = date.today().isoformat()
-        yesterday = (date.today() - timedelta(days=1)).isoformat()
-
-        # today: no entry, yesterday: has entry
-        mock_store.get_by_date.side_effect = lambda cid, d: (
-            None if d == today else (
-                Diary(id=1, chat_id=1, date=yesterday, content="어제 일기",
-                      created_at="2026-03-16T10:00:00", updated_at="2026-03-16T10:00:00")
-                if d == yesterday else None
-            )
-        )
-        mock_store.count_by_chat.return_value = 1
-
-        result = plugin._handle_menu(1)
-
-        text = result["text"]
-        # Today status line
-        assert "📝 오늘 일기 미작성" in text
-        # Yesterday status line
-        assert "✅ 어제 일기 작성됨" in text
-
-        # Check for "⏪ 어제 쓰기" button
-        markup = result["reply_markup"]
-        buttons_flat = [btn for row in markup.inline_keyboard for btn in row]
-        button_texts = [b.text for b in buttons_flat]
-        assert "⏪ 어제 쓰기" in button_texts
 
     def test_callback_write_yesterday_no_existing(self):
         """diary:write_yesterday - 어제 일기 없음 → ForceReply with '어제' labels."""

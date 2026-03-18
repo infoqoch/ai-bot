@@ -227,6 +227,7 @@ src/
     ├── session_service.py     # 세션 생명주기
     ├── job_service.py         # detached provider job 실행 + Telegram 응답
     ├── schedule_execution_service.py  # 스케줄 실행
+    ├── delivery_retry_service.py      # 미전달 메시지 자동 재시도 (60s 주기, 최대 10회)
     └── local_session_discovery.py     # 로컬 CLI 세션 발견/임포트
 ```
 
@@ -345,6 +346,7 @@ supervisor
 | 세션 | 동일 세션 중복 실행 | `session_locks` |
 | 재시작 | self-restart 중 응답 유실 | detached `src.worker_job` |
 | 상태 | 처리 중/대기열 유실 | `message_log`, `queued_messages`, `session_locks` |
+| 전달 실패 | 텔레그램 전송 실패 | `delivery_retry` (60s, 최대 10회) |
 | DoS | 긴 메시지 | `MAX_MESSAGE_LENGTH` (4096) |
 
 ## 로깅 시스템
@@ -474,7 +476,7 @@ class MyPlugin(Plugin):
 | `sess_rename:{session_id}` | 세션 이름 변경 | `message_handlers.py` |
 | `schedule_input` | 스케줄 메시지 입력 | `message_handlers.py` |
 | `_ws_pending` | 워크스페이스 플로우 | `message_handlers.py` (dict 기반) |
-| `diary_write` | 일기 작성/수정 | `message_handlers.py` (plugin interaction) |
+| `diary_write` | 일기 작성 및 수정 (`interaction_action`으로 구분) | `message_handlers.py` (plugin interaction) |
 
 ## 메시지 처리 흐름
 

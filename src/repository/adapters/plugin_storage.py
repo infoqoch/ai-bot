@@ -310,14 +310,6 @@ class RepositoryDiaryStore:
         conn.commit()
         return cursor.rowcount > 0
 
-    def list_by_chat(self, chat_id: int, limit: int = 10, offset: int = 0) -> list[Diary]:
-        conn = _require_conn(self._repo)
-        rows = conn.execute(
-            "SELECT * FROM diaries WHERE chat_id = ? ORDER BY date DESC LIMIT ? OFFSET ?",
-            (chat_id, limit, offset),
-        ).fetchall()
-        return [_row_to_diary(row) for row in rows]
-
     def count_by_chat(self, chat_id: int) -> int:
         conn = _require_conn(self._repo)
         row = conn.execute(

@@ -1,6 +1,7 @@
 """Diary plugin - daily journal with date-based entries."""
 
 import re
+from datetime import date as _date, timedelta
 from typing import Optional, cast
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ForceReply
@@ -12,12 +13,10 @@ from src.repository.adapters import RepositoryDiaryStore
 from src.time_utils import app_today
 
 WEEKDAY_NAMES = ["월", "화", "수", "목", "금", "토", "일"]
-PAGE_SIZE = 10
 
 
 def _format_date_display(date_str: str) -> str:
     """Format date string to Korean display format: 2026년 3월 17일 (월)."""
-    from datetime import date as _date
     d = _date.fromisoformat(date_str)
     weekday = WEEKDAY_NAMES[d.weekday()]
     return f"{d.year}년 {d.month}월 {d.day}일 ({weekday})"
@@ -25,7 +24,6 @@ def _format_date_display(date_str: str) -> str:
 
 def _format_date_short(date_str: str) -> str:
     """Format date string to short display: 3/17 (월)."""
-    from datetime import date as _date
     d = _date.fromisoformat(date_str)
     weekday = WEEKDAY_NAMES[d.weekday()]
     return f"{d.month}/{d.day} ({weekday})"
@@ -103,10 +101,8 @@ END;
 
         if re.search(r"쓰기", msg):
             result = self._handle_write_check(chat_id)
-        elif re.search(r"목록|보기", msg):
-            result = self._handle_list(chat_id, offset=0)
         else:
-            result = self._handle_menu(chat_id)
+            result = self._handle_list(chat_id)
 
         return PluginResult(
             handled=True,
@@ -122,12 +118,19 @@ END;
         action = parts[1]
 
         if action == "menu":
-            return self._handle_menu(chat_id)
+            return self._handle_list(chat_id)
         elif action == "write":
             return self._handle_write_check(chat_id)
+        elif action == "write_yesterday":
+            yesterday = (app_today() - timedelta(days=1)).isoformat()
+            return self._handle_write_check(chat_id, target_date=yesterday)
         elif action == "list":
-            offset = int(parts[2]) if len(parts) > 2 else 0
-            return self._handle_list(chat_id, offset=offset)
+            try:
+                year = int(parts[2]) if len(parts) > 2 else None
+                month = int(parts[3]) if len(parts) > 3 else None
+            except (ValueError, IndexError):
+                return {"text": "⚠️ 잘못된 요청입니다.", "edit": True}
+            return self._handle_list(chat_id, year=year, month=month)
         elif action == "view":
             diary_id = int(parts[2]) if len(parts) > 2 else 0
             return self._handle_view(chat_id, diary_id)
@@ -181,39 +184,20 @@ END;
             diary_id = state.get("diary_id", 0)
             return self._process_edit(chat_id, diary_id, content)
         else:
-            return self._process_write(chat_id, content)
-
-    # ==================== Menu ====================
-
-    def _handle_menu(self, chat_id: int) -> dict:
-        today = app_today().isoformat()
-        existing = self.store.get_by_date(chat_id, today)
-        total = self.store.count_by_chat(chat_id)
-
-        if existing:
-            today_status = f"✅ 오늘 일기 작성됨 ({_format_date_short(today)})"
-        else:
-            today_status = f"📝 오늘 일기 미작성 ({_format_date_short(today)})"
-
-        buttons = [
-            [
-                InlineKeyboardButton("📝 쓰기", callback_data="diary:write"),
-                InlineKeyboardButton("📄 목록", callback_data="diary:list"),
-            ]
-        ]
-
-        return {
-            "text": f"📓 <b>일기</b>\n\n{today_status}\n총 {total}개 기록",
-            "reply_markup": InlineKeyboardMarkup(buttons),
-            "edit": True,
-        }
+            target_date = state.get("target_date")
+            return self._process_write(chat_id, content, target_date=target_date)
 
     # ==================== Write ====================
 
-    def _handle_write_check(self, chat_id: int) -> dict:
+    def _handle_write_check(self, chat_id: int, target_date: str | None = None) -> dict:
         """Check for existing entry before starting write flow."""
-        today = app_today().isoformat()
-        existing = self.store.get_by_date(chat_id, today)
+        today = app_today()
+        date = target_date or today.isoformat()
+        is_yesterday = target_date is not None and target_date == (today - timedelta(days=1)).isoformat()
+        label = "어제의 일기" if is_yesterday else "오늘의 일기"
+        placeholder = "어제 하루는 어땠나요?" if is_yesterday else "오늘 하루는 어땠나요?"
+        prompt = f"📓 {label}를 입력하세요:"
+        existing = self.store.get_by_date(chat_id, date)
 
         if existing:
             buttons = [
@@ -224,28 +208,32 @@ END;
                 [InlineKeyboardButton("◀️ 메뉴", callback_data="diary:menu")],
             ]
             return {
-                "text": f"📓 오늘 일기는 이미 작성되었습니다.\n\n<b>{_format_date_display(today)}</b>\n{escape_html(existing.content[:100])}{'...' if len(existing.content) > 100 else ''}",
+                "text": f"📓 {label}는 이미 작성되었습니다.\n\n<b>{_format_date_display(date)}</b>\n{escape_html(existing.content[:100])}{'...' if len(existing.content) > 100 else ''}",
                 "reply_markup": InlineKeyboardMarkup(buttons),
                 "edit": True,
             }
 
         return {
-            "text": f"📓 <b>일기 쓰기</b>\n\n{_format_date_display(today)}\n\n오늘 하루를 기록해보세요.",
-            "force_reply_prompt": "📓 오늘의 일기를 입력하세요:",
+            "text": f"📓 <b>일기 쓰기</b>\n\n{_format_date_display(date)}\n\n{'어제 하루를' if is_yesterday else '오늘 하루를'} 기록해보세요.",
+            "force_reply_prompt": prompt,
             "force_reply": ForceReply(
                 selective=True,
-                input_field_placeholder="오늘 하루는 어땠나요?",
+                input_field_placeholder=placeholder,
             ),
             "interaction_action": "write",
+            "interaction_state": {"target_date": date},
             "edit": False,
         }
 
-    def _process_write(self, chat_id: int, content: str) -> dict:
+    def _process_write(self, chat_id: int, content: str, target_date: str | None = None) -> dict:
         """Process new diary entry from ForceReply."""
-        today = app_today().isoformat()
+        today = app_today()
+        date = target_date or today.isoformat()
+        is_yesterday = target_date is not None and target_date == (today - timedelta(days=1)).isoformat()
+        label = "어제의 일기" if is_yesterday else "오늘의 일기"
 
         # Race condition guard
-        existing = self.store.get_by_date(chat_id, today)
+        existing = self.store.get_by_date(chat_id, date)
         if existing:
             buttons = [
                 [
@@ -254,11 +242,11 @@ END;
                 ],
             ]
             return {
-                "text": "📓 오늘 일기는 이미 작성되었습니다.",
+                "text": f"📓 {label}는 이미 작성되었습니다.",
                 "reply_markup": InlineKeyboardMarkup(buttons),
             }
 
-        diary = self.store.add(chat_id, today, content)
+        diary = self.store.add(chat_id, date, content)
 
         buttons = [[
             InlineKeyboardButton("👁 보기", callback_data=f"diary:view:{diary.id}"),
@@ -266,7 +254,7 @@ END;
         ]]
 
         return {
-            "text": f"✅ 일기가 저장되었습니다!\n\n<b>{_format_date_display(today)}</b>",
+            "text": f"✅ 일기가 저장되었습니다!\n\n<b>{_format_date_display(date)}</b>",
             "reply_markup": InlineKeyboardMarkup(buttons),
         }
 
@@ -282,7 +270,7 @@ END;
             return {"text": "❌ 권한이 없습니다.", "edit": True}
 
         return {
-            "text": f"✏️ <b>일기 수정</b>\n\n<b>{_format_date_display(diary.date)}</b>\n\n현재 내용:\n{escape_html(diary.content)}",
+            "text": f"✏️ <b>일기 수정</b>\n\n<b>{_format_date_display(diary.date)}</b>\n\n현재 내용:\n<code>{escape_html(diary.content)}</code>",
             "force_reply_prompt": "✏️ 수정할 내용을 입력하세요:",
             "force_reply": ForceReply(
                 selective=True,
@@ -316,32 +304,29 @@ END;
 
     # ==================== List ====================
 
-    def _handle_list(self, chat_id: int, offset: int = 0) -> dict:
-        """Show paginated diary list."""
-        total = self.store.count_by_chat(chat_id)
-        entries = self.store.list_by_chat(chat_id, limit=PAGE_SIZE, offset=offset)
+    def _handle_list(self, chat_id: int, year: int | None = None, month: int | None = None) -> dict:
+        """Show month-based diary list."""
+        today = app_today()
+        if year is None or month is None:
+            year, month = today.year, today.month
 
-        if not entries:
+        entries = self.store.list_by_month(chat_id, year, month)
+        total = self.store.count_by_chat(chat_id)
+
+        month_display = f"{year}년 {month}월"
+
+        if not entries and total == 0:
             buttons = [
-                [InlineKeyboardButton("📝 쓰기", callback_data="diary:write")],
-                [InlineKeyboardButton("◀️ 메뉴", callback_data="diary:menu")],
+                [
+                    InlineKeyboardButton("📝 쓰기", callback_data="diary:write"),
+                    InlineKeyboardButton("⏪ 어제 쓰기", callback_data="diary:write_yesterday"),
+                ],
             ]
             return {
                 "text": "📭 작성된 일기가 없습니다.",
                 "reply_markup": InlineKeyboardMarkup(buttons),
                 "edit": True,
             }
-
-        # Determine month range for display
-        first_date = entries[-1].date
-        last_date = entries[0].date
-        from datetime import date as _date
-        first_d = _date.fromisoformat(first_date)
-        last_d = _date.fromisoformat(last_date)
-        if first_d.month == last_d.month and first_d.year == last_d.year:
-            month_display = f"{last_d.year}년 {last_d.month}월"
-        else:
-            month_display = f"{first_d.month}월 ~ {last_d.month}월"
 
         lines = [f"📓 <b>일기 목록</b> ({month_display})\n"]
 
@@ -358,26 +343,40 @@ END;
                 )
             ])
 
-        # Pagination
-        nav_buttons = []
-        if offset > 0:
-            prev_offset = max(0, offset - PAGE_SIZE)
-            nav_buttons.append(
-                InlineKeyboardButton("◀️ 이전", callback_data=f"diary:list:{prev_offset}")
-            )
-        if offset + PAGE_SIZE < total:
-            next_offset = offset + PAGE_SIZE
-            nav_buttons.append(
-                InlineKeyboardButton("다음 ▶️", callback_data=f"diary:list:{next_offset}")
-            )
-        if nav_buttons:
-            buttons.append(nav_buttons)
+        if not entries:
+            lines.append("이 달에 작성된 일기가 없습니다.")
 
-        lines.append(f"📊 총 {total}개 ({offset + 1}~{min(offset + PAGE_SIZE, total)})")
+        # Month navigation
+        nav_buttons = []
+        prev_month = month - 1
+        prev_year = year
+        if prev_month < 1:
+            prev_month, prev_year = 12, year - 1
+        nav_buttons.append(
+            InlineKeyboardButton(f"◀️ {prev_month}월", callback_data=f"diary:list:{prev_year}:{prev_month}")
+        )
+
+        if year != today.year or month != today.month:
+            nav_buttons.append(
+                InlineKeyboardButton("📅 이번달", callback_data="diary:list")
+            )
+
+        next_month = month + 1
+        next_year = year
+        if next_month > 12:
+            next_month, next_year = 1, year + 1
+        if _date(next_year, next_month, 1) <= today:
+            nav_buttons.append(
+                InlineKeyboardButton(f"{next_month}월 ▶️", callback_data=f"diary:list:{next_year}:{next_month}")
+            )
+
+        buttons.append(nav_buttons)
+
+        lines.append(f"📊 이 달 {len(entries)}개 · 전체 {total}개")
 
         buttons.append([
             InlineKeyboardButton("📝 쓰기", callback_data="diary:write"),
-            InlineKeyboardButton("◀️ 메뉴", callback_data="diary:menu"),
+            InlineKeyboardButton("⏪ 어제 쓰기", callback_data="diary:write_yesterday"),
         ])
 
         return {
@@ -408,7 +407,7 @@ END;
         ]
 
         return {
-            "text": f"📓 <b>{date_display}</b>\n\n{escape_html(diary.content)}",
+            "text": f"📓 <b>{date_display}</b>\n\n<code>{escape_html(diary.content)}</code>",
             "reply_markup": InlineKeyboardMarkup(buttons),
             "edit": True,
         }
@@ -452,6 +451,6 @@ END;
         date_display = _format_date_display(diary.date)
         self.store.delete(diary_id)
 
-        result = self._handle_list(chat_id, offset=0)
+        result = self._handle_list(chat_id)
         result["text"] = f"🗑 <b>{date_display}</b> 일기가 삭제되었습니다.\n\n" + result["text"]
         return result
