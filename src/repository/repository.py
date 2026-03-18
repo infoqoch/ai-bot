@@ -1542,6 +1542,44 @@ class Repository:
         self._conn.commit()
         return cursor.rowcount > 0
 
+    def get_failed_deliveries(self, max_attempts: int = 10, limit: int = 20) -> list[dict[str, Any]]:
+        """Get messages that failed Telegram delivery and are eligible for retry."""
+        rows = self._conn.execute(
+            """SELECT id, chat_id, session_id, delivery_text, delivery_attempts, delivery_error
+               FROM message_log
+               WHERE delivery_status = 'failed'
+                 AND delivery_attempts < ?
+                 AND processed = 2
+                 AND delivery_text IS NOT NULL
+               ORDER BY id ASC
+               LIMIT ?""",
+            (max_attempts, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def claim_delivery_for_retry(self, queue_id: int) -> bool:
+        """Optimistic lock: atomically set delivery_status='retrying' only if still 'failed'."""
+        cursor = self._conn.execute(
+            """UPDATE message_log
+               SET delivery_status = 'retrying'
+               WHERE id = ? AND delivery_status = 'failed'""",
+            (queue_id,),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def mark_delivery_abandoned(self, queue_id: int) -> bool:
+        """Mark a message as permanently undeliverable after max retries."""
+        cursor = self._conn.execute(
+            """UPDATE message_log
+               SET delivery_status = 'abandoned',
+                   delivery_error = 'Max retry attempts exceeded'
+               WHERE id = ?""",
+            (queue_id,),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
     def list_processing_messages_by_user(self, user_id: str) -> list[dict[str, Any]]:
         """List active processing message_log rows for a user."""
         rows = self._conn.execute(

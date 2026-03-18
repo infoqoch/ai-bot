@@ -1,4 +1,4 @@
-"""Main entry point for the Telegram CLI AI bot."""
+"""Main entry point for Telegram Agent Relay."""
 
 import atexit
 import os
@@ -33,6 +33,7 @@ from src.bot.command_catalog import build_bot_commands
 from src.scheduler_manager import scheduler_manager
 from src.repository import shutdown_repository
 from src.time_utils import configure_app_timezone
+from src.services.delivery_retry_service import DeliveryRetryService
 from src.services.schedule_execution_service import ScheduleExecutionService
 
 
@@ -62,7 +63,7 @@ def create_app(settings) -> Application:
     configure_app_timezone(app_timezone)
 
     logger.info("=" * 60)
-    logger.info("Telegram CLI AI Bot initialization started")
+    logger.info("Telegram Agent Relay initialization started")
     logger.info(f"  LOG_LEVEL: {log_level}")
     logger.info(f"  base_dir: {settings.base_dir}")
     logger.info(f"  working_dir: {settings.effective_working_dir}")
@@ -74,11 +75,18 @@ def create_app(settings) -> Application:
     runtime = build_bot_runtime(settings)
     handlers = runtime.handlers
 
+    # Delivery retry service
+    delivery_retry_service = DeliveryRetryService(repo=runtime.repo)
+
     # 봇 시작 후 미완료 메시지 재처리 콜백
     async def post_init(application):
         count = await handlers.cleanup_detached_jobs(application.bot)
         if count:
             logger.info(f"Detached job cleanup count: {count}")
+        # Immediate retry of failed deliveries from previous session
+        retried = await delivery_retry_service.retry_failed_deliveries(application.bot)
+        if retried:
+            logger.info(f"Startup delivery retry count: {retried}")
         try:
             await _sync_bot_commands(application.bot, settings, runtime)
         except Exception as exc:
@@ -101,6 +109,20 @@ def create_app(settings) -> Application:
 
     scheduler_manager.set_app(app)
     logger.info("SchedulerManager initialized")
+
+    # Register delivery retry repeating job (every 60s, first run after 30s)
+    async def _delivery_retry_callback(context):
+        """Scheduled callback for retrying failed Telegram deliveries."""
+        await delivery_retry_service.retry_failed_deliveries(context.bot)
+
+    scheduler_manager.register_repeating(
+        name="delivery_retry",
+        callback=_delivery_retry_callback,
+        interval=60,
+        owner="system",
+        first=30,
+        metadata={"description": "Retry failed Telegram message deliveries"},
+    )
 
     if hasattr(runtime.plugin_loader, "register_system_jobs"):
         runtime.plugin_loader.register_system_jobs(app, settings.admin_chat_id)
@@ -230,7 +252,7 @@ def main() -> None:
         logger.error("TELEGRAM_TOKEN is not set")
         sys.exit(int(RuntimeExitCode.CONFIG_ERROR))
 
-    logger.info("Starting Telegram CLI AI Bot...")
+    logger.info("Starting Telegram Agent Relay...")
 
     app = create_app(settings)
 

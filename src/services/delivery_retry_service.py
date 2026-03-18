@@ -1,0 +1,92 @@
+"""Retry failed Telegram message deliveries."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from src.bot.formatters import split_message
+from src.logging_config import logger
+
+if TYPE_CHECKING:
+    from telegram import Bot
+    from src.repository.repository import Repository
+
+MAX_DELIVERY_ATTEMPTS = 10
+
+
+class DeliveryRetryService:
+    """Periodically retries failed Telegram message deliveries."""
+
+    def __init__(self, repo: Repository) -> None:
+        self._repo = repo
+
+    async def retry_failed_deliveries(self, bot: Bot) -> int:
+        """Retry all eligible failed deliveries. Returns count of successfully retried."""
+        failed = self._repo.get_failed_deliveries(max_attempts=MAX_DELIVERY_ATTEMPTS)
+        if not failed:
+            return 0
+
+        logger.info(f"[DeliveryRetry] Found {len(failed)} failed deliveries to retry")
+        success_count = 0
+
+        for row in failed:
+            job_id = row["id"]
+            chat_id = row["chat_id"]
+            delivery_text = row["delivery_text"]
+            attempts = row["delivery_attempts"]
+
+            # Optimistic lock - claim this row
+            if not self._repo.claim_delivery_for_retry(job_id):
+                logger.debug(f"[DeliveryRetry] job_id={job_id} already claimed, skipping")
+                continue
+
+            try:
+                self._repo.increment_delivery_attempts(job_id)
+                chunks = split_message(delivery_text)
+
+                for chunk in chunks:
+                    try:
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text=chunk,
+                            parse_mode="HTML",
+                        )
+                    except Exception:
+                        # HTML failed, try plain text
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text=chunk,
+                        )
+
+                self._repo.mark_message_delivered(job_id)
+                success_count += 1
+                logger.info(f"[DeliveryRetry] Successfully retried job_id={job_id}, chat_id={chat_id}")
+
+            except Exception as exc:
+                logger.warning(
+                    f"[DeliveryRetry] Retry failed - job_id={job_id}, "
+                    f"attempts={attempts + 1}, error={exc}"
+                )
+                # Check if max attempts reached
+                if attempts + 1 >= MAX_DELIVERY_ATTEMPTS:
+                    self._repo.mark_delivery_abandoned(job_id)
+                    logger.warning(f"[DeliveryRetry] Abandoned job_id={job_id} after {attempts + 1} attempts")
+                    # Try to notify user about abandoned message
+                    try:
+                        preview = (delivery_text[:100] + "...") if len(delivery_text) > 100 else delivery_text
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text=f"⚠️ 메시지 전달에 실패했습니다 (시도 {attempts + 1}회).\n\n"
+                                 f"<i>미리보기:</i> {preview}",
+                            parse_mode="HTML",
+                        )
+                    except Exception:
+                        logger.error(f"[DeliveryRetry] Abandon notification also failed - job_id={job_id}")
+                else:
+                    # Reset back to failed for next retry cycle
+                    self._repo.mark_message_delivery_failed(job_id, str(exc))
+
+        if success_count:
+            logger.info(f"[DeliveryRetry] Retry cycle complete: {success_count}/{len(failed)} succeeded")
+
+        return success_count
