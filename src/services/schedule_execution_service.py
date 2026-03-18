@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -27,19 +26,17 @@ class ScheduleExecutionService:
         plugin_loader: "PluginLoader",
         schedule_manager,
         repo: Optional["Repository"] = None,
-        execution_timeout_seconds: float | None = 300,
     ):
         self._bot = bot
         self._ai_registry = ai_registry
         self._plugin_loader = plugin_loader
         self._schedule_manager = schedule_manager
         self._repo = repo
-        self._execution_timeout_seconds = execution_timeout_seconds
 
     async def execute(self, schedule) -> None:
         """Execute one schedule and persist the outcome."""
         try:
-            result = await self._run_with_timeout(schedule)
+            result = await self._run(schedule)
             response = result[0] if isinstance(result, tuple) else result
             provider_session_id = result[1] if isinstance(result, tuple) else None
             is_ai = isinstance(result, tuple)
@@ -73,22 +70,13 @@ class ScheduleExecutionService:
 
             self._schedule_manager.update_run(schedule.id)
             logger.info(f"Schedule {schedule.id} executed successfully")
-        except asyncio.TimeoutError:
-            timeout_text = self._format_timeout_error()
-            self._schedule_manager.update_run(schedule.id, last_error=timeout_text)
-            logger.error(f"Schedule {schedule.id} failed: {timeout_text}")
         except Exception as exc:
             self._schedule_manager.update_run(schedule.id, last_error=str(exc))
             logger.error(f"Schedule {schedule.id} failed: {exc}")
 
-    async def _run_with_timeout(self, schedule) -> str | tuple[str, Optional[str]]:
-        """Execute one schedule response build with a hard timeout."""
-        if not self._execution_timeout_seconds:
-            return await self._build_response(schedule)
-        return await asyncio.wait_for(
-            self._build_response(schedule),
-            timeout=self._execution_timeout_seconds,
-        )
+    async def _run(self, schedule) -> str | tuple[str, Optional[str]]:
+        """Execute one schedule response build."""
+        return await self._build_response(schedule)
 
     async def _build_response(self, schedule) -> str | tuple[str, Optional[str]]:
         """Generate the response body for one scheduled execution.
@@ -182,8 +170,3 @@ class ScheduleExecutionService:
             InlineKeyboardButton("💬 Session", callback_data=f"resp:sched:{log_id}"),
         ]])
 
-    def _format_timeout_error(self) -> str:
-        """Return a stable timeout error string."""
-        if self._execution_timeout_seconds:
-            return f"Schedule execution timed out after {int(self._execution_timeout_seconds)}s"
-        return "Schedule execution timed out"
