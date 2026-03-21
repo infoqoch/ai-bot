@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Optional
 
 from src.bot.formatters import escape_html
 from src.logging_config import logger
+from src.runtime_paths import get_log_dir
 
 if TYPE_CHECKING:
     from src.repository import Repository
@@ -129,7 +130,7 @@ class DetachedJobManager:
         env.setdefault("PYTHONUNBUFFERED", "1")
         env.setdefault("PYTHONPYCACHEPREFIX", ".build")
 
-        log_dir = Path(os.getenv("BOT_LOG_DIR", "/tmp/telegram-bot-logs"))
+        log_dir = get_log_dir()
         log_dir.mkdir(parents=True, exist_ok=True)
         stderr_path = log_dir / f"worker-{job_id}.err"
         stderr_file = open(stderr_path, "w")

@@ -20,9 +20,10 @@ from telegram.ext import (
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.lock import ProcessLock
+from src.runtime_paths import get_main_lock_path
 
 # 싱글톤 락
-_process_lock = ProcessLock(Path("/tmp/telegram-bot.lock"))
+_process_lock = ProcessLock(get_main_lock_path())
 
 
 from src.config import get_settings

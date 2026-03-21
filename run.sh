@@ -8,15 +8,23 @@
 
 cd "$(dirname "$0")"
 
-PID_FILE="/tmp/telegram-bot.pid"
-LOCK_FILE="/tmp/telegram-bot.lock"
-SUPERVISOR_LOCK_FILE="/tmp/telegram-bot-supervisor.lock"
-APP_LOG_LINK="/tmp/telegram-bot.log"
-BOOT_LOG_LINK="/tmp/telegram-bot-boot.log"
-LOG_DIR="${BOT_LOG_DIR:-/tmp/telegram-bot-logs}"
+BASE_DIR="$(pwd)"
+DATA_DIR="${BOT_DATA_DIR:-$BASE_DIR/.data}"
+PID_FILE="${BOT_PID_FILE:-$DATA_DIR/telegram-bot.pid}"
+LOCK_FILE="${BOT_LOCK_FILE:-$DATA_DIR/telegram-bot.lock}"
+SUPERVISOR_LOCK_FILE="${BOT_SUPERVISOR_LOCK_FILE:-$DATA_DIR/telegram-bot-supervisor.lock}"
+APP_LOG_LINK="${BOT_APP_LOG_LINK:-$DATA_DIR/telegram-bot.log}"
+BOOT_LOG_LINK="${BOT_BOOT_LOG_LINK:-$DATA_DIR/telegram-bot-boot.log}"
+LOG_DIR="${BOT_LOG_DIR:-$DATA_DIR/logs}"
 APP_LOG_FILE="$LOG_DIR/bot.log"
 DEFAULT_LOG_LEVEL="${LOG_LEVEL:-DEBUG}"
 BOOT_LOG_RETENTION_DAYS="${BOOT_LOG_RETENTION_DAYS:-14}"
+LEGACY_PID_FILE="/tmp/telegram-bot.pid"
+LEGACY_LOCK_FILE="/tmp/telegram-bot.lock"
+LEGACY_SUPERVISOR_LOCK_FILE="/tmp/telegram-bot-supervisor.lock"
+LEGACY_APP_LOG_LINK="/tmp/telegram-bot.log"
+LEGACY_BOOT_LOG_LINK="/tmp/telegram-bot-boot.log"
+LEGACY_LOG_DIR="/tmp/telegram-bot-logs"
 
 _get_running_pid() {
     # 락 파일에서 PID 읽기 (supervisor 락 파일 우선)
@@ -120,7 +128,21 @@ _terminate_pids() {
 }
 
 _cleanup_pid_files() {
+    mkdir -p "$DATA_DIR"
     rm -f "$PID_FILE" "$LOCK_FILE" "$SUPERVISOR_LOCK_FILE"
+}
+
+_cleanup_legacy_tmp_artifacts() {
+    if [ -n "$(_get_supervisor_pids)$(_get_main_pids)$(_get_worker_pids)" ]; then
+        return 0
+    fi
+
+    rm -f "$LEGACY_PID_FILE" "$LEGACY_LOCK_FILE" "$LEGACY_SUPERVISOR_LOCK_FILE"
+    rm -f "$LEGACY_APP_LOG_LINK" "$LEGACY_BOOT_LOG_LINK"
+
+    if [ "$LOG_DIR" != "$LEGACY_LOG_DIR" ]; then
+        rm -rf "$LEGACY_LOG_DIR"
+    fi
 }
 
 _stop_bot_processes() {
@@ -144,7 +166,7 @@ _is_running() {
 }
 
 _ensure_log_dir() {
-    mkdir -p "$LOG_DIR"
+    mkdir -p "$DATA_DIR" "$LOG_DIR"
 }
 
 _cleanup_old_boot_logs() {
@@ -227,7 +249,8 @@ _start_supervisor() {
     source venv/bin/activate
     unset CLAUDECODE
 
-    LOG_LEVEL="$level" BOT_LOG_DIR="$LOG_DIR" PYTHONUNBUFFERED=1 PYTHONPYCACHEPREFIX=.build \
+    LOG_LEVEL="$level" BOT_DATA_DIR="$DATA_DIR" BOT_LOG_DIR="$LOG_DIR" BOT_LOCK_FILE="$LOCK_FILE" \
+        BOT_SUPERVISOR_LOCK_FILE="$SUPERVISOR_LOCK_FILE" PYTHONUNBUFFERED=1 PYTHONPYCACHEPREFIX=.build \
         nohup python -m src.supervisor >> "$boot_log" 2>&1 &
     local new_pid=$!
     echo "$new_pid" > "$PID_FILE"
@@ -323,6 +346,7 @@ case "$1" in
         echo "   상태 확인  : ./run.sh status"
         exit 1
     fi
+    _cleanup_legacy_tmp_artifacts
     _preflight_startup || exit 1
     _start_supervisor "$DEFAULT_LOG_LEVEL" || exit 1
     ;;
@@ -340,9 +364,11 @@ case "$1" in
     if _is_running || [ -n "$(_get_worker_pids)" ]; then
         echo "🛑 봇 hard stop 중 (detached worker 포함)..."
         _stop_bot_processes hard
+        _cleanup_legacy_tmp_artifacts
         echo "✅ 봇 전체 중지됨"
     else
         _cleanup_pid_files
+        _cleanup_legacy_tmp_artifacts
         echo "⚠️  실행 중인 봇/worker 없음"
     fi
     ;;
@@ -357,6 +383,7 @@ case "$1" in
     echo "🔄 봇 hard 재시작 중 (detached worker 포함 종료)..."
     _preflight_startup || exit 1
     _stop_bot_processes hard
+    _cleanup_legacy_tmp_artifacts
     sleep 1
     _start_supervisor "$DEFAULT_LOG_LEVEL" || exit 1
     ;;
@@ -426,7 +453,8 @@ case "$1" in
     echo ""
     echo "환경변수:"
     echo "  LOG_LEVEL               - start/restart 기본 로그 레벨"
-    echo "  BOT_LOG_DIR             - 로그 디렉토리 (기본: /tmp/telegram-bot-logs)"
+    echo "  BOT_DATA_DIR            - 런타임 데이터 루트 (기본: $BASE_DIR/.data)"
+    echo "  BOT_LOG_DIR             - 로그 디렉토리 (기본: \$BOT_DATA_DIR/logs)"
     echo "  BOOT_LOG_RETENTION_DAYS - boot 로그 보관 일수 (기본: 14)"
     exit 1
     ;;

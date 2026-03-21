@@ -274,6 +274,8 @@ src/
 | `ALLOWED_PROJECT_PATHS` | `~/AiSandbox/*,~/Projects/*` | Allowed workspace directories (glob patterns, comma-separated) |
 | `GOOGLE_SERVICE_ACCOUNT_FILE` | (none) | Google service account JSON path (for Calendar plugin) |
 | `GOOGLE_CALENDAR_ID` | `primary` | Google Calendar ID (e.g., `user@gmail.com`) |
+| `BOT_DATA_DIR` | `.data/` | Runtime files root (locks, pid, symlink logs) |
+| `BOT_LOG_DIR` | `.data/logs/` | Runtime log directory |
 
 ## Process Management (CRITICAL)
 
@@ -283,8 +285,8 @@ The bot uses a file lock system to prevent duplicate execution:
 
 | Lock File | Purpose |
 |-----------|---------|
-| `/tmp/telegram-bot.lock` | main.py singleton |
-| `/tmp/telegram-bot-supervisor.lock` | supervisor singleton |
+| `.data/telegram-bot.lock` | main.py singleton |
+| `.data/telegram-bot-supervisor.lock` | supervisor singleton |
 
 ### Process Management Rules (CRITICAL)
 

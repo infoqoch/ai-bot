@@ -21,13 +21,12 @@ Usage:
 
 import contextvars
 import logging
-import os
 import sys
 import uuid
-from pathlib import Path
 from typing import Optional
 
 from loguru import logger
+from src.runtime_paths import get_log_dir
 
 # Context variable for trace ID (like Java MDC)
 # 각 asyncio 코루틴은 자신만의 trace_id를 가짐
@@ -150,7 +149,7 @@ def setup_logging(
     # 기존 핸들러 제거
     logger.remove()
 
-    log_dir = Path(os.getenv("BOT_LOG_DIR", "/tmp/telegram-bot-logs"))
+    log_dir = get_log_dir()
     log_dir.mkdir(parents=True, exist_ok=True)
     default_log_file = log_dir / "bot.log"
 

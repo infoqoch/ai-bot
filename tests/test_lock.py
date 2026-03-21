@@ -1,10 +1,8 @@
 """ProcessLock 테스트 - flock 기반 프로세스 싱글톤 락."""
 
 import os
-import tempfile
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 import fcntl
+from unittest.mock import patch
 
 import pytest
 
@@ -160,13 +158,23 @@ class TestIsLocked:
 class TestErrorHandling:
     """에러 처리 테스트."""
 
-    def test_acquire_io_error(self, tmp_path):
-        """파일 열기 실패 시 False 반환."""
-        lock_file = tmp_path / "readonly" / "test.lock"
-        # 부모 디렉토리가 없어서 실패
+    def test_acquire_creates_parent_directory(self, tmp_path):
+        """부모 디렉토리가 없어도 생성 후 락을 획득한다."""
+        lock_file = tmp_path / "nested" / "locks" / "test.lock"
         lock = ProcessLock(lock_file)
 
-        assert lock.acquire() is False
+        assert lock.acquire() is True
+        assert lock_file.exists()
+
+        lock.release()
+
+    def test_acquire_open_error(self, tmp_path):
+        """파일 열기 실패 시 False 반환."""
+        lock_file = tmp_path / "test.lock"
+        lock = ProcessLock(lock_file)
+
+        with patch("builtins.open", side_effect=IOError("open failed")):
+            assert lock.acquire() is False
 
     def test_acquire_flock_error(self, tmp_path):
         """flock 실패 시 False 반환 및 fd 정리."""

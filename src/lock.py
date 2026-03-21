@@ -1,7 +1,7 @@
 """프로세스 싱글톤 락 - flock 기반.
 
 사용법:
-    lock = ProcessLock(Path("/tmp/my-app.lock"))
+    lock = ProcessLock(Path(".data/my-app.lock"))
     if not lock.acquire():
         print("이미 실행 중")
         sys.exit(1)
@@ -34,6 +34,7 @@ class ProcessLock:
         정확히 하나만 성공합니다.
         """
         try:
+            self.lock_file.parent.mkdir(parents=True, exist_ok=True)
             self._fd = open(self.lock_file, "w")
             fcntl.flock(self._fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             self._fd.write(str(os.getpid()))

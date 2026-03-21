@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 from src.config import get_settings
 from src.logging_config import logger, setup_logging
 from src.lock import ProcessLock
+from src.runtime_paths import get_supervisor_lock_path
 from src.runtime_exit_codes import RuntimeExitCode, describe_exit_code, is_restartable_exit_code
 
 # .env 파일 로드 (supervisor는 별도 프로세스라 직접 로드 필요)
@@ -32,7 +33,7 @@ INITIAL_RESTART_DELAY = 5  # 초기 5초
 CRASH_RESET_TIME = 60  # 60초 이상 정상 실행 시 딜레이 리셋
 
 # 전역 상태
-_process_lock = ProcessLock(Path("/tmp/telegram-bot-supervisor.lock"))
+_process_lock = ProcessLock(get_supervisor_lock_path())
 _child_process = None
 _shutdown_requested = False
 _telegram_token = None
