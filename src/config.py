@@ -41,7 +41,7 @@ class Settings(BaseSettings):
 
     # Project Sessions (쉼표로 구분된 문자열로 저장, 프로퍼티로 리스트 반환)
     allowed_project_paths_raw: str = Field(
-        default="/Users/bae/AiSandbox/*,/Users/bae/Projects/*",
+        default="~/AiSandbox/*,~/Projects/*",
         alias="ALLOWED_PROJECT_PATHS",
         description="프로젝트 세션 허용 디렉토리 (glob 패턴, 쉼표 구분)"
     )
