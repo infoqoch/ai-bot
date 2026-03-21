@@ -341,8 +341,7 @@ class BaseHandler:
 
         add_row("new", "sl")
         add_row("workspace", "scheduler")
-        add_row("cal", "plugins")
-        add_row("tasks")
+        add_row("plugins", "tasks")
         add_row("select_ai")
         buttons.append([InlineKeyboardButton("❓ Help", callback_data="menu:help")])
 
