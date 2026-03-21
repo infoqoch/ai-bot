@@ -18,6 +18,7 @@ class TodoPlugin(Plugin):
 
     name = "todo"
     description = "Todo management"
+    display_name = "Todo"
     usage = (
         "📋 <b>Todo Plugin</b>\n\n"
         "<b>Getting Started</b>\n"

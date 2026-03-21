@@ -55,6 +55,7 @@ class Plugin(ABC):
 
     name: str = "base"
     description: str = "Base plugin"
+    display_name: str = ""  # Human-readable label for AI Work UI (default: name.capitalize())
     usage: str = "Usage not defined."
 
     CALLBACK_PREFIX: str = ""  # 빈 문자열이면 콜백 미지원

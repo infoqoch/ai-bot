@@ -34,6 +34,7 @@ class DiaryPlugin(Plugin):
 
     name = "diary"
     description = "Daily diary management"
+    display_name = "Diary"
     usage = (
         "📓 <b>Diary Plugin</b>\n\n"
         "<code>일기</code> or <code>/diary</code> - Open diary\n\n"

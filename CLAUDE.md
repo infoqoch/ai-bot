@@ -464,7 +464,12 @@ For a plugin to store new data:
 2. Add CRUD methods to `src/repository/repository.py`
 3. Call `self.repository.xxx()` from the plugin
 
-**Note:** Do not add plugin tables to the core `schema.sql`. Each plugin manages its own DDL.
+7. **Plugin-core isolation (CRITICAL)**: Plugins must not leak into core code. Adding a new plugin must NOT require modifying any core file (`src/` directory). Specifically:
+   - Do not hardcode plugin names, callback prefixes, or labels in core handlers
+   - Do not add plugin tables to the core `schema.sql` — each plugin manages its own DDL via `get_schema()`
+   - Do not add plugin dataclasses or models to core repository
+   - Core code accesses plugins only through the `Plugin` interface (`self.plugins.get_plugin_by_name()`, `plugin.get_ai_context()`, etc.)
+   - If core needs plugin metadata, the Plugin base class must provide it as an interface attribute
 
 ### Callback Handling Pattern
 
@@ -564,7 +569,7 @@ Every sub-menu (one level deep from the main menu) provides a "✨ AI와 작업�
 1. `ai_context.md` 파일 작성
 2. `get_ai_dynamic_context()` 구현
 3. 서브메뉴에 "✨ AI와 작업하기" 버튼 추가 (`callback_data="aiwork:{name}"`)
-4. `DOMAIN_LABELS`에 도메인 레이블 추가
+4. `display_name` 클래스 속성 설정 (AI Work UI 레이블로 사용)
 
 ## Message Processing Flow
 

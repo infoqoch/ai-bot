@@ -52,6 +52,7 @@ class WeatherPlugin(Plugin):
 
     name = "weather"
     description = "Weather lookup and location settings"
+    display_name = "Weather"
     usage = (
         "🌤️ <b>날씨 플러그인</b>\n\n"
         "<b>날씨 확인</b>\n"
