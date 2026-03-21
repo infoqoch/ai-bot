@@ -117,16 +117,23 @@ def process():
 
 ### 실행 스크립트 (run.sh)
 ```bash
-./run.sh start          # 봇 시작
-./run.sh stop-soft      # supervisor/main만 중지, detached worker 유지 시도
-./run.sh stop-hard      # 봇 + detached worker 중지
-./run.sh restart-soft   # soft 재시작 (in-flight worker 유지 시도)
-./run.sh restart-hard   # hard 재시작 (detached worker 포함 종료)
-./run.sh status         # 상태 확인
-./run.sh log            # 앱 로그 보기
-./run.sh log boot       # 부팅/감시 로그 보기
-./run.sh test           # 테스트 실행
+./run.sh start            # 봇 시작
+./run.sh stop-soft        # supervisor/main만 중지, detached worker 유지 시도
+./run.sh stop-hard        # 봇 + detached worker 중지
+./run.sh restart-soft     # soft 재시작 (in-flight worker 유지 시도)
+./run.sh restart-hard     # hard 재시작 (detached worker 포함 종료)
+./run.sh status           # 상태 확인
+./run.sh log              # 앱 로그 보기
+./run.sh log boot         # 부팅/감시 로그 보기
+./run.sh trace            # TRACE 로그 레벨로 시작
+./run.sh debug            # DEBUG 로그 레벨로 시작
+./run.sh test             # 단위 테스트 실행
+./run.sh test-integration # 통합 테스트 실행
+./run.sh test-all         # 전체 테스트 실행
 ```
+
+### DB 관리 스크립트 (db.sh)
+SQLite DB 조회/관리용 유틸리티 스크립트.
 
 ### 완료 루틴 (CRITICAL - 모든 단계 필수)
 ```bash
@@ -157,7 +164,7 @@ source venv/bin/activate && python -m src.notify "주요변경1" "변경2" -- "f
 | `chore` | 기타 |
 
 ```
-Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 ```
 
 ## 코드 규칙
@@ -212,7 +219,8 @@ src/
 │   └── client.py              # Codex CLI 래퍼 (BaseCLIClient 상속)
 │
 ├── plugins/
-│   └── loader.py              # Plugin 기본 클래스 + PluginLoader
+│   ├── loader.py              # Plugin 기본 클래스 + PluginLoader
+│   └── storage.py             # 플러그인 저장소 Protocol (TodoStore, MemoStore, DiaryStore 등)
 │
 ├── repository/
 │   ├── database.py            # DB 커넥션 싱글톤
@@ -388,9 +396,12 @@ plugins/
 │       ├── __init__.py
 │       └── plugin.py
 └── custom/                # Git 무시 (개인용)
-    └── my_plugin/
+    ├── diary/
+    │   ├── __init__.py
+    │   └── plugin.py      # 일기 CRUD, 콜백, ForceReply, 스케줄
+    └── hourly_ping/
         ├── __init__.py
-        └── plugin.py
+        └── plugin.py      # 시간별 핑 알림
 ```
 
 ### 플러그인 클래스 구조
@@ -454,7 +465,7 @@ class MyPlugin(Plugin):
 |--------|------|----------|
 | `menu:` | 메인 메뉴 네비게이션 | `callback_handlers.py` |
 | `ai:` | AI 프로바이더 선택 | `callback_handlers.py` |
-| `resp:` | AI 응답 후속 버튼 | `callback_handlers.py` |
+| `resp:` | AI 응답 후속 버튼 | `callback_handlers.py` → `session_callbacks.py` |
 | `plug:` | 플러그인 허브 네비게이션 | `callback_handlers.py` |
 | `td:` | 투두 플러그인 | `callback_handlers.py` |
 | `memo:` | 메모 플러그인 | `callback_handlers.py` |
@@ -468,15 +479,15 @@ class MyPlugin(Plugin):
 
 **ForceReply 마커 (충돌 금지):**
 
-| 마커 | 용도 | 라우팅 위치 |
-|------|------|------------|
-| `td:add` | 투두 추가 | `message_handlers.py` |
-| `memo_add` | 메모 추가 | `message_handlers.py` |
-| `sess_name:{model}` | 세션 이름 입력 | `message_handlers.py` |
-| `sess_rename:{session_id}` | 세션 이름 변경 | `message_handlers.py` |
-| `schedule_input` | 스케줄 메시지 입력 | `message_handlers.py` |
-| `_ws_pending` | 워크스페이스 플로우 | `message_handlers.py` (dict 기반) |
-| `diary_write` | 일기 작성 및 수정 (`interaction_action`으로 구분) | `message_handlers.py` (plugin interaction) |
+| 마커 | 용도 | 라우팅 메커니즘 |
+|------|------|----------------|
+| `sess_name:{model}` | 세션 이름 입력 | `message_handlers.py` 직접 패턴 매칭 |
+| `sess_rename:{session_id}` | 세션 이름 변경 | `message_handlers.py` 직접 패턴 매칭 |
+| `schedule_input` | 스케줄 메시지 입력 | `message_handlers.py` 직접 패턴 매칭 |
+| `_ws_pending` | 워크스페이스 플로우 | `message_handlers.py` dict 기반 |
+| `td:add` | 투두 추가 | plugin interaction (`_plugin_interactions`) |
+| `memo_add` | 메모 추가 | plugin interaction (`_plugin_interactions`) |
+| `diary_write` | 일기 작성 및 수정 (`interaction_action`으로 구분) | plugin interaction (`_plugin_interactions`) |
 
 ## 메시지 처리 흐름
 
@@ -528,7 +539,7 @@ class MyPlugin(Plugin):
 
 1. **고정 명령어**: 언더바로 연결 (`/new_opus`, `/model_haiku`)
 2. **동적 파라미터**: 언더바 + ID (`/s_{id}`, `/h_{id}`, `/d_{id}`)
-3. **단축 명령어**: 자주 쓰는 명령어 (`/sl` = `/session_list`, `/nw` = `/new_workspace`, `/ws` = `/workspace`)
+3. **단축 명령어**: 자주 쓰는 명령어 (`/sl` = `/session_list`, `/ws` = `/workspace`)
 
 ## 로컬 세션 디스커버리 (Import Local Session)
 
