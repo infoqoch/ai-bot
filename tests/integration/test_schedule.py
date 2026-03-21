@@ -277,7 +277,7 @@ class TestScheduleList:
         adapter = ScheduleManagerAdapter(repository)
 
         summary = adapter.get_schedule_summary("no_schedules_user")
-        assert "No scheduled tasks" in summary
+        assert "No active schedules" in summary
 
 
 class TestScheduleData:

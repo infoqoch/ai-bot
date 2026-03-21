@@ -242,15 +242,15 @@ class ScheduleManagerAdapter:
         return unregistered, registered
 
     def get_schedule_summary(self, user_id: str) -> str:
-        """Build the `/scheduler` list body for one user."""
+        """Build the `/scheduler` list body for one user (active only)."""
         schedules = self.list_by_user(user_id)
-        if not schedules:
-            return "No scheduled tasks."
+        active = [s for s in schedules if s.enabled]
+        if not active:
+            return "No active schedules."
 
-        lines = ["<b>Your Schedules</b>"]
-        for schedule in schedules:
-            status = "🟢" if schedule.enabled else "⏸"
-            lines.append(f"{status} {schedule.type_emoji} <b>{escape_html(schedule.name)}</b>")
+        lines = ["<b>Active Schedules</b>"]
+        for schedule in active:
+            lines.append(f"🟢 {schedule.type_emoji} <b>{escape_html(schedule.name)}</b>")
             lines.append(f"  Next: {escape_html(schedule.next_run_text)}")
         return "\n".join(lines)
 

@@ -39,15 +39,17 @@ class SchedulerCallbackHandlers(BaseHandler):
         return text + scheduler_manager.get_system_jobs_text()
 
     def _build_scheduler_keyboard(self, user_id: str) -> list[list[InlineKeyboardButton]]:
-        """Build the main scheduler list keyboard."""
+        """Build the main scheduler list keyboard (active only)."""
         buttons: list[list[InlineKeyboardButton]] = []
         schedules = self._schedule_manager.list_by_user(user_id) if self._schedule_manager else []
 
-        for schedule in schedules:
-            status = "✅" if schedule.enabled else "⏸"
+        active = [s for s in schedules if s.enabled]
+        inactive_count = len(schedules) - len(active)
+
+        for schedule in active:
             buttons.append([
                 InlineKeyboardButton(
-                    f"{status} {schedule.type_emoji} {schedule.name[:18]}",
+                    f"✅ {schedule.type_emoji} {schedule.name[:18]}",
                     callback_data=f"sched:detail:{schedule.id}",
                 )
             ])
@@ -57,10 +59,10 @@ class SchedulerCallbackHandlers(BaseHandler):
             InlineKeyboardButton(BUTTON_ADD_WORKSPACE, callback_data="sched:add:workspace"),
             InlineKeyboardButton(BUTTON_ADD_PLUGIN, callback_data="sched:add:plugin"),
         ])
-        buttons.append([InlineKeyboardButton("✨ AI와 작업하기", callback_data="aiwork:scheduler")])
-        buttons.append([
-            InlineKeyboardButton(BUTTON_REFRESH, callback_data="sched:refresh"),
-        ])
+        nav_row = [InlineKeyboardButton(BUTTON_REFRESH, callback_data="sched:refresh")]
+        if inactive_count > 0:
+            nav_row.append(InlineKeyboardButton(f"📋 History ({inactive_count})", callback_data="sched:history"))
+        buttons.append(nav_row)
         return buttons
 
     async def _handle_schedule_force_reply(self, update, chat_id: int, message: str) -> None:
@@ -133,6 +135,8 @@ class SchedulerCallbackHandlers(BaseHandler):
 
         if action == "refresh":
             return await self._sched_refresh(query, user_id)
+        if action == "history":
+            return await self._sched_history(query, user_id)
         if action.startswith("detail:"):
             return await self._sched_detail(query, user_id, action[7:])
         if action.startswith("toggle:"):
@@ -186,6 +190,32 @@ class SchedulerCallbackHandlers(BaseHandler):
             parse_mode="HTML",
         )
         await query.answer("Refreshed")
+
+    async def _sched_history(self, query, user_id: str) -> None:
+        """Show inactive (disabled / completed once) schedules."""
+        schedules = self._schedule_manager.list_by_user(user_id) if self._schedule_manager else []
+        inactive = [s for s in schedules if not s.enabled]
+
+        if not inactive:
+            await query.answer("No history")
+            return
+
+        buttons = []
+        for schedule in inactive[:20]:
+            buttons.append([
+                InlineKeyboardButton(
+                    f"⏸ {schedule.type_emoji} {schedule.name[:18]}",
+                    callback_data=f"sched:detail:{schedule.id}",
+                )
+            ])
+        buttons.append([InlineKeyboardButton(BUTTON_SCHEDULE_LIST, callback_data="sched:refresh")])
+
+        await query.edit_message_text(
+            "<b>Schedule History</b>\n\nInactive / completed schedules:",
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="HTML",
+        )
+        await query.answer()
 
     async def _sched_detail(self, query, user_id: str, schedule_id: str) -> None:
         """Show detail screen for a single schedule."""
