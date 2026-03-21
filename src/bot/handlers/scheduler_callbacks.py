@@ -57,6 +57,7 @@ class SchedulerCallbackHandlers(BaseHandler):
             InlineKeyboardButton(BUTTON_ADD_WORKSPACE, callback_data="sched:add:workspace"),
             InlineKeyboardButton(BUTTON_ADD_PLUGIN, callback_data="sched:add:plugin"),
         ])
+        buttons.append([InlineKeyboardButton("✨ AI와 작업하기", callback_data="aiwork:scheduler")])
         buttons.append([
             InlineKeyboardButton(BUTTON_REFRESH, callback_data="sched:refresh"),
         ])

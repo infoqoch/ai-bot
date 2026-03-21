@@ -71,6 +71,7 @@ class WorkspaceHandlers(BaseHandler):
                     InlineKeyboardButton(BUTTON_DELETE, callback_data=f"ws:delete:{ws.id}"),
                 ])
 
+        buttons.append([InlineKeyboardButton("✨ AI와 작업하기", callback_data="aiwork:workspace")])
         buttons.append([
             InlineKeyboardButton(BUTTON_ADD_NEW, callback_data="ws:add"),
             InlineKeyboardButton(BUTTON_REFRESH, callback_data="ws:refresh"),

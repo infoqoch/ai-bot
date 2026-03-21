@@ -481,6 +481,7 @@ For a plugin to use inline buttons:
 | `ws:` | Workspace | `callback_handlers.py` |
 | `sq:` | Session queue (conflict handling) | `callback_handlers.py` |
 | `tasks:` | Task status | `callback_handlers.py` |
+| `aiwork:` | AI Work (contextual AI) | `callback_handlers.py` |
 
 **ForceReply markers (no conflicts allowed):**
 
@@ -493,6 +494,47 @@ For a plugin to use inline buttons:
 | `td:add` | Todo add | Plugin interaction (`_plugin_interactions`) |
 | `memo_add` | Memo add | Plugin interaction (`_plugin_interactions`) |
 | `diary_write` | Diary write and edit (distinguished by `interaction_action`) | Plugin interaction (`_plugin_interactions`) |
+| `aiwork:{domain}` | AI contextual assistance | Pattern matching in `message_handlers.py` |
+
+### AI Work (✨ AI와 작업하기) Pattern
+
+Every sub-menu (one level deep from the main menu) provides a "✨ AI와 작업하기" button for contextual AI assistance. When clicked, it gathers domain-specific data and sends it to the AI along with the user's request.
+
+**Flow:**
+```
+[✨ AI와 작업하기] button clicked
+    → callback: aiwork:{domain}
+    → ForceReply prompt: "무엇을 도와드릴까요?"
+    → User types request
+    → Handler gathers domain data (todos, memos, schedules, etc.)
+    → Prepends context to user's message
+    → Dispatches to AI via _dispatch_to_ai()
+    → AI responds with domain-aware answer
+```
+
+**Supported domains:**
+
+| Domain | Callback | Context Data |
+|--------|----------|-------------|
+| `scheduler` | `aiwork:scheduler` | All schedules (name, type, time, on/off status) |
+| `workspace` | `aiwork:workspace` | All workspaces (name, path) |
+| `calendar` | `aiwork:calendar` | Today's calendar events |
+| `tasks` | `aiwork:tasks` | Processing/queued AI tasks |
+| `todo` | `aiwork:todo` | Today's todo list with completion status |
+| `memo` | `aiwork:memo` | All saved memos |
+| `weather` | `aiwork:weather` | Last queried weather location |
+| `diary` | `aiwork:diary` | This month's diary entries |
+
+**Implementation:**
+- Handler mixin: `src/bot/handlers/ai_work_handlers.py` (`AiWorkHandlers`)
+- Callback prefix: `aiwork:` (registered in `callback_handlers.py`)
+- ForceReply marker: `aiwork:{domain}` (detected in `message_handlers.py`)
+- UI constant: `BUTTON_AI_WORK` in `src/ui_emoji.py`
+
+**Rules for new domains:**
+1. Add domain to `DOMAIN_LABELS` dict in `ai_work_handlers.py`
+2. Add context gatherer method `_ctx_{domain}()`
+3. Add "✨ AI와 작업하기" button with `callback_data="aiwork:{domain}"` to the sub-menu keyboard
 
 ## Message Processing Flow
 
@@ -506,6 +548,8 @@ User message arrives
     ▼ Not a command
 [2] ForceReply response detection
     │ Extract marker from reply_to_message.text → route to appropriate handler
+    │   • aiwork:{domain} → gather domain context → dispatch to AI
+    │   • Other markers → sess_name, sess_rename, schedule_input, _ws_pending, plugin interactions
     │
     ▼ Not ForceReply
 [3] Plugin (natural language pattern)

@@ -10,6 +10,7 @@ from .workspace_handlers import WorkspaceHandlers
 from .session_callbacks import SessionCallbackHandlers
 from .scheduler_callbacks import SchedulerCallbackHandlers
 from .session_queue_callbacks import SessionQueueCallbackHandlers
+from .ai_work_handlers import AiWorkHandlers
 from .callback_handlers import CallbackHandlers
 
 if TYPE_CHECKING:
@@ -29,6 +30,7 @@ class BotHandlers(
     SessionCallbackHandlers,
     SchedulerCallbackHandlers,
     SessionQueueCallbackHandlers,
+    AiWorkHandlers,
     CallbackHandlers,
 ):
     """Container for all bot command handlers.
@@ -42,6 +44,7 @@ class BotHandlers(
     - SessionCallbackHandlers: Session inline button callbacks (sess: prefix)
     - SchedulerCallbackHandlers: Scheduler inline button callbacks (sched: prefix)
     - SessionQueueCallbackHandlers: Session queue callbacks (sq: prefix)
+    - AiWorkHandlers: Contextual AI assistance (aiwork: prefix)
     - CallbackHandlers: Callback router and small utility callbacks
     """
 
