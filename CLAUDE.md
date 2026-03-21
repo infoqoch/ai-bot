@@ -392,13 +392,13 @@ plugins/
 │   ├── memo/
 │   │   ├── __init__.py
 │   │   └── plugin.py
-│   └── weather/
+│   ├── weather/
+│   │   ├── __init__.py
+│   │   └── plugin.py
+│   └── diary/
 │       ├── __init__.py
-│       └── plugin.py
+│       └── plugin.py      # 일기 CRUD, 콜백, ForceReply, 스케줄
 └── custom/                # Git 무시 (개인용)
-    ├── diary/
-    │   ├── __init__.py
-    │   └── plugin.py      # 일기 CRUD, 콜백, ForceReply, 스케줄
     └── hourly_ping/
         ├── __init__.py
         └── plugin.py      # 시간별 핑 알림
@@ -431,7 +431,7 @@ class MyPlugin(Plugin):
     # execute_scheduled_action(action_name, chat_id) → str  # 스케줄 실행
 ```
 
-참고 구현체: `plugins/builtin/todo/` (콜백+ForceReply+스케줄), `plugins/builtin/memo/` (간단한 CRUD)
+참고 구현체: `plugins/builtin/todo/` (콜백+ForceReply+스케줄), `plugins/builtin/memo/` (간단한 CRUD), `plugins/builtin/diary/` (콜백+ForceReply+스케줄+월별 목록)
 
 ### 플러그인 규칙 (CRITICAL)
 

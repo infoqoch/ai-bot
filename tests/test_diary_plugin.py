@@ -53,7 +53,7 @@ def _make_store() -> tuple[RepositoryDiaryStore, sqlite3.Connection]:
 
 def _make_plugin():
     """DiaryPlugin + mock store 조합 반환."""
-    from plugins.custom.diary.plugin import DiaryPlugin
+    from plugins.builtin.diary.plugin import DiaryPlugin
 
     plugin = DiaryPlugin()
     mock_store = MagicMock()
