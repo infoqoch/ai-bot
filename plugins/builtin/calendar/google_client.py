@@ -38,16 +38,6 @@ class CalendarEvent:
 
 def _extract_error_reason(e: Exception) -> str:
     """Extract error reason string from Google API exceptions. Returns raw Google message."""
-    # HttpError: try error_details[0]['message'] first
-    try:
-        if hasattr(e, "error_details") and e.error_details:
-            details = e.error_details
-            if isinstance(details, list) and len(details) > 0:
-                detail_msg = details[0].get("message", "")
-                if detail_msg:
-                    return str(detail_msg)
-    except Exception:
-        pass
     return str(e)
 
 
@@ -110,7 +100,7 @@ class GoogleCalendarClient:
             return [self._parse_event(item) for item in result.get("items", [])]
         except Exception as e:
             self.last_error = _extract_error_reason(e)
-            logger.error(f"Google Calendar list_events error: {e}", exc_info=True)
+            logger.error(f"Google Calendar list_events error: {self.last_error}", exc_info=True)
             return []
 
     def get_event(self, event_id: str) -> Optional[CalendarEvent]:
