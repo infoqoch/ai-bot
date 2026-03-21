@@ -272,6 +272,8 @@ src/
 | `AUTH_TIMEOUT_MINUTES` | `30` | Auth validity duration |
 | `WORKING_DIR` | (none) | Bot working directory (defaults to project root if unset) |
 | `ALLOWED_PROJECT_PATHS` | `~/AiSandbox/*,~/Projects/*` | Allowed workspace directories (glob patterns, comma-separated) |
+| `GOOGLE_SERVICE_ACCOUNT_FILE` | (none) | Google service account JSON path (for Calendar plugin) |
+| `GOOGLE_CALENDAR_ID` | `primary` | Google Calendar ID (e.g., `user@gmail.com`) |
 
 ## Process Management (CRITICAL)
 
@@ -436,7 +438,10 @@ class MyPlugin(Plugin):
     # get_schema() → str                                        # Plugin table DDL
     # build_storage(repository) → Any                           # Plugin-specific storage adapter
     # get_scheduled_actions() → list[ScheduledAction]           # List of scheduled actions
-    # execute_scheduled_action(action_name, chat_id) → str      # Execute scheduled action
+    #   ScheduledAction(name, description, recommended_hour=None, recommended_minute=None)
+    #     recommended_hour + minute set → "⭐ Recommended: HH:MM daily" button in scheduler UI
+    #     recommended_hour=None, minute set → "⭐ Recommended: every {minute} min" (interval cron)
+    # execute_scheduled_action(action_name, chat_id) → str | dict | None  # Execute scheduled action
     # register_system_jobs(context: PluginSystemJobContext)      # Register background jobs
 
     # --- AI Context API ---
@@ -454,7 +459,10 @@ Reference implementations: `plugins/builtin/todo/` (callbacks+ForceReply+schedul
 2. **Safe loading**: If a plugin fails to load, the bot continues to operate (try-catch isolation)
 3. **Data storage**: `self.repository` (Repository instance, injected by PluginLoader)
 4. **Validate before deployment**: `python -m py_compile plugins/custom/my.py`
-5. **Scheduled response is required**: `execute_scheduled_action()` must not return an empty string (`""`). Even when there is no data, it must return a message informing the user of the "empty" state. Once a schedule is set, its execution result must always reach the user.
+5. **Scheduled response rules**: `execute_scheduled_action()` returns `str`, `dict`, or `None`.
+   - `str` (non-empty): sent as plain text. Empty string `""` triggers a fallback message — avoid returning `""`.
+   - `dict`: rich response with `text` and optional `reply_markup`, sent directly.
+   - `None`: intentional silence — execution is recorded but no message is sent. Use for periodic checks (e.g., reminders) where "nothing to report" should be silent.
 6. **AI context is required**: Every plugin must provide `ai_context.md` describing its feature, DB schema, available operations, and AI assistance scope. Override `get_ai_dynamic_context()` to provide current data from DB.
 
 ### Plugin Data Storage Extension
@@ -477,7 +485,7 @@ For a plugin to use inline buttons:
 
 1. Define `CALLBACK_PREFIX = "myplugin:"` (must not conflict with existing prefixes)
 2. Implement `handle_callback(callback_data, chat_id) → dict`
-3. Add prefix routing branch to the `handle_callback()` method in `callback_handlers.py`
+3. Auto-routed — no manual registration needed in `callback_handlers.py`
 
 **Registered callback prefixes (no conflicts allowed):**
 
@@ -497,6 +505,7 @@ For a plugin to use inline buttons:
 | `sq:` | Session queue (conflict handling) | `callback_handlers.py` |
 | `tasks:` | Task status | `callback_handlers.py` |
 | `aiwork:` | AI Work (contextual AI) | `callback_handlers.py` |
+| `cal:` | Calendar plugin | Plugin auto-routing |
 
 **ForceReply markers (no conflicts allowed):**
 
@@ -510,6 +519,7 @@ For a plugin to use inline buttons:
 | `memo_add` | Memo add | Plugin interaction (`_plugin_interactions`) |
 | `diary_write` | Diary write and edit (distinguished by `interaction_action`) | Plugin interaction (`_plugin_interactions`) |
 | `aiwork:{domain}` | AI contextual assistance | Pattern matching in `message_handlers.py` |
+| `cal_title` | Calendar event title input | Plugin interaction (`_plugin_interactions`) |
 
 ### AI Work (✨ AI와 작업하기) Pattern
 
