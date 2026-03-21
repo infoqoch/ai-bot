@@ -9,26 +9,27 @@ from src.logging_config import logger
 from .base import BaseHandler
 
 
-DOMAIN_LABELS = {
+# Core domain labels (only non-plugin domains)
+CORE_DOMAIN_LABELS = {
     "scheduler": "Scheduler",
     "workspace": "Workspace",
-    "calendar": "Calendar",
     "tasks": "Tasks",
-    "todo": "Todo",
-    "memo": "Memo",
-    "weather": "Weather",
-    "diary": "Diary",
 }
 
-# Domains handled by plugins (via plugin.get_ai_context)
-PLUGIN_DOMAINS = {"todo", "memo", "weather", "diary", "calendar"}
-
-# Domains handled by core handlers (via md file + _ctx_ methods)
+# Core domains with static md context files
 CORE_DOMAINS = {"scheduler", "workspace", "tasks"}
 
 
 class AiWorkHandlers(BaseHandler):
     """Contextual AI assistance - '✨ AI와 작업하기' feature."""
+
+    def _get_domain_label(self, domain: str) -> str:
+        """Get display label for a domain. Plugins provide their own, core uses constant."""
+        if self.plugins:
+            plugin = self.plugins.get_plugin_by_name(domain)
+            if plugin:
+                return plugin.display_name or plugin.name.capitalize()
+        return CORE_DOMAIN_LABELS.get(domain, domain.capitalize())
 
     def _load_core_context(self, domain: str) -> str:
         """Load static AI context markdown for a core domain."""
@@ -41,7 +42,7 @@ class AiWorkHandlers(BaseHandler):
     async def _handle_aiwork_callback(self, query, chat_id: int, callback_data: str) -> None:
         """Handle aiwork:{domain} callback - show ForceReply prompt."""
         domain = callback_data.split(":", 1)[1] if ":" in callback_data else ""
-        label = DOMAIN_LABELS.get(domain, domain)
+        label = self._get_domain_label(domain)
 
         await query.message.reply_text(
             f"✨ <b>{label} - AI Work</b>\n\n"
@@ -60,7 +61,7 @@ class AiWorkHandlers(BaseHandler):
     ) -> None:
         """Create a new session, gather domain context, and dispatch to AI."""
         user_id = str(chat_id)
-        label = DOMAIN_LABELS.get(domain, domain)
+        label = self._get_domain_label(domain)
 
         # Create a dedicated session for this AI work
         provider = self._get_selected_ai_provider(user_id)
@@ -94,25 +95,20 @@ class AiWorkHandlers(BaseHandler):
         await self._dispatch_to_ai(update, chat_id, user_id, augmented_message)
 
     async def _gather_domain_context(self, chat_id: int, domain: str) -> str:
-        """Gather context: plugin domains delegate to plugin, core domains use md + dynamic."""
+        """Gather context: try plugin first, then core domains."""
         try:
-            if domain in PLUGIN_DOMAINS:
-                return await self._gather_plugin_context(chat_id, domain)
+            # Try plugin first (dynamic - no hardcoded plugin list)
+            if self.plugins:
+                plugin = self.plugins.get_plugin_by_name(domain)
+                if plugin:
+                    return await plugin.get_ai_context(chat_id)
+            # Core domains
             if domain in CORE_DOMAINS:
                 return await self._gather_core_context(chat_id, domain)
             return "(unknown domain)"
         except Exception as e:
             logger.error(f"Context gathering error for {domain}: {e}", exc_info=True)
             return f"(context gathering error: {e})"
-
-    async def _gather_plugin_context(self, chat_id: int, domain: str) -> str:
-        """Delegate context gathering to the plugin."""
-        if not self.plugins:
-            return "(no plugins)"
-        plugin = self.plugins.get_plugin_by_name(domain)
-        if not plugin:
-            return f"({domain} plugin not found)"
-        return await plugin.get_ai_context(chat_id)
 
     async def _gather_core_context(self, chat_id: int, domain: str) -> str:
         """Load core context: static md file + dynamic data."""

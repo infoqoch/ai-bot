@@ -51,6 +51,7 @@ class CalendarPlugin(Plugin):
 
     name = "calendar"
     description = "Google Calendar"
+    display_name = "Calendar"
     usage = (
         "📅 <b>Calendar Plugin</b>\n\n"
         "<code>/cal</code> - Open calendar\n\n"

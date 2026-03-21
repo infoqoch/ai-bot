@@ -15,6 +15,7 @@ class MemoPlugin(Plugin):
 
     name = "memo"
     description = "Save, view, and delete memos"
+    display_name = "Memo"
     usage = (
         "📝 <b>Memo Plugin</b>\n\n"
         "<code>memo</code> or <code>/memo</code>"
