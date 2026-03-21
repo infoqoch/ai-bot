@@ -424,9 +424,12 @@ class AdminHandlers(BaseHandler):
                 lines.append(f"\n  ... and {total_waiting - len(waiting_details)} more")
         text = "".join(lines) if lines else "No status info"
 
-        keyboard = [[
-            InlineKeyboardButton(BUTTON_REFRESH, callback_data="tasks:refresh"),
-            InlineKeyboardButton(BUTTON_SESSION_LIST, callback_data="sess:list"),
-        ]]
+        keyboard = [
+            [InlineKeyboardButton("✨ AI와 작업하기", callback_data="aiwork:tasks")],
+            [
+                InlineKeyboardButton(BUTTON_REFRESH, callback_data="tasks:refresh"),
+                InlineKeyboardButton(BUTTON_SESSION_LIST, callback_data="sess:list"),
+            ],
+        ]
 
         return text, keyboard

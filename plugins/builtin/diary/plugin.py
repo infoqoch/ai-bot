@@ -407,6 +407,7 @@ END;
 
         lines.append(f"📊 이 달 {len(entries)}개 · 전체 {total}개")
 
+        buttons.append([InlineKeyboardButton("✨ AI와 작업하기", callback_data="aiwork:diary")])
         buttons.append([
             InlineKeyboardButton("📝 쓰기", callback_data="diary:write"),
             InlineKeyboardButton("⏪ 어제 쓰기", callback_data="diary:write_yesterday"),

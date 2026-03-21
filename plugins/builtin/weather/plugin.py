@@ -251,7 +251,8 @@ CREATE TABLE IF NOT EXISTS weather_locations (
             [
                 InlineKeyboardButton("🔄 Refresh", callback_data=f"weather:city:{city}"),
                 InlineKeyboardButton("📍 Other city", callback_data="weather:select"),
-            ]
+            ],
+            [InlineKeyboardButton("✨ AI와 작업하기", callback_data="aiwork:weather")],
         ]
 
         return {

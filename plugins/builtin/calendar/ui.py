@@ -142,6 +142,7 @@ def build_hub_nav(date_str: str) -> list[list[InlineKeyboardButton]]:
 
     return [
         nav,
+        [InlineKeyboardButton("✨ AI와 작업하기", callback_data="aiwork:calendar")],
         [
             InlineKeyboardButton("+ Add Event", callback_data="cal:add"),
             InlineKeyboardButton("📅 Calendar", callback_data=f"cal:grid:{d.year}-{d.month:02d}"),

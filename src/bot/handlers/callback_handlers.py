@@ -55,6 +55,10 @@ class CallbackHandlers(BaseHandler):
                 await self._handle_plugin_hub_callback(query, chat_id, callback_data)
                 return
 
+            if callback_data.startswith("aiwork:"):
+                await self._handle_aiwork_callback(query, chat_id, callback_data)
+                return
+
             # Plugin auto-routing (CALLBACK_PREFIX 기반)
             if self.plugins:
                 plugin = self.plugins.get_plugin_for_callback(callback_data)

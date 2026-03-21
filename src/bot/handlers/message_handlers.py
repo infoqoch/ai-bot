@@ -134,6 +134,14 @@ class MessageHandlers(BaseHandler):
                 clear_context()
                 return
 
+            if "aiwork:" in reply_text:
+                aiwork_match = re.search(r"aiwork:(\w+)", reply_text)
+                if aiwork_match:
+                    domain = aiwork_match.group(1)
+                    await self._handle_aiwork_force_reply(update, chat_id, message, domain)
+                    clear_context()
+                    return
+
         # Plugin processing attempt
         if self.plugins:
             logger.debug(f"[PLUGIN] Processing - loaded plugins: {len(self.plugins.plugins)}")
