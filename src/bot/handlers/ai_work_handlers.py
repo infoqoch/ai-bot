@@ -4,19 +4,20 @@ from pathlib import Path
 
 from telegram import ForceReply
 
+from src.ai import get_default_model
 from src.logging_config import logger
 from .base import BaseHandler
 
 
 DOMAIN_LABELS = {
-    "scheduler": "스케줄러",
-    "workspace": "워크스페이스",
-    "calendar": "캘린더",
-    "tasks": "작업 현황",
-    "todo": "할일",
-    "memo": "메모",
-    "weather": "날씨",
-    "diary": "일기",
+    "scheduler": "Scheduler",
+    "workspace": "Workspace",
+    "calendar": "Calendar",
+    "tasks": "Tasks",
+    "todo": "Todo",
+    "memo": "Memo",
+    "weather": "Weather",
+    "diary": "Diary",
 }
 
 # Domains handled by plugins (via plugin.get_ai_context)
@@ -43,29 +44,50 @@ class AiWorkHandlers(BaseHandler):
         label = DOMAIN_LABELS.get(domain, domain)
 
         await query.message.reply_text(
-            f"✨ <b>{label} - AI와 작업하기</b>\n\n"
-            f"무엇을 도와드릴까요?\n"
-            f"<i>현재 {label} 데이터를 AI에게 전달합니다.</i>\n\n"
+            f"✨ <b>{label} - AI Work</b>\n\n"
+            f"What would you like help with?\n"
+            f"<i>Current {label} data will be sent to AI.</i>\n\n"
             f"<code>aiwork:{domain}</code>",
             parse_mode="HTML",
             reply_markup=ForceReply(
                 selective=True,
-                input_field_placeholder=f"{label} 관련 질문을 입력하세요",
+                input_field_placeholder=f"Ask about {label}...",
             ),
         )
 
     async def _handle_aiwork_force_reply(
         self, update, chat_id: int, message: str, domain: str
     ) -> None:
-        """Gather domain context and dispatch to AI."""
+        """Create a new session, gather domain context, and dispatch to AI."""
         user_id = str(chat_id)
         label = DOMAIN_LABELS.get(domain, domain)
+
+        # Create a dedicated session for this AI work
+        provider = self._get_selected_ai_provider(user_id)
+        model = get_default_model(provider)
+        session_name = f"✨ {label} AI"
+
+        session_id = self.sessions.create_session(
+            user_id=user_id,
+            ai_provider=provider,
+            model=model,
+            name=session_name,
+            first_message=f"(AI Work: {domain})",
+        )
+
+        await update.message.reply_text(
+            f"✨ New session created: <b>{session_name}</b>\n"
+            f"<code>{session_id[:8]}</code>",
+            parse_mode="HTML",
+        )
+
+        # Gather context and dispatch
         context_text = await self._gather_domain_context(chat_id, domain)
 
         augmented_message = (
-            f"[참고 정보 - {label}]\n"
+            f"[Context - {label}]\n"
             f"{context_text}\n\n"
-            f"위 정보를 참고하여 다음 요청에 답해주세요:\n"
+            f"Based on the above context, answer the following request:\n"
             f"{message}"
         )
 
@@ -78,18 +100,18 @@ class AiWorkHandlers(BaseHandler):
                 return await self._gather_plugin_context(chat_id, domain)
             if domain in CORE_DOMAINS:
                 return await self._gather_core_context(chat_id, domain)
-            return "(알 수 없는 도메인)"
+            return "(unknown domain)"
         except Exception as e:
             logger.error(f"Context gathering error for {domain}: {e}", exc_info=True)
-            return f"(데이터 수집 중 오류: {e})"
+            return f"(context gathering error: {e})"
 
     async def _gather_plugin_context(self, chat_id: int, domain: str) -> str:
         """Delegate context gathering to the plugin."""
         if not self.plugins:
-            return "(플러그인 없음)"
+            return "(no plugins)"
         plugin = self.plugins.get_plugin_by_name(domain)
         if not plugin:
-            return f"({domain} 플러그인 없음)"
+            return f"({domain} plugin not found)"
         return await plugin.get_ai_context(chat_id)
 
     async def _gather_core_context(self, chat_id: int, domain: str) -> str:
@@ -105,7 +127,7 @@ class AiWorkHandlers(BaseHandler):
         dynamic = await gatherer(chat_id) if gatherer else ""
 
         if dynamic:
-            return f"{static}\n\n[현재 데이터]\n{dynamic}"
+            return f"{static}\n\n[Current Data]\n{dynamic}"
         return static
 
     # --- Core domain dynamic data gatherers ---
@@ -113,23 +135,23 @@ class AiWorkHandlers(BaseHandler):
     async def _ctx_scheduler(self, chat_id: int) -> str:
         repo = self._repository
         if not repo:
-            return "(데이터 없음)"
+            return "(no data)"
         schedules = repo.list_schedules_by_user(str(chat_id))
         if not schedules:
-            return "등록된 스케줄이 없습니다."
+            return "No schedules registered."
         lines = []
         for s in schedules:
             status = "ON" if s.enabled else "OFF"
-            lines.append(f"- [{status}] {s.name} (유형: {s.schedule_type}, 시간: {s.trigger_summary})")
+            lines.append(f"- [{status}] {s.name} (type: {s.schedule_type}, time: {s.trigger_summary})")
         return "\n".join(lines)
 
     async def _ctx_workspace(self, chat_id: int) -> str:
         repo = self._repository
         if not repo:
-            return "(데이터 없음)"
+            return "(no data)"
         workspaces = repo.list_workspaces_by_user(str(chat_id))
         if not workspaces:
-            return "등록된 워크스페이스가 없습니다."
+            return "No workspaces registered."
         lines = []
         for ws in workspaces:
             lines.append(f"- {ws.name} ({ws.short_path})")
@@ -138,18 +160,18 @@ class AiWorkHandlers(BaseHandler):
     async def _ctx_tasks(self, chat_id: int) -> str:
         repo = self._repository
         if not repo:
-            return "(데이터 없음)"
+            return "(no data)"
         processing = repo.list_processing_messages_by_user(str(chat_id))
         queued = repo.list_queued_messages_by_user(str(chat_id))
         lines = []
         if processing:
-            lines.append(f"진행 중인 작업: {len(processing)}개")
+            lines.append(f"Processing: {len(processing)} job(s)")
             for msg in processing:
                 lines.append(f"  - {msg.get('request', '')[:50]}")
         else:
-            lines.append("진행 중인 작업 없음")
+            lines.append("No jobs processing")
         if queued:
-            lines.append(f"대기 중인 메시지: {len(queued)}개")
+            lines.append(f"Queued: {len(queued)} message(s)")
         else:
-            lines.append("대기 중인 메시지 없음")
+            lines.append("No queued messages")
         return "\n".join(lines)
