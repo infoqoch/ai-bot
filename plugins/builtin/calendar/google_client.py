@@ -36,6 +36,23 @@ class CalendarEvent:
     all_day: bool = False
 
 
+def _extract_error_reason(e: Exception) -> str:
+    """Extract a user-friendly error reason from Google API exceptions."""
+    msg = str(e)
+    # HttpError has structured details
+    if hasattr(e, "reason"):
+        return e.reason
+    if "403" in msg and "writer access" in msg.lower():
+        return "쓰기 권한이 없습니다. 캘린더 공유 설정에서 '일정 변경' 이상 권한을 부여하세요."
+    if "403" in msg:
+        return "접근 권한이 없습니다. 캘린더 공유 설정을 확인하세요."
+    if "404" in msg:
+        return "캘린더를 찾을 수 없습니다. GOOGLE_CALENDAR_ID와 공유 설정을 확인하세요."
+    if "401" in msg:
+        return "인증 실패. 서비스 계정 키를 확인하세요."
+    return msg
+
+
 class GoogleCalendarClient:
     """Thin wrapper around Google Calendar API."""
 
@@ -51,6 +68,7 @@ class GoogleCalendarClient:
         )
         self._calendar_id = calendar_id or os.getenv("GOOGLE_CALENDAR_ID", "primary")
         self._service = None
+        self.last_error: str = ""
 
     @property
     def available(self) -> bool:
@@ -93,7 +111,8 @@ class GoogleCalendarClient:
             )
             return [self._parse_event(item) for item in result.get("items", [])]
         except Exception as e:
-            logger.error(f"Google Calendar list_events error: {e}")
+            self.last_error = _extract_error_reason(e)
+            logger.error(f"Google Calendar list_events error: {e}", exc_info=True)
             return []
 
     def get_event(self, event_id: str) -> Optional[CalendarEvent]:
@@ -106,7 +125,8 @@ class GoogleCalendarClient:
             )
             return self._parse_event(item)
         except Exception as e:
-            logger.error(f"Google Calendar get_event error: {e}")
+            self.last_error = _extract_error_reason(e)
+            logger.error(f"Google Calendar get_event error: {e}", exc_info=True)
             return None
 
     def create_event(
@@ -144,7 +164,8 @@ class GoogleCalendarClient:
             )
             return self._parse_event(item)
         except Exception as e:
-            logger.error(f"Google Calendar create_event error: {e}")
+            self.last_error = _extract_error_reason(e)
+            logger.error(f"Google Calendar create_event error: {e}", exc_info=True)
             return None
 
     def delete_event(self, event_id: str) -> bool:
@@ -155,7 +176,8 @@ class GoogleCalendarClient:
             ).execute()
             return True
         except Exception as e:
-            logger.error(f"Google Calendar delete_event error: {e}")
+            self.last_error = _extract_error_reason(e)
+            logger.error(f"Google Calendar delete_event error: {e}", exc_info=True)
             return False
 
     def update_event(
@@ -190,7 +212,8 @@ class GoogleCalendarClient:
             )
             return self._parse_event(item)
         except Exception as e:
-            logger.error(f"Google Calendar update_event error: {e}")
+            self.last_error = _extract_error_reason(e)
+            logger.error(f"Google Calendar update_event error: {e}", exc_info=True)
             return None
 
     @staticmethod

@@ -441,7 +441,7 @@ class CalendarPlugin(Plugin):
 
         if not event:
             return {
-                "text": "❌ 일정 등록에 실패했습니다.",
+                "text": f"❌ 일정 등록에 실패했습니다.\n\n<code>{escape_html(self._gcal.last_error)}</code>",
                 "reply_markup": InlineKeyboardMarkup(
                     [[InlineKeyboardButton("📅 캘린더", callback_data="cal:hub")]]
                 ),
@@ -512,7 +512,7 @@ class CalendarPlugin(Plugin):
 
         if not event:
             return {
-                "text": "❌ 제목 수정에 실패했습니다.",
+                "text": f"❌ 제목 수정에 실패했습니다.\n\n<code>{escape_html(self._gcal.last_error)}</code>",
                 "reply_markup": InlineKeyboardMarkup(
                     [[InlineKeyboardButton("📅 캘린더", callback_data="cal:hub")]]
                 ),
@@ -592,7 +592,7 @@ class CalendarPlugin(Plugin):
         event = self._gcal.update_event(event_id, start=new_start, end=new_end)
         if not event:
             return {
-                "text": "❌ 시간 수정에 실패했습니다.",
+                "text": f"❌ 시간 수정에 실패했습니다.\n\n<code>{escape_html(self._gcal.last_error)}</code>",
                 "reply_markup": InlineKeyboardMarkup(
                     [[InlineKeyboardButton("📅 캘린더", callback_data="cal:hub")]]
                 ),
@@ -647,7 +647,7 @@ class CalendarPlugin(Plugin):
 
         if not success:
             return {
-                "text": "❌ 삭제에 실패했습니다.",
+                "text": f"❌ 삭제에 실패했습니다.\n\n<code>{escape_html(self._gcal.last_error)}</code>",
                 "reply_markup": InlineKeyboardMarkup(
                     [[InlineKeyboardButton("📅 캘린더", callback_data="cal:hub")]]
                 ),

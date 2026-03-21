@@ -56,6 +56,7 @@ def _make_plugin() -> tuple[CalendarPlugin, MagicMock]:
     plugin = CalendarPlugin()
     mock_gcal = MagicMock(spec=GoogleCalendarClient)
     mock_gcal.available = True
+    mock_gcal.last_error = ""
     plugin._gcal = mock_gcal
     return plugin, mock_gcal
 
