@@ -82,14 +82,14 @@ def build_date_quick_select() -> list[list[InlineKeyboardButton]]:
 
 
 def build_hour_keyboard(date_str: str) -> list[list[InlineKeyboardButton]]:
-    """Hour selection grid (09-20, 6 columns)."""
+    """Hour selection grid (00-23, 4 columns) - same layout as scheduler."""
     rows = []
     row = []
-    for h in range(9, 21):
+    for h in range(24):
         row.append(InlineKeyboardButton(
-            f"{h:02d}", callback_data=f"cal:ah:{date_str}:{h}"
+            f"{h:02d}h", callback_data=f"cal:ah:{date_str}:{h}"
         ))
-        if len(row) == 6:
+        if len(row) == 4:
             rows.append(row)
             row = []
     if row:
@@ -104,19 +104,24 @@ def build_hour_keyboard(date_str: str) -> list[list[InlineKeyboardButton]]:
 
 
 def build_minute_keyboard(date_str: str, hour: int) -> list[list[InlineKeyboardButton]]:
-    """Minute selection (00, 15, 30, 45)."""
-    return [
-        [
-            InlineKeyboardButton(
-                f"{m:02d}분", callback_data=f"cal:am:{date_str}:{hour}:{m}"
-            )
-            for m in (0, 15, 30, 45)
-        ],
-        [
-            InlineKeyboardButton("◀ 시간 다시", callback_data=f"cal:ad:{date_str}"),
-            InlineKeyboardButton("❌ 취소", callback_data="cal:hub"),
-        ],
-    ]
+    """Minute selection (0-55, 5-min intervals, 4 columns) - same layout as scheduler."""
+    rows = []
+    row = []
+    for m in range(0, 60, 5):
+        row.append(InlineKeyboardButton(
+            f":{m:02d}", callback_data=f"cal:am:{date_str}:{hour}:{m}"
+        ))
+        if len(row) == 4:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+
+    rows.append([
+        InlineKeyboardButton("◀ 시간 다시", callback_data=f"cal:ad:{date_str}"),
+        InlineKeyboardButton("❌ 취소", callback_data="cal:hub"),
+    ])
+    return rows
 
 
 def build_hub_nav(date_str: str) -> list[list[InlineKeyboardButton]]:

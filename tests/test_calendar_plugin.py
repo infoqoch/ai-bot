@@ -102,17 +102,20 @@ class TestUIHelpers:
         assert "오늘" in rows[0][0].text
 
     def test_build_hour_keyboard(self):
-        """시간 선택 키보드."""
+        """시간 선택 키보드 (00-23, 4열)."""
         rows = build_hour_keyboard("2026-03-21")
-        # Should have hour buttons + 종일 + nav
-        total_buttons = sum(len(row) for row in rows)
-        assert total_buttons > 12
+        # 24 hours / 4 cols = 6 rows + 종일 + nav = 8 rows
+        assert len(rows) == 8
+        assert rows[0][0].text == "00h"
+        assert len(rows[0]) == 4
 
     def test_build_minute_keyboard(self):
-        """분 선택 키보드."""
+        """분 선택 키보드 (5분 단위, 4열)."""
         rows = build_minute_keyboard("2026-03-21", 11)
-        assert len(rows[0]) == 4  # 00, 15, 30, 45
-        assert "00분" in rows[0][0].text
+        # 12 minutes / 4 cols = 3 rows + nav = 4 rows
+        assert len(rows) == 4
+        assert rows[0][0].text == ":00"
+        assert len(rows[0]) == 4
 
 
 # ---------------------------------------------------------------------------
