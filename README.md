@@ -236,6 +236,10 @@ Bind a session to a local directory. The AI operates with that project's `CLAUDE
 
 ---
 
+## Built With
+
+Developed with [Claude Code](https://claude.ai/claude-code) and [Codex CLI](https://github.com/openai/codex).
+
 ## License
 
 MIT

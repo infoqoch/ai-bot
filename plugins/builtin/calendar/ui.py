@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from telegram import InlineKeyboardButton
 
 from src.time_utils import app_today
+from src.ui_emoji import BUTTON_AI_WORK
 
 WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
@@ -142,7 +143,7 @@ def build_hub_nav(date_str: str) -> list[list[InlineKeyboardButton]]:
 
     return [
         nav,
-        [InlineKeyboardButton("✨ AI와 작업하기", callback_data="aiwork:calendar")],
+        [InlineKeyboardButton(BUTTON_AI_WORK, callback_data="aiwork:calendar")],
         [
             InlineKeyboardButton("+ Add Event", callback_data="cal:add"),
             InlineKeyboardButton("📅 Calendar", callback_data=f"cal:grid:{d.year}-{d.month:02d}"),
