@@ -55,8 +55,9 @@ class TestCodexClient:
         """Codex commands should expose the shared project-local MCP bridge."""
         cmd = client._build_command("Hello", session_id=None, model="gpt54_xhigh", workspace_path=None)
 
+        import sys
         root = Path(__file__).resolve().parents[1]
-        expected_command = f'mcp_servers.bot-plugins.command="{root / "venv" / "bin" / "python"}"'
+        expected_command = f'mcp_servers.bot-plugins.command="{sys.executable}"'
         expected_args = (
             f'mcp_servers.bot-plugins.args=["{root / "mcp_servers" / "plugin_bridge_server.py"}"]'
         )

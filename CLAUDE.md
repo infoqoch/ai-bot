@@ -692,11 +692,10 @@ class Plugin(ABC):
 
 ```
 mcp_servers/
-├── plugin_mcp.json              # MCP config (read by Claude CLI)
 └── plugin_bridge_server.py      # Bridge server (DB tools + plugin ToolSpecs)
 ```
 
-**Activation:** Auto-enabled when `mcp_servers/plugin_mcp.json` exists. No flag or config needed — file presence is the switch.
+**Activation:** Auto-enabled when `mcp_servers/plugin_bridge_server.py` exists. MCP config is generated dynamically at runtime with correct absolute paths — no static JSON file needed.
 
 **Adding MCP tools to a plugin:**
 1. Implement `get_tool_specs()` returning `list[ToolSpec]`

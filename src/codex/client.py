@@ -24,26 +24,16 @@ class CodexClient(BaseCLIClient):
 
     @classmethod
     def _load_project_mcp_servers(cls) -> dict[str, dict]:
-        """Load project-local MCP server definitions shared with Claude."""
-        mcp_config = cls._plugin_mcp_config_path()
-        if not mcp_config.exists():
+        """Build project-local MCP server definitions dynamically."""
+        import sys
+        bridge_script = cls._project_root() / "mcp_servers" / "plugin_bridge_server.py"
+        if not bridge_script.exists():
             return {}
-
-        try:
-            payload = json.loads(mcp_config.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.warning(f"Codex MCP config load failed: path={mcp_config}, error={exc}")
-            return {}
-
-        servers = payload.get("mcpServers")
-        if not isinstance(servers, dict):
-            logger.warning(f"Codex MCP config missing mcpServers object: path={mcp_config}")
-            return {}
-
         return {
-            name: config
-            for name, config in servers.items()
-            if isinstance(name, str) and isinstance(config, dict)
+            "bot-plugins": {
+                "command": sys.executable,
+                "args": [str(bridge_script)],
+            }
         }
 
     @classmethod

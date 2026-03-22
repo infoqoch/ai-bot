@@ -3,9 +3,12 @@
 import asyncio
 from contextlib import suppress
 from dataclasses import dataclass
+import json
 import os
 import shlex
 import signal
+import sys
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -47,9 +50,28 @@ class BaseCLIClient:
         return Path(__file__).resolve().parents[2]
 
     @classmethod
-    def _plugin_mcp_config_path(cls) -> Path:
-        """Return the shared project-local MCP bridge config path."""
-        return cls._project_root() / "mcp_servers" / "plugin_mcp.json"
+    def _generate_mcp_config(cls) -> Optional[str]:
+        """Generate MCP config file with correct absolute paths for this environment.
+
+        Returns path to temporary config file, or None if bridge server doesn't exist.
+        """
+        bridge_script = cls._project_root() / "mcp_servers" / "plugin_bridge_server.py"
+        if not bridge_script.exists():
+            return None
+        config = {
+            "mcpServers": {
+                "bot-plugins": {
+                    "command": sys.executable,
+                    "args": [str(bridge_script)],
+                }
+            }
+        }
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", prefix="mcp_", delete=False, dir=str(cls._project_root() / ".data"),
+        )
+        json.dump(config, tmp)
+        tmp.close()
+        return tmp.name
 
     def _resolve_prompts(self, workspace_path: Optional[str]) -> PromptConfig:
         """Determine prompts for one AI call.
