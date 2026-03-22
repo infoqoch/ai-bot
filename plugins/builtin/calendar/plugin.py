@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from datetime import date, datetime, timedelta
 from typing import Optional
 
@@ -80,8 +79,23 @@ class CalendarPlugin(Plugin):
     CALLBACK_PREFIX = "cal:"
     FORCE_REPLY_MARKER = "cal_title"
 
-    PATTERNS = [r"^캘린더$", r"^일정$", r"^달력$", r"^일정\s+(추가|보기|목록)"]
+    TRIGGER_KEYWORDS = ["calendar", "cal", "캘린더", "일정", "달력"]
     EXCLUDE_PATTERNS = [r"(란|이란)\s*뭐", r"(가|이)\s*뭐"]
+
+    async def can_handle(self, message: str, chat_id: int) -> bool:
+        """Match exact keywords or keyword followed by a sub-command word (e.g. '일정 추가')."""
+        import re as _re
+        msg = message.strip().lower()
+        for pattern in self.EXCLUDE_PATTERNS:
+            if _re.search(pattern, msg, _re.IGNORECASE):
+                return False
+        for keyword in self.TRIGGER_KEYWORDS:
+            kw = keyword.lower()
+            if msg == kw:
+                return True
+            if msg.startswith(kw) and len(msg) > len(kw) and msg[len(kw)].isspace():
+                return True
+        return False
 
     def __init__(self):
         super().__init__()
@@ -152,16 +166,6 @@ class CalendarPlugin(Plugin):
             return f"일정 생성 실패: {self._gcal.last_error}"
         return f"일정 생성됨: {event.summary} ({event.start.strftime('%m/%d %H:%M')})"
 
-    async def can_handle(self, message: str, chat_id: int) -> bool:
-        msg = message.strip()
-        for pattern in self.EXCLUDE_PATTERNS:
-            if re.search(pattern, msg, re.IGNORECASE):
-                return False
-        for pattern in self.PATTERNS:
-            if re.search(pattern, msg):
-                return True
-        return False
-
     async def handle(self, message: str, chat_id: int) -> PluginResult:
         if not self._gcal.available:
             return PluginResult(
@@ -173,12 +177,7 @@ class CalendarPlugin(Plugin):
                 ),
             )
 
-        msg = message.strip()
-        if re.search(r"추가", msg):
-            result = self._show_add_date_select()
-        else:
-            result = self._show_hub(chat_id, app_today())
-
+        result = self._show_hub(chat_id, app_today())
         return PluginResult(
             handled=True,
             response=result["text"],

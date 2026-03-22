@@ -203,19 +203,6 @@ class SessionHandlers(BaseHandler):
         context.args = ["haiku"]
         await self.new_session(update, context)
 
-    async def new_session_haiku_speedy(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /new_haiku_speedy command - quick haiku session with name."""
-        if not await self._require_claude_shortcut(update):
-            return
-        context.args = ["haiku", "Speedy"]
-        await self.new_session(update, context)
-
-    async def new_session_opus_smarty(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /new_opus_smarty command - smart opus session with name."""
-        if not await self._require_claude_shortcut(update):
-            return
-        context.args = ["opus", "Smarty"]
-        await self.new_session(update, context)
 
     @authorized_only
     @authenticated_only

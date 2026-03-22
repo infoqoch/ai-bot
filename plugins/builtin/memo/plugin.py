@@ -70,20 +70,6 @@ CREATE INDEX IF NOT EXISTS idx_memos_chat_id ON memos(chat_id);
         """Bind memo persistence through a bounded adapter."""
         return RepositoryMemoStore(repository)
 
-    async def can_handle(self, message: str, chat_id: int) -> bool:
-        """Check if message is memo-related."""
-        msg = message.strip().lower()
-
-        for pattern in self.EXCLUDE_PATTERNS:
-            if re.search(pattern, msg, re.IGNORECASE):
-                return False
-
-        for keyword in self.TRIGGER_KEYWORDS:
-            if msg == keyword:
-                return True
-
-        return False
-
     async def handle(self, message: str, chat_id: int) -> PluginResult:
         """Show memo main screen."""
         result = self._handle_main(chat_id)

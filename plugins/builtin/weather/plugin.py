@@ -1,7 +1,6 @@
 """Weather plugin - button-based weather lookup (Open-Meteo API)."""
 
 import csv
-import re
 from collections import OrderedDict
 from pathlib import Path
 from typing import Optional, cast
@@ -75,6 +74,8 @@ class WeatherPlugin(Plugin):
 
     CALLBACK_PREFIX = "weather:"
 
+    TRIGGER_KEYWORDS = ["weather", "날씨", "기온"]
+
     def get_schema(self) -> str:
         return """
 CREATE TABLE IF NOT EXISTS weather_locations (
@@ -94,13 +95,6 @@ CREATE TABLE IF NOT EXISTS weather_locations (
     _CITIES_CSV = Path(__file__).parent / "cities.csv"
     KOREAN_TO_ENGLISH, PROVINCE_TO_CITIES = _load_cities_csv(_CITIES_CSV)
 
-    # 단독 키워드만 플러그인이 처리
-    WEATHER_PATTERNS = [r"^날씨$", r"^기온$", r"^weather$"]
-    SET_LOCATION_PATTERNS = [
-        r"위치\s*설정\s*[:\-]?\s*(.+)",
-        r"날씨\s*위치\s*[:\-]?\s*(.+)",
-        r"(.+)\s*날씨\s*설정",
-    ]
     EXCLUDE_PATTERNS = [
         r"(란|이란|가|이)\s*(뭐|무엇|뭔)",
         r"영어로|번역|translate",
@@ -127,34 +121,7 @@ CREATE TABLE IF NOT EXISTS weather_locations (
         """Bind weather persistence through a bounded adapter."""
         return RepositoryWeatherLocationStore(repository)
 
-    async def can_handle(self, message: str, chat_id: int) -> bool:
-        msg = message.strip()
-
-        for pattern in self.EXCLUDE_PATTERNS:
-            if re.search(pattern, msg, re.IGNORECASE):
-                return False
-
-        for pattern in self.WEATHER_PATTERNS:
-            if re.search(pattern, msg, re.IGNORECASE):
-                return True
-
-        for pattern in self.SET_LOCATION_PATTERNS:
-            if re.search(pattern, msg, re.IGNORECASE):
-                return True
-
-        return False
-
     async def handle(self, message: str, chat_id: int) -> PluginResult:
-        msg = message.strip()
-
-        for pattern in self.SET_LOCATION_PATTERNS:
-            match = re.search(pattern, msg, re.IGNORECASE)
-            if match:
-                location = match.group(1).strip()
-                if location:
-                    return await self._set_location(chat_id, location)
-
-        # 단독 키워드 → 저장된 위치 날씨 or 도/광역시 선택
         return await self._get_weather(chat_id)
 
     def handle_callback(self, callback_data: str, chat_id: int) -> dict:

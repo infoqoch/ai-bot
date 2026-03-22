@@ -1,6 +1,5 @@
 """Diary plugin - daily journal with date-based entries."""
 
-import re
 from datetime import date as _date, timedelta
 from typing import Optional, cast
 
@@ -61,12 +60,27 @@ class DiaryPlugin(Plugin):
     CALLBACK_PREFIX = "diary:"
     FORCE_REPLY_MARKER = "diary_write"
 
-    PATTERNS = [r"^일기$", r"^일기\s+(쓰기|목록|보기)"]
+    TRIGGER_KEYWORDS = ["diary", "일기"]
 
     EXCLUDE_PATTERNS = [
         r"(란|이란)\s*뭐",
         r"(가|이)\s*뭐",
     ]
+
+    async def can_handle(self, message: str, chat_id: int) -> bool:
+        """Match exact keywords or keyword followed by a sub-command word (e.g. '일기 쓰기')."""
+        import re as _re
+        msg = message.strip().lower()
+        for pattern in self.EXCLUDE_PATTERNS:
+            if _re.search(pattern, msg, _re.IGNORECASE):
+                return False
+        for keyword in self.TRIGGER_KEYWORDS:
+            kw = keyword.lower()
+            if msg == kw:
+                return True
+            if msg.startswith(kw) and len(msg) > len(kw) and msg[len(kw)].isspace():
+                return True
+        return False
 
     def get_schema(self) -> str:
         return """
@@ -98,27 +112,8 @@ END;
         """Bind diary persistence through a bounded adapter."""
         return RepositoryDiaryStore(repository)
 
-    async def can_handle(self, message: str, chat_id: int) -> bool:
-        msg = message.strip()
-
-        for pattern in self.EXCLUDE_PATTERNS:
-            if re.search(pattern, msg, re.IGNORECASE):
-                return False
-
-        for pattern in self.PATTERNS:
-            if re.search(pattern, msg):
-                return True
-
-        return False
-
     async def handle(self, message: str, chat_id: int) -> PluginResult:
-        msg = message.strip()
-
-        if re.search(r"쓰기", msg):
-            result = self._handle_write_check(chat_id)
-        else:
-            result = self._handle_list(chat_id)
-
+        result = self._handle_list(chat_id)
         return PluginResult(
             handled=True,
             response=result["text"],

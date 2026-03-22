@@ -211,32 +211,32 @@ class AdminHandlers(BaseHandler):
     @authorized_only
     @authenticated_only
     async def plugin_help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /plugin_name command - redirect to the canonical help topic."""
+        """Handle /{plugin_name} command - open plugin launcher."""
         chat_id = update.effective_chat.id
         self._setup_request_context(chat_id)
 
-        if not self.plugins:
-            logger.trace("No plugin loader")
-            clear_context()
-            return
-
         text = update.message.text.strip()
-        if not text.startswith("/"):
+        plugin_name = text[1:].split()[0].lower()
+
+        plugin = self.plugins.get_plugin_by_name(plugin_name) if self.plugins else None
+        if not plugin:
+            await update.message.reply_text(f"Plugin '{plugin_name}' not found.")
             clear_context()
             return
-        plugin_name = text[1:].split()[0]
-        logger.info(f"Plugin help request: /{plugin_name}")
 
-        plugin = self.plugins.get_plugin_by_name(plugin_name)
-        if plugin:
-            logger.trace(f"Plugin found: {plugin.name}")
-            await update.message.reply_text(
-                f"Use <code>/help_{plugin.name}</code> for docs.\n"
-                f"Open <code>/plugins</code> or <code>/menu</code> for the interactive UI.",
-                parse_mode="HTML",
-            )
-        else:
-            logger.trace(f"Plugin not found: {plugin_name}")
+        try:
+            result = await plugin.open_launcher(chat_id)
+            if result and result.response:
+                await update.message.reply_text(
+                    result.response,
+                    reply_markup=result.reply_markup,
+                    parse_mode="HTML",
+                )
+            else:
+                await update.message.reply_text(plugin.usage, parse_mode="HTML")
+        except Exception as e:
+            logger.error(f"Plugin open error ({plugin_name}): {e}", exc_info=True)
+            await update.message.reply_text(f"Error opening {plugin_name}.")
 
         clear_context()
 

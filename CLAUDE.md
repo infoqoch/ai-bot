@@ -446,18 +446,18 @@ plugins/
 from src.plugins.loader import Plugin, PluginResult, ScheduledAction
 
 class MyPlugin(Plugin):
-    name = "myplugin"                    # Required: used as /myplugin command
+    name = "myplugin"                    # Required: used as /myplugin command (opens plugin)
     description = "Plugin description"   # Required: shown in /plugins
-    usage = (                            # Required: shown when /myplugin is run
+    usage = (                            # Required: shown in /help_myplugin
         "<b>Usage</b>\n\n"
         "<code>command1</code> - description\n"
         "<code>command2</code> - description"
     )
 
-    PATTERNS = [r"패턴1", r"패턴2"]          # Trigger patterns (regex)
-    EXCLUDE_PATTERNS = [r"(란|이란)\s*뭐"]   # Exclude patterns → pass to AI
+    TRIGGER_KEYWORDS = ["myplugin", "내플러그인"]  # Exact match keywords (Korean + English)
+    EXCLUDE_PATTERNS = [r"(란|이란)\s*뭐"]         # Exclude patterns → pass to AI
 
-    async def can_handle(self, message: str, chat_id: int) -> bool: ...
+    # can_handle: provided by base class (exact keyword match). Override only for special cases.
     async def handle(self, message: str, chat_id: int) -> PluginResult: ...
 
     # --- Optional API ---
@@ -694,22 +694,41 @@ User message arrives
     │
     ▼
 [1] Command (/command)
-    │ CommandHandler processes first. Immediate response (no Claude call)
+    │ /{plugin_name} → open plugin launcher
+    │ /help_{plugin_name} → show plugin help
+    │ Other commands → immediate response
     │
     ▼ Not a command
 [2] ForceReply response detection
     │ Extract marker from reply_to_message.text → route to appropriate handler
-    │   • aiwork:{domain} → gather domain context → dispatch to AI
+    │   • aiwork:{domain} → load static context → dispatch to AI
     │   • Other markers → sess_name, sess_rename, schedule_input, _ws_pending, plugin interactions
     │
     ▼ Not ForceReply
-[3] Plugin (natural language pattern)
-    │ Iterate plugins.process_message()
-    │ can_handle() → handle() → immediate response
+[3] Plugin (exact keyword match)
+    │ "할일" → todo plugin opens
+    │ "memo" → memo plugin opens
+    │ Iterate plugins, can_handle() checks TRIGGER_KEYWORDS exact match
     │
-    ▼ No plugin match
+    ▼ No exact match
+[3.5] Plugin keyword + content → AI with context
+    │ "할일 오늘 뭐 해야돼?" → AI gets todo context + "오늘 뭐 해야돼?"
+    │ match_plugin_keyword() detects keyword prefix with additional text
+    │ Prepends plugin ai_context.md to message → dispatch to AI
+    │
+    ▼ No keyword match
 [4] Claude AI (background processing)
 ```
+
+**Plugin Trigger Rules:**
+
+| Rule | Description |
+|------|-------------|
+| `TRIGGER_KEYWORDS` | Required. List of exact-match keywords (Korean + English). Base class `can_handle()` enforces exact match. |
+| `EXCLUDE_PATTERNS` | Optional. Regex patterns to pass to AI instead (e.g., "메모란 뭐" → AI answers, not plugin) |
+| `/{name}` command | Opens plugin launcher (same as menu button click) |
+| `/help_{name}` | Shows plugin usage/help text |
+| Keyword + content | Auto-routed to AI with plugin context prepended (no new session created) |
 
 ## Telegram Command Rules
 

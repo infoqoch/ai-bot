@@ -93,6 +93,9 @@ class Plugin(ABC):
     CALLBACK_PREFIX: str = ""  # 빈 문자열이면 콜백 미지원
     FORCE_REPLY_MARKER: str = ""  # 빈 문자열이면 ForceReply 미지원
 
+    TRIGGER_KEYWORDS: list[str] = []
+    EXCLUDE_PATTERNS: list[str] = []
+
     # Repository 인스턴스 (PluginLoader가 주입)
     _repository: Optional["Repository"] = None
     _storage: Any = None
@@ -122,10 +125,22 @@ class Plugin(ABC):
         """플러그인 전용 DDL을 반환. 오버라이드하여 사용."""
         return ""
 
-    @abstractmethod
     async def can_handle(self, message: str, chat_id: int) -> bool:
-        """이 플러그인이 메시지를 처리할 수 있는지 확인."""
-        pass
+        """Check if this plugin handles the message via exact keyword match.
+
+        Matches only exact keywords (e.g. "할일"). Messages with trailing content
+        (e.g. "할일 오늘 뭐 해야돼?") fall through to match_plugin_keyword for
+        AI-with-context routing. Plugins that handle sub-commands (e.g. "일정 추가")
+        should override this method.
+        """
+        msg = message.strip().lower()
+        for pattern in self.EXCLUDE_PATTERNS:
+            if re.search(pattern, msg, re.IGNORECASE):
+                return False
+        for keyword in self.TRIGGER_KEYWORDS:
+            if msg == keyword.lower():
+                return True
+        return False
 
     @abstractmethod
     async def handle(self, message: str, chat_id: int) -> PluginResult:
@@ -600,6 +615,27 @@ class PluginLoader:
         logger.trace("no plugin match - passing to Claude")
         return None
 
+    def match_plugin_keyword(self, message: str) -> "tuple[Plugin, str] | None":
+        """Match a plugin keyword with additional content.
+
+        Returns (plugin, user_query) if message starts with a keyword followed by text.
+        Returns None if no match or exact keyword match (handled by can_handle).
+        """
+        msg = message.strip().lower()
+        for plugin in self.plugins:
+            for keyword in plugin.TRIGGER_KEYWORDS:
+                if msg.startswith(keyword + " ") and len(msg) > len(keyword) + 1:
+                    # Check exclude patterns first
+                    excluded = False
+                    for pattern in plugin.EXCLUDE_PATTERNS:
+                        if re.search(pattern, msg, re.IGNORECASE):
+                            excluded = True
+                            break
+                    if not excluded:
+                        user_query = message.strip()[len(keyword):].strip()
+                        return plugin, user_query
+        return None
+
     def get_plugin_list(self) -> list[dict]:
         """로드된 플러그인 목록 반환."""
         logger.trace("get_plugin_list()")
@@ -668,4 +704,50 @@ class PluginLoader:
                 return plugin
 
         logger.trace(f"plugin not found: {name}")
+        return None
+
+    def match_plugin_keyword(self, message: str) -> Optional[tuple["Plugin", str]]:
+        """Check if message starts with a plugin keyword followed by content.
+
+        Returns (plugin, user_query) when a keyword prefix is found with trailing
+        content that does not match any exclude pattern. Returns None otherwise.
+
+        Distinct from process_message: this path is taken only when the message
+        has extra content after the keyword (e.g. "할일 오늘 뭐 해야돼?").
+        Exact keyword-only messages are handled by the normal plugin dispatch.
+        """
+        stripped = message.strip()
+
+        for plugin in self.plugins:
+            keywords = getattr(plugin, "TRIGGER_KEYWORDS", [])
+            for keyword in keywords:
+                if not stripped.lower().startswith(keyword.lower()):
+                    continue
+
+                # Require content after the keyword (separated by whitespace)
+                remainder = stripped[len(keyword):]
+                if not remainder or not remainder[0].isspace():
+                    continue
+
+                user_query = remainder.strip()
+                if not user_query:
+                    continue
+
+                # Check exclude patterns - if matched, pass to AI without context
+                exclude_patterns = getattr(plugin, "EXCLUDE_PATTERNS", [])
+                excluded = any(
+                    re.search(pattern, user_query)
+                    for pattern in exclude_patterns
+                )
+                if excluded:
+                    logger.trace(
+                        f"match_plugin_keyword: '{keyword}' matched but query excluded by pattern"
+                    )
+                    continue
+
+                logger.debug(
+                    f"match_plugin_keyword: plugin={plugin.name}, keyword='{keyword}', query='{user_query[:50]}'"
+                )
+                return plugin, user_query
+
         return None

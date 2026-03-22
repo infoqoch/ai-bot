@@ -178,6 +178,25 @@ class MessageHandlers(BaseHandler):
         else:
             logger.debug("[PLUGIN] No plugin loader")
 
+        # Keyword + content → AI with plugin context
+        # e.g. "할일 오늘 뭐 해야돼?" → AI gets plugin context + "오늘 뭐 해야돼?"
+        if self.plugins:
+            keyword_match = self.plugins.match_plugin_keyword(message)
+            if keyword_match:
+                plugin, user_query = keyword_match
+                static_context = await plugin.get_ai_context(chat_id)
+                label = plugin.display_name or plugin.name.capitalize()
+                augmented = (
+                    f"[Context - {label}]\n"
+                    f"{static_context}\n\n"
+                    f"Based on the above context, answer the following request:\n"
+                    f"{user_query}"
+                )
+                logger.info(f"[PLUGIN] Keyword+content match: plugin={plugin.name}, query='{user_query[:50]}'")
+                await self._dispatch_to_ai(update, chat_id, user_id, augmented)
+                clear_context()
+                return
+
         await self._dispatch_to_ai(update, chat_id, user_id, message)
 
     async def _dispatch_to_ai(
