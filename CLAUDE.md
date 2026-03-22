@@ -765,6 +765,20 @@ User message arrives
 | `/help_{name}` | Shows plugin usage/help text |
 | Keyword + content | Auto-routed to AI Conversation with plugin context prepended. AI uses MCP Data Bridge for actual data access. |
 
+**Keyword + Content Examples:**
+
+When a message starts with a plugin keyword followed by natural language, it is dispatched to AI with that plugin's context automatically:
+
+| User Input | Routing | What Happens |
+|------------|---------|-------------|
+| `할일` | Plugin Launcher | Opens todo UI |
+| `할일 오늘 뭐 해야돼?` | AI + todo context | AI queries todos via `query_db`, responds with today's list |
+| `메모 정리해줘` | AI + memo context | AI queries memos via `query_db`, suggests organization |
+| `일정 다음 주 비어있는 날 알려줘` | AI + calendar context | AI queries calendar via `calendar_list_events`, finds free days |
+| `일기 이번 달 요약해줘` | AI + diary context | AI queries diaries via `query_db`, generates summary |
+
+No special command needed — just type `{keyword} {your request}` and AI handles it with full data access via MCP.
+
 **Plugin Launcher Registry:**
 
 | Plugin | `/command` | Korean Keywords | English Keywords |
