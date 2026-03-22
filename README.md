@@ -2,66 +2,46 @@
 
 Control local AI coding agents (Claude Code, Codex CLI) from your phone via Telegram.
 
-Single-user, Telegram-first, and intentionally narrow: this is a remote control surface for your local coding agents, not a general-purpose personal assistant platform.
+Use the sessions that already live on your machine, work across multiple projects, automate recurring jobs, and extend the bot with your own plugins.
 
 ---
 
-## Why This Project?
+## What You Get
 
-| | |
-|---|---|
-| **Reuse existing CLI subscriptions** | Works with your existing Claude Code / Codex CLI login — no API key needed |
-| **Remote access from anywhere** | Manage local AI agent sessions from your phone, on the go |
-| **Multi-session management** | Independent sessions per project, auto-recycled after 24h idle |
-| **Plugin fast-path** | Instant responses for memo, todo, weather — no AI call required |
-| **MCP data bridge** | Let your AI query the bot's own SQLite database for context-aware answers |
-| **Long-running task support** | Detached worker survives bot restarts; AI responses are delivered end-to-end |
-| **Security** | Chat ID whitelist + optional authentication layer |
+- Convenient access to the local Claude Code / Codex CLI sessions you already use
+- Import local CLI sessions and continue them from Telegram without starting over
+- Multi-session workflow across providers, projects, and tasks
+- Scheduler-driven work for chat, workspace, folder, and plugin actions
+- Workspace and folder aware execution that applies each project's `CLAUDE.md`
+- MCP-backed access to live bot data during AI work
+- Detached workers that keep long-running jobs alive across soft restarts
+- Persistent queueing and delivery retry so in-flight work is less likely to disappear on restarts or send failures
+- An extension surface for custom plugins, using the built-ins as reference implementations
 
----
+## Why It Feels Fast
 
-## Best Fit
+The bot does not send every request to AI.
 
-- You already use Claude Code and/or Codex CLI locally.
-- You want to continue or monitor coding sessions from your phone.
-- You prefer a small local control plane over a broader hosted assistant product.
+Common actions can go through plugins first, then fall through to AI only when needed. That keeps latency low and avoids unnecessary CLI runs.
 
-## Non-Goals
+## Why It Feels Stable
 
-- Multi-user team collaboration
-- A voice-first or multi-channel personal assistant
-- A general consumer assistant with broad lifestyle integrations
+The bot keeps operational state in SQLite instead of memory-only flow.
 
----
+That matters when:
 
-## Architecture
+- you restart the bot while a long-running worker is still active
+- Telegram delivery fails and needs retry
+- you want to adopt a session that already exists in your local CLI history
 
-The bot is a thin Telegram control plane over your existing local AI CLI setup:
+## Built-In Plugins
 
-```
-┌─────────────────────────────────────────────────────┐
-│  Telegram Client (your phone)                        │
-└──────────────────────┬──────────────────────────────┘
-                       │
-┌──────────────────────▼──────────────────────────────┐
-│  Layer 1: Plugin Launcher                            │
-│  Pattern-matched fast-path (0.1s)                    │
-│  Todo, Memo, Diary, Calendar, Weather                │
-└──────────────────────┬──────────────────────────────┘
-                       │ no match
-┌──────────────────────▼──────────────────────────────┐
-│  Layer 2: AI Conversation                            │
-│  src.main → spawn → src.worker_job                   │
-│  Claude Code CLI / Codex CLI (subprocess)            │
-│  Detached worker — survives soft restarts            │
-└──────────────────────┬──────────────────────────────┘
-                       │ tool calls
-┌──────────────────────▼──────────────────────────────┐
-│  Layer 3: MCP Data Bridge                            │
-│  query_db, db_schema, list_events, create_event      │
-│  AI queries bot's own SQLite for live context        │
-└─────────────────────────────────────────────────────┘
-```
+Todo, Memo, Diary, Calendar, and Weather ship by default.
+
+Treat them as both useful defaults and reference implementations for extension. Detailed behavior belongs in the plugin spec, not in this README:
+
+- Built-in plugin spec: [docs/SPEC_PLUGINS_BUILTIN.md](docs/SPEC_PLUGINS_BUILTIN.md)
+- Extension rules and plugin interfaces: [CLAUDE.md](CLAUDE.md)
 
 ---
 
@@ -127,104 +107,7 @@ cp .env.example .env
 
 ---
 
-## Features
-
-### Message Routing
-
-Every incoming message flows through four stages in order:
-
-```
-1. Command handler   /menu, /new, /sl, /tasks — instant response
-        ↓ (not a command)
-2. ForceReply check  Route reply to its originating handler
-        ↓ (not a reply)
-3. Plugin Launcher   Pattern-match → instant response (no AI call)
-        ↓ (no match)
-4. AI dispatch       Send to Claude Code or Codex via detached worker
-```
-
-### Plugin System
-
-Five built-in plugins handle common tasks instantly without touching the AI:
-
-| Plugin | Keywords | What it does |
-|--------|----------|--------------|
-| **Todo** | `todo`, `할일`, `투두` | Add, list, complete todo items |
-| **Memo** | `memo`, `메모` | Save and search text notes |
-| **Diary** | `diary`, `일기` | Daily journal entries |
-| **Calendar** | `calendar`, `cal`, `캘린더`, `일정`, `달력` | Google Calendar integration |
-| **Weather** | `weather`, `날씨`, `기온` | Real-time weather via Open-Meteo |
-
-**Keyword + natural language → AI with context:** Type a keyword followed by a request (e.g., `할일 오늘 뭐 해야돼?`) and the AI automatically receives the plugin's context + MCP data access. No button needed.
-
-Each plugin also provides a "✨ AI Work" button for contextual AI assistance with full MCP data access.
-
-Direct plugin slash commands such as `/memo` or `/todo` open usage docs first. The interactive launcher lives under `/plugins` and the menu UI.
-
-**Adding custom plugins:** Drop a `plugin.py` into `plugins/custom/` — no core code changes required.
-
-### Session Management
-
-- **Multi-provider:** Switch between Claude Code and Codex with `/select_ai`
-- **Named sessions:** `/new opus coding-helper` creates a session with a name
-- **Auto-recycling:** Sessions idle for 24h are recycled; deleted after 7 days
-- **Random nicknames:** Sessions get friendly names like `Buddy📚` or `Sparky🤖`
-- **Import local sessions:** Bring in sessions you started directly in the terminal
-
-```
-/menu          → Main hub (sessions, workspaces, scheduler, plugins)
-/new           → Create a new session
-/sl            → List all sessions
-/session       → Current session info
-/select_ai     → Switch provider (Claude / Codex)
-/tasks         → View active AI tasks
-```
-
-### MCP Data Bridge
-
-When Claude Code runs inside the bot's workspace, it can call MCP tools to query live data:
-
-| Tool | What it does |
-|------|-------------|
-| `query_db` | Run SQL on the bot's SQLite database (SELECT/INSERT/UPDATE/DELETE) |
-| `db_schema` | Explore table structure and column definitions |
-| `list_events` | Fetch upcoming Google Calendar events |
-| `create_event` | Create a new calendar event |
-
-This lets the AI answer questions like "what todos do I have this week?" by reading real data rather than relying on conversation history.
-
-### Scheduler
-
-Create scheduled AI tasks from the Telegram UI:
-
-- **Chat schedules:** Run a prompt on a cron schedule using the current provider
-- **Workspace schedules:** Run inside a specific project directory (applies that project's `CLAUDE.md`)
-- **Plugin schedules:** Trigger a plugin action (e.g., daily diary reminder) on a schedule
-
-```
-Scheduler UI flow:
-  Hour (00–23) → Minute (5-min steps) → Daily / One-time → Message → Register
-```
-
-Schedules are sorted by next execution time. Timezone is controlled by `APP_TIMEZONE` (default: `Asia/Seoul`).
-
-### Detached Worker Architecture
-
-Long-running AI tasks run in a separate process so the bot stays responsive:
-
-```
-src.supervisor          watches and restarts src.main
-    └─ src.main         receives requests, creates job record, spawns worker, returns immediately
-         └─ src.worker_job   owns the CLI subprocess, streams response to Telegram, drains queue
-```
-
-`./run.sh restart-soft` restarts only supervisor and main — in-flight workers continue running and deliver their responses. The DB (`message_log`, `queued_messages`, `session_locks`) is the source of truth for job state, not memory.
-
-### Workspace Sessions
-
-Bind a session to a local directory. The AI operates with that project's `CLAUDE.md` as its system context, making it project-aware without manual setup.
-
-### Security
+## Security
 
 | Layer | Protection |
 |-------|-----------|
@@ -268,16 +151,9 @@ Bind a session to a local directory. The AI operates with that project's `CLAUDE
 | Doc | Content |
 |-----|---------|
 | [CLAUDE.md](CLAUDE.md) | Development rules, architecture contracts, extension interfaces |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Runtime boundaries and code ownership |
 | [docs/SPEC.md](docs/SPEC.md) | UI/UX specification, session/schedule/restart scenarios |
 | [docs/SPEC_PLUGINS_BUILTIN.md](docs/SPEC_PLUGINS_BUILTIN.md) | Builtin plugin UI/UX specifications |
-
----
-
-## Positioning
-
-If you want a broad personal-assistant platform with many channels, voice, and consumer integrations, this repository is probably too narrow.
-
-If you want a practical way to reuse your existing Claude Code / Codex CLI login, keep coding sessions on your own machine, and steer them from Telegram, that narrowness is the point.
 
 ---
 
