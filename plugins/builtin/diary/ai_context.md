@@ -31,6 +31,14 @@ diaries (
 - 성찰 질문 제안
 - 반복 패턴이나 성장 포인트 발견
 
+## MCP 도구
+
+데이터 조회/수정이 필요하면 `query_db` 도구를 사용하라. `{chat_id}` 플레이스홀더가 자동 치환된다.
+
+- 월별 조회: `query_db("SELECT * FROM diaries WHERE chat_id = {chat_id} AND date LIKE '2026-03%'")`
+- 특정 날짜: `query_db("SELECT * FROM diaries WHERE chat_id = {chat_id} AND date = '2026-03-22'")`
+- 테이블 구조 확인: `db_schema("diaries")`
+
 ## 제약사항
 
 - 하루 1개 일기만 허용 (chat_id + date UNIQUE)

@@ -642,7 +642,7 @@ class SessionCallbackHandlers(BaseHandler):
 
             buttons.append([
                 InlineKeyboardButton(
-                    f"{provider_icon} {name[:15]}",
+                    f"↩ {name[:13]}",
                     callback_data=f"sess:restore:{sid}",
                 ),
                 InlineKeyboardButton(BUTTON_HISTORY, callback_data=f"sess:history:{sid}"),

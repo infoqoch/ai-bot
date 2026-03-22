@@ -48,3 +48,12 @@
 - 멈춘 작업 진단 및 해결 방안 제시
 - 작업 처리 패턴 분석 (평균 소요 시간, 에러 빈도 등)
 - 시스템 최적화 제안
+
+## MCP 도구
+
+데이터 조회가 필요하면 `query_db` 도구를 사용하라. `{chat_id}` 플레이스홀더가 자동 치환된다.
+
+- 처리 중 작업: `query_db("SELECT * FROM message_log WHERE chat_id = {chat_id} AND processed = 1 ORDER BY request_at DESC LIMIT 10")`
+- 대기 중 메시지: `query_db("SELECT * FROM queued_messages WHERE chat_id = {chat_id}")`
+- 세션 잠금 상태: `query_db("SELECT * FROM session_locks")`
+- 테이블 구조 확인: `db_schema("message_log")`

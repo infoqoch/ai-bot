@@ -48,3 +48,12 @@
 - 새로운 스케줄 추천 (사용 패턴 기반)
 - 스케줄 실행 결과 분석
 - 에러 발생 시 원인 분석 및 해결 방안 제시
+
+## MCP 도구
+
+데이터 조회/수정이 필요하면 `query_db` 도구를 사용하라. `{chat_id}` 플레이스홀더가 자동 치환된다.
+
+- 전체 조회: `query_db("SELECT * FROM schedules WHERE chat_id = {chat_id}")`
+- 활성 스케줄만: `query_db("SELECT * FROM schedules WHERE chat_id = {chat_id} AND enabled = 1")`
+- 에러 발생 스케줄: `query_db("SELECT * FROM schedules WHERE chat_id = {chat_id} AND last_error IS NOT NULL")`
+- 테이블 구조 확인: `db_schema("schedules")`

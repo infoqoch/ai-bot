@@ -29,6 +29,12 @@ weather_locations (
 - 주간 날씨 트렌드 분석
 - 기상 상황에 따른 일정 조정 제안
 
+## MCP 도구
+
+저장된 위치 조회: `query_db("SELECT * FROM weather_locations WHERE chat_id = {chat_id}")`
+
+날씨 데이터는 실시간 API에서 제공되므로 DB 조회로는 현재 날씨를 알 수 없다. 위치 정보만 조회 가능.
+
 ## 제약사항
 
 - 사용자당 1개 위치만 저장

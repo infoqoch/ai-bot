@@ -33,3 +33,10 @@
 - 워크스페이스 활용 제안 (자주 쓰는 작업 자동화)
 - 프로젝트별 맞춤 스케줄 추천
 - 워크스페이스 정리 및 구조화 조언
+
+## MCP 도구
+
+데이터 조회가 필요하면 `query_db` 도구를 사용하라. `{chat_id}` 플레이스홀더는 user_id로 자동 치환된다.
+
+- 전체 조회: `query_db("SELECT * FROM workspaces WHERE user_id = '{chat_id}'")`
+- 테이블 구조 확인: `db_schema("workspaces")`

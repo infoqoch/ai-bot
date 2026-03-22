@@ -27,6 +27,15 @@ memos (
 - 주제별 메모 검색
 - 메모 정리 및 구조화 제안
 
+## MCP 도구
+
+데이터 조회/수정이 필요하면 `query_db` 도구를 사용하라. `{chat_id}` 플레이스홀더가 자동 치환된다.
+
+- 전체 조회: `query_db("SELECT * FROM memos WHERE chat_id = {chat_id}")`
+- 키워드 검색: `query_db("SELECT * FROM memos WHERE chat_id = {chat_id} AND content LIKE '%키워드%'")`
+- 삭제: `query_db("DELETE FROM memos WHERE id = 3 AND chat_id = {chat_id}")`
+- 테이블 구조 확인: `db_schema("memos")`
+
 ## 제약사항
 
 - 사용자(chat_id)별 격리

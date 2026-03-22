@@ -255,6 +255,7 @@ _start_supervisor() {
     local new_pid=$!
     echo "$new_pid" > "$PID_FILE"
 
+    sleep 3
     local main_pids
     if ps -p "$new_pid" > /dev/null 2>&1 && main_pids=$(_wait_for_main_start "$new_pid" 5); then
         echo "✅ 봇 시작됨 (Supervisor PID: $new_pid)"

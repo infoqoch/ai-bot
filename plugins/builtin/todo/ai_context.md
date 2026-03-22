@@ -35,6 +35,15 @@ todos (
 - 일일/주간 계획 수립 도우미
 - 반복 할일 패턴 파악
 
+## MCP 도구
+
+데이터 조회/수정이 필요하면 `query_db` 도구를 사용하라. `{chat_id}` 플레이스홀더가 자동 치환된다.
+
+- 조회: `query_db("SELECT * FROM todos WHERE chat_id = {chat_id} AND date = '2026-03-22'")`
+- 완료 처리: `query_db("UPDATE todos SET done = 1 WHERE id = 5 AND chat_id = {chat_id}")`
+- 삭제: `query_db("DELETE FROM todos WHERE id = 5 AND chat_id = {chat_id}")`
+- 테이블 구조 확인: `db_schema("todos")`
+
 ## 제약사항
 
 - 날짜 기반 관리 (date 컬럼)
