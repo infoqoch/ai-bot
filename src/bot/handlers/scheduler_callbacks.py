@@ -13,6 +13,7 @@ from src.ui_emoji import (
     BUTTON_ADD_CHAT,
     BUTTON_ADD_PLUGIN,
     BUTTON_ADD_WORKSPACE,
+    BUTTON_AI_WORK,
     BUTTON_BACK,
     BUTTON_CANCEL,
     BUTTON_DELETE,
@@ -59,6 +60,7 @@ class SchedulerCallbackHandlers(BaseHandler):
             InlineKeyboardButton(BUTTON_ADD_WORKSPACE, callback_data="sched:add:workspace"),
             InlineKeyboardButton(BUTTON_ADD_PLUGIN, callback_data="sched:add:plugin"),
         ])
+        buttons.append([InlineKeyboardButton(BUTTON_AI_WORK, callback_data="aiwork:scheduler")])
         nav_row = [InlineKeyboardButton(BUTTON_REFRESH, callback_data="sched:refresh")]
         if inactive_count > 0:
             nav_row.append(InlineKeyboardButton(f"📋 History ({inactive_count})", callback_data="sched:history"))

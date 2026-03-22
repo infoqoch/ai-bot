@@ -57,3 +57,7 @@
 - 활성 스케줄만: `query_db("SELECT * FROM schedules WHERE chat_id = {chat_id} AND enabled = 1")`
 - 에러 발생 스케줄: `query_db("SELECT * FROM schedules WHERE chat_id = {chat_id} AND last_error IS NOT NULL")`
 - 테이블 구조 확인: `db_schema("schedules")`
+
+### reload_schedules
+
+`query_db`로 스케줄을 추가/수정/삭제한 후 반드시 `reload_schedules()`를 호출해야 변경사항이 런타임 스케줄러에 반영된다. DB만 수정하면 봇 재시작 전까지 실제 동작에 반영되지 않는다.

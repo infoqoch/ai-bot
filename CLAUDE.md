@@ -679,6 +679,7 @@ class Plugin(ABC):
 |------|---------|
 | `query_db(sql)` | SQL against bot SQLite (SELECT/INSERT/UPDATE/DELETE). Use `{chat_id}` placeholder for auto-replacement with `ADMIN_CHAT_ID`. DROP/ALTER blocked. |
 | `db_schema(table_name?)` | List all tables, or show columns for a specific table |
+| `reload_schedules()` | Send SIGUSR1 to bot process to hot-reload schedules from DB. Call after modifying schedules via `query_db`. |
 | `calendar_list_events(start_date, end_date)` | Google Calendar event query (plugin ToolSpec) |
 | `calendar_create_event(summary, start, all_day?)` | Google Calendar event creation (plugin ToolSpec) |
 

@@ -125,6 +125,33 @@ def db_schema(table_name: str = "") -> str:
     return "Tables:\n" + "\n".join(f"  - {t}" for t in tables)
 
 
+# ==================== Scheduler Reload Tool ====================
+
+@mcp.tool(
+    name="reload_schedules",
+    description=(
+        "스케줄러를 리로드한다. query_db로 스케줄을 추가/수정/삭제한 후 "
+        "이 도구를 호출하면 변경사항이 런타임에 즉시 반영된다."
+    ),
+)
+def reload_schedules() -> str:
+    """Send SIGUSR1 to the bot process to trigger schedule hot-reload."""
+    import signal
+
+    pid_file = _PROJECT_ROOT / os.getenv("BOT_DATA_DIR", ".data") / "telegram-bot.pid"
+    if not pid_file.exists():
+        return "ERROR: PID 파일을 찾을 수 없습니다. 봇이 실행 중인지 확인하세요."
+
+    try:
+        pid = int(pid_file.read_text().strip())
+        os.kill(pid, signal.SIGUSR1)
+        return f"OK: 스케줄러 리로드 시그널 전송 완료 (PID={pid})"
+    except ProcessLookupError:
+        return f"ERROR: 프로세스(PID={pid})가 실행 중이 아닙니다."
+    except Exception as e:
+        return f"ERROR: 시그널 전송 실패 - {e}"
+
+
 # ==================== Plugin Tools ====================
 
 def _make_tool_function(name: str, handler, parameters: dict):
