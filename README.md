@@ -1,36 +1,47 @@
 # Telegram AI CLI Bot
 
-Control local AI coding agents (Claude Code, Codex CLI) from your phone via Telegram.
+Turn Claude Code and Codex CLI on your machine into a Telegram-accessible remote coding workspace.
 
-Use your existing Claude Code / Codex CLI login from Telegram, create new sessions remotely, continue the sessions you already have on your machine, and keep longer-running work stable.
+Use Claude Code and Codex CLI from Telegram without changing the workflow you already use on your machine.
+
+Reuse the subscriptions and logins you already have. Start fresh sessions remotely, pick up sessions that already exist locally, switch across projects, schedule recurring work, and keep longer-running jobs stable.
 
 ---
 
-## Why It Is Practical
+## Why Use It
 
-- Use the CLI subscriptions and logins you already have; no separate API-first setup is required
-- Chat with Claude Code or Codex from Telegram wherever you are
-- Create new sessions from Telegram when you want fresh work
+- Use the Claude Code / Codex CLI subscriptions and logins you already have; no separate provider API key workflow is required
+- Chat with your local coding agents from Telegram wherever you are
+- Create new Claude or Codex sessions from Telegram when you want a clean start
 - Import local CLI sessions and continue them from Telegram without starting over
+- Keep multiple sessions across providers, projects, and tasks without collapsing everything into one thread
+- Schedule recurring work for chat, workspace, folder, and plugin actions
+- Extend the bot through custom plugins, using the built-ins as reference implementations
 
-## Why Sessions Matter
+## Typical Uses
 
-- Multi-session workflow across providers, projects, and tasks
-- Workspace and folder aware execution that applies each project's `CLAUDE.md`
-- Session switching, queueing, and session-level isolation for safer long-running work
-- Fast-path plugin handling so simple actions do not always pay the AI latency cost
+- **Fresh remote start:** create a new debugging, review, or refactor session from your phone while away from the desk
+- **Desk -> phone handoff:** import a Claude/Codex session you already started locally and continue it in Telegram
+- **Multi-project flow:** keep separate sessions per repo, task, or provider and switch between them quickly
+- **Scheduled project work:** run recurring workspace prompts against a specific project and its `CLAUDE.md`
+- **Fast-path utility work:** use plugins for common actions so simple requests do not always pay full AI latency
 
-## Why It Feels Stable
+This workflow is not just a pitch. The bot has been actively developed through Telegram using the same local Claude Code / Codex CLI session flow it provides.
 
-- Long-running work runs in detached workers instead of living only in the main bot process
-- SQLite-backed state adds persistence for locks, queued work, and delivery tracking
-- Delivery retry and persistent queueing make responses less likely to disappear on restarts or send failures
+## Why It Holds Up
 
-## Why It Extends
+- Long-running AI jobs run in detached workers instead of living only in the main bot process
+- Soft restarts can preserve in-flight work instead of dropping responses
+- Persistent queueing, lock state, and delivery tracking reduce lost work and duplicate execution
+- Session-level isolation makes multi-session handling safer
+- SQLite persistence helps the bot recover operational state instead of relying only on memory
 
-- Scheduler-driven work for chat, workspace, folder, and plugin actions
-- MCP-backed access to live bot data during AI work
-- An extension surface for custom plugins, using the built-ins as reference implementations
+## Why It Automates And Extends
+
+- Workspace and folder aware execution applies each project's `CLAUDE.md`
+- MCP-backed tools expose live bot data during AI work
+- Plugin fast paths handle common actions instantly
+- Custom plugins let you add your own domain-specific workflows without rewriting the core runtime
 
 ## Built-In Plugins
 
@@ -78,6 +89,7 @@ For manual setup, runtime commands, security controls, and environment variables
 
 | Doc | Content |
 |-----|---------|
+| [docs/README.md](docs/README.md) | Documentation map and reading order |
 | [CLAUDE.md](CLAUDE.md) | Development rules, architecture contracts, extension interfaces |
 | [docs/SETUP.md](docs/SETUP.md) | User-facing setup, runtime commands, security, and environment variables |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Runtime boundaries and code ownership |
