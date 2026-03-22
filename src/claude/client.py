@@ -622,7 +622,7 @@ req.end();
         logger.trace("--dangerously-skip-permissions option added")
 
         # MCP plugin tools (auto-enabled when config exists)
-        mcp_config = Path(__file__).parent.parent.parent / "mcp_servers" / "plugin_mcp.json"
+        mcp_config = self._plugin_mcp_config_path()
         if mcp_config.exists():
             cmd.extend(["--mcp-config", str(mcp_config)])
             logger.trace("--mcp-config option added")

@@ -41,6 +41,16 @@ class BaseCLIClient:
             return path.read_text(encoding="utf-8")
         return None
 
+    @staticmethod
+    def _project_root() -> Path:
+        """Return the repository root for project-local provider assets."""
+        return Path(__file__).resolve().parents[2]
+
+    @classmethod
+    def _plugin_mcp_config_path(cls) -> Path:
+        """Return the shared project-local MCP bridge config path."""
+        return cls._project_root() / "mcp_servers" / "plugin_mcp.json"
+
     def _resolve_prompts(self, workspace_path: Optional[str]) -> PromptConfig:
         """Determine prompts for one AI call.
 

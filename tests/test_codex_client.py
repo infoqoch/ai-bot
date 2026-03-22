@@ -1,6 +1,7 @@
 """Codex CLI client tests."""
 
 import asyncio
+from pathlib import Path
 import signal
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -49,3 +50,23 @@ class TestCodexClient:
 
         assert response.error == ChatError.TIMEOUT
         assert response.text == ""
+
+    def test_build_command_includes_project_mcp_overrides(self, client):
+        """Codex commands should expose the shared project-local MCP bridge."""
+        cmd = client._build_command("Hello", session_id=None, model="gpt54_xhigh", workspace_path=None)
+
+        root = Path(__file__).resolve().parents[1]
+        expected_command = f'mcp_servers.bot-plugins.command="{root / "venv" / "bin" / "python"}"'
+        expected_args = (
+            f'mcp_servers.bot-plugins.args=["{root / "mcp_servers" / "plugin_bridge_server.py"}"]'
+        )
+
+        assert expected_command in cmd
+        assert expected_args in cmd
+
+    def test_build_command_skips_mcp_overrides_without_config(self, client):
+        """Codex should not emit MCP config overrides when no project config exists."""
+        with patch.object(CodexClient, "_load_project_mcp_servers", return_value={}):
+            cmd = client._build_command("Hello", session_id=None, model="gpt54_xhigh", workspace_path=None)
+
+        assert not any(part.startswith("mcp_servers.") for part in cmd)

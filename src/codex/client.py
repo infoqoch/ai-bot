@@ -2,12 +2,15 @@
 
 import asyncio
 import json
+import re
 from typing import Optional
 
 from src.ai.base_client import BaseCLIClient, PromptConfig
 from src.ai.catalog import get_profile
 from src.ai.client_types import ChatError, ChatResponse
 from src.logging_config import logger
+
+_TOML_BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 class CodexClient(BaseCLIClient):
@@ -18,6 +21,78 @@ class CodexClient(BaseCLIClient):
         content = prompts.system or prompts.append
         if content:
             cmd.extend(["-c", f'instructions="{content}"'])
+
+    @classmethod
+    def _load_project_mcp_servers(cls) -> dict[str, dict]:
+        """Load project-local MCP server definitions shared with Claude."""
+        mcp_config = cls._plugin_mcp_config_path()
+        if not mcp_config.exists():
+            return {}
+
+        try:
+            payload = json.loads(mcp_config.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning(f"Codex MCP config load failed: path={mcp_config}, error={exc}")
+            return {}
+
+        servers = payload.get("mcpServers")
+        if not isinstance(servers, dict):
+            logger.warning(f"Codex MCP config missing mcpServers object: path={mcp_config}")
+            return {}
+
+        return {
+            name: config
+            for name, config in servers.items()
+            if isinstance(name, str) and isinstance(config, dict)
+        }
+
+    @classmethod
+    def _format_toml_key(cls, key: str) -> str:
+        """Format one TOML bare/quoted key for `codex -c` overrides."""
+        if _TOML_BARE_KEY_RE.match(key):
+            return key
+        return json.dumps(key)
+
+    @classmethod
+    def _format_toml_value(cls, value: object) -> str:
+        """Serialize one Python value into a TOML-compatible inline literal."""
+        if isinstance(value, str):
+            return json.dumps(value)
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, int | float):
+            return repr(value)
+        if isinstance(value, list):
+            return "[" + ", ".join(cls._format_toml_value(item) for item in value) + "]"
+        if isinstance(value, dict):
+            parts = [
+                f"{cls._format_toml_key(str(key))} = {cls._format_toml_value(item)}"
+                for key, item in value.items()
+                if item is not None
+            ]
+            return "{ " + ", ".join(parts) + " }"
+        raise TypeError(f"Unsupported TOML override value: {type(value).__name__}")
+
+    @classmethod
+    def _inject_project_mcp_args(cls, cmd: list[str]) -> None:
+        """Expose project-local MCP servers to Codex without mutating ~/.codex/config.toml."""
+        servers = cls._load_project_mcp_servers()
+        if not servers:
+            return
+
+        for server_name, config in servers.items():
+            prefix = f"mcp_servers.{server_name}"
+            for field, value in config.items():
+                if value is None:
+                    continue
+                try:
+                    encoded = cls._format_toml_value(value)
+                except TypeError as exc:
+                    logger.warning(f"Codex MCP override skipped: {prefix}.{field} ({exc})")
+                    continue
+                cmd.extend(["-c", f"{prefix}.{field}={encoded}"])
+
+        logger.trace(f"Codex MCP overrides added: {', '.join(sorted(servers))}")
 
     async def chat(
         self,
@@ -78,6 +153,7 @@ class CodexClient(BaseCLIClient):
 
         prompts = self._resolve_prompts(workspace_path)
         self._inject_prompt_args(common, prompts)
+        self._inject_project_mcp_args(common)
 
         if session_id:
             common.append(session_id)
