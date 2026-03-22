@@ -701,14 +701,33 @@ mcp_servers/
 3. No changes to `plugin_bridge_server.py` — tools are auto-registered
 4. For DB-only queries, `query_db` is sufficient — no plugin ToolSpec needed
 
-## Message Processing Flow
+## Message Processing Architecture
+
+Three layers handle user interactions with distinct responsibilities:
+
+| Layer | Name | Trigger | Role |
+|-------|------|---------|------|
+| **Plugin Launcher** | UI workspace | Exact keyword or `/{name}` command | Open interactive UI (button-based). Minimal trigger scope — keywords only. |
+| **AI Conversation** | Natural language | Everything else, or keyword + content | Intent understanding + response generation via AI provider |
+| **MCP Data Bridge** | Data access | AI calls tools autonomously | Actual data operations (`query_db`, `calendar_list_events`, `db_schema`) |
+
+**How they interact:**
+```
+"할일"              → Plugin Launcher → UI screen (buttons, callbacks)
+"할일 정리해줘"      → AI Conversation → MCP Data Bridge (query_db) → response
+"이번 달 일정"       → AI Conversation → MCP Data Bridge (calendar_list_events) → response
+```
+
+Plugin Launcher is the **quick entry point** for UI-driven tasks. AI Conversation is the **brain**. MCP Data Bridge is the **hands** — AI decides when and how to use it.
+
+### Message Processing Flow
 
 ```
 User message arrives
     │
     ▼
 [1] Command (/command)
-    │ /{plugin_name} → open plugin launcher
+    │ /{plugin_name} → Plugin Launcher (open plugin UI)
     │ /help_{plugin_name} → show plugin help
     │ Other commands → immediate response
     │
@@ -719,30 +738,32 @@ User message arrives
     │   • Other markers → sess_name, sess_rename, schedule_input, _ws_pending, plugin interactions
     │
     ▼ Not ForceReply
-[3] Plugin (exact keyword match)
-    │ "할일" → todo plugin opens
-    │ "memo" → memo plugin opens
+[3] Plugin Launcher (exact keyword match)
+    │ "할일" → todo plugin opens (UI)
+    │ "memo" → memo plugin opens (UI)
     │ Iterate plugins, can_handle() checks TRIGGER_KEYWORDS exact match
     │
     ▼ No exact match
-[3.5] Plugin keyword + content → AI with context
+[3.5] Keyword + content → AI Conversation with context
     │ "할일 오늘 뭐 해야돼?" → AI gets todo context + "오늘 뭐 해야돼?"
     │ match_plugin_keyword() detects keyword prefix with additional text
-    │ Prepends plugin ai_context.md to message → dispatch to AI
+    │ Prepends plugin ai_context.md → dispatch to AI (MCP tools available)
     │
     ▼ No keyword match
-[4] Claude AI (background processing)
+[4] AI Conversation (background processing)
+    │ AI has MCP Data Bridge tools available (query_db, db_schema, etc.)
+    │ AI autonomously queries data as needed
 ```
 
-**Plugin Trigger Rules:**
+### Plugin Trigger Rules
 
 | Rule | Description |
 |------|-------------|
-| `TRIGGER_KEYWORDS` | Required. List of exact-match keywords (Korean + English). Base class `can_handle()` enforces exact match. |
+| `TRIGGER_KEYWORDS` | Required. List of exact-match keywords (Korean + English). Base class `can_handle()` enforces exact match. Keep minimal — only bare keywords. |
 | `EXCLUDE_PATTERNS` | Optional. Regex patterns to pass to AI instead (e.g., "메모란 뭐" → AI answers, not plugin) |
-| `/{name}` command | Opens plugin launcher (same as menu button click) |
+| `/{name}` command | Opens Plugin Launcher (same as menu button click) |
 | `/help_{name}` | Shows plugin usage/help text |
-| Keyword + content | Auto-routed to AI with plugin context prepended (no new session created) |
+| Keyword + content | Auto-routed to AI Conversation with plugin context prepended. AI uses MCP Data Bridge for actual data access. |
 
 ## Telegram Command Rules
 
