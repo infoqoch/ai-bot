@@ -113,15 +113,17 @@ Every incoming message flows through four stages in order:
 
 Five built-in plugins handle common tasks instantly without touching the AI:
 
-| Plugin | Trigger examples | What it does |
-|--------|-----------------|--------------|
-| **Todo** | `todo`, `할일`, `add todo` | Add, list, complete todo items |
-| **Memo** | `memo`, `메모`, `remember` | Save and search text notes |
-| **Diary** | `diary`, `일기`, `write diary` | Daily journal entries |
-| **Calendar** | `calendar`, `캘린더`, `schedule` | Google Calendar integration |
-| **Weather** | `weather`, `날씨`, `서울 날씨` | Real-time weather via Open-Meteo |
+| Plugin | Keywords | What it does |
+|--------|----------|--------------|
+| **Todo** | `todo`, `할일`, `투두` | Add, list, complete todo items |
+| **Memo** | `memo`, `메모` | Save and search text notes |
+| **Diary** | `diary`, `일기` | Daily journal entries |
+| **Calendar** | `calendar`, `cal`, `캘린더`, `일정`, `달력` | Google Calendar integration |
+| **Weather** | `weather`, `날씨`, `기온` | Real-time weather via Open-Meteo |
 
-Each plugin also provides a "✨ Work with AI" button that prepends live data from the plugin's storage to your AI request, giving the AI full context without manual copy-paste.
+**Keyword + natural language → AI with context:** Type a keyword followed by a request (e.g., `할일 오늘 뭐 해야돼?`) and the AI automatically receives the plugin's context + MCP data access. No button needed.
+
+Each plugin also provides a "✨ AI Work" button for contextual AI assistance with full MCP data access.
 
 **Adding custom plugins:** Drop a `plugin.py` into `plugins/custom/` — no core code changes required.
 
@@ -148,7 +150,7 @@ When Claude Code runs inside the bot's workspace, it can call MCP tools to query
 
 | Tool | What it does |
 |------|-------------|
-| `query_db` | Run a read-only SQL query on the bot's SQLite database |
+| `query_db` | Run SQL on the bot's SQLite database (SELECT/INSERT/UPDATE/DELETE) |
 | `db_schema` | Explore table structure and column definitions |
 | `list_events` | Fetch upcoming Google Calendar events |
 | `create_event` | Create a new calendar event |
@@ -219,6 +221,8 @@ Bind a session to a local directory. The AI operates with that project's `CLAUDE
 | `BOT_DATA_DIR` | `.data/` | Root directory for runtime files (locks, PID, logs) |
 | `BOT_LOG_DIR` | `.data/logs/` | Log file directory |
 | `BOT_MAIN_MENU_PLUGINS` | (none) | Comma-separated plugin names to promote to the main menu |
+| `DEFAULT_MODEL_CLAUDE` | (none) | Default Claude model profile (overrides built-in default) |
+| `DEFAULT_MODEL_CODEX` | (none) | Default Codex model profile (overrides built-in default) |
 
 ---
 
@@ -228,6 +232,7 @@ Bind a session to a local directory. The AI operates with that project's `CLAUDE
 |-----|---------|
 | [CLAUDE.md](CLAUDE.md) | Development rules, architecture contracts, extension interfaces |
 | [docs/SPEC.md](docs/SPEC.md) | UI/UX specification, session/schedule/restart scenarios |
+| [docs/SPEC_PLUGINS_BUILTIN.md](docs/SPEC_PLUGINS_BUILTIN.md) | Builtin plugin UI/UX specifications |
 
 ---
 
