@@ -77,7 +77,7 @@ class AiWorkHandlers(BaseHandler):
         )
 
         await update.message.reply_text(
-            f"✨ New session created: <b>{session_name}</b>\n"
+            f"✨ New session & switch: <b>{session_name}</b>\n"
             f"<code>{session_id[:8]}</code>",
             parse_mode="HTML",
         )
