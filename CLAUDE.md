@@ -125,6 +125,17 @@ Run focused tests for the feature area you changed before defaulting to the whol
 
 ## Documentation Discipline
 
-- If a detail is mainly for humans to look up occasionally, put it in `docs/`.
-- If a rule must be available automatically to Claude Code but only for specific paths, prefer [`.claude/rules/`](.claude/rules).
+- `CLAUDE.md` is the always-loaded layer. Keep it compact on purpose.
+- If a detail is mainly for humans or maintainers to look up occasionally, put it in `docs/`.
+- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) stays under `docs/` on purpose: it is a deep reference, not something we want auto-loaded into every Claude Code session.
+- If a rule must be available automatically to Claude Code but only for specific files or directories, prefer [`.claude/rules/`](.claude/rules).
+- Keep detailed UI/UX transcripts and button-by-button flows in [`docs/SPEC.md`](docs/SPEC.md) and [`docs/SPEC_PLUGINS_BUILTIN.md`](docs/SPEC_PLUGINS_BUILTIN.md). Those files are intentionally verbose because they are product contracts.
+- Do not aggressively compress `SPEC` just to make the docs stack look cleaner. Shrink `CLAUDE.md` first.
 - Avoid copying large chunks of implementation detail back into `CLAUDE.md`.
+
+### Required Doc Updates
+
+- Telegram-visible flow, command output, callback behavior, restart/queue UX changes: update [`docs/SPEC.md`](docs/SPEC.md)
+- Built-in plugin screens or plugin-owned UX changes: update [`docs/SPEC_PLUGINS_BUILTIN.md`](docs/SPEC_PLUGINS_BUILTIN.md)
+- Canonical emoji, labels, or UI naming changes: update [`docs/UI_EMOJI_SYSTEM.md`](docs/UI_EMOJI_SYSTEM.md)
+- Runtime ownership, plugin architecture, MCP model, or maintainer-facing implementation guidance: update [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)

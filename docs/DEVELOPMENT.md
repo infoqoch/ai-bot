@@ -16,9 +16,34 @@ It is intentionally separate from the root `CLAUDE.md` so the always-loaded Clau
 - [`README.md`](../README.md): product positioning, why it is useful, quick start.
 - [`docs/SETUP.md`](./SETUP.md): installation, runtime commands, security controls, environment variables.
 - [`docs/SPEC.md`](./SPEC.md): user-visible Telegram behavior and stable UX rules.
+- [`docs/SPEC_PLUGINS_BUILTIN.md`](./SPEC_PLUGINS_BUILTIN.md): detailed built-in plugin UI/UX contract.
+- [`docs/UI_EMOJI_SYSTEM.md`](./UI_EMOJI_SYSTEM.md): canonical emoji and label mapping for Telegram UI.
 - [`docs/DEVELOPMENT.md`](./DEVELOPMENT.md): architecture, extension patterns, runtime flows, maintainer reference.
 - [`CLAUDE.md`](../CLAUDE.md): compact always-loaded instructions for Claude Code.
 - [`.claude/rules/`](../.claude/rules): path-scoped Claude Code guidance for focused edits.
+
+## Documentation Strategy
+
+### Why `DEVELOPMENT.md` Lives In `docs/`
+
+- This file is intentionally not in `.claude/` because it is not meant to be auto-loaded into every Claude Code session.
+- It is a deep maintainer reference: useful, but too large and too infrequently needed to justify always-on context cost.
+- The compact root [`CLAUDE.md`](../CLAUDE.md) should hold only high-signal rules worth paying for every session.
+- [`.claude/rules/`](../.claude/rules) should hold only path-scoped guidance that deserves automatic loading during focused edits.
+
+### Why `SPEC` Stays Detailed
+
+- For this project, detailed UI/UX transcripts are not clutter. They are intentional product contracts.
+- Screen text, button layout, flow ordering, empty states, and callback behavior matter enough to preserve explicitly.
+- Therefore [`docs/SPEC.md`](./SPEC.md), [`docs/SPEC_PLUGINS_BUILTIN.md`](./SPEC_PLUGINS_BUILTIN.md), and [`docs/UI_EMOJI_SYSTEM.md`](./UI_EMOJI_SYSTEM.md) are allowed to stay long and specific.
+- The right optimization target is the always-loaded Claude context, not the UX contract docs.
+
+### Update Rules
+
+- Change Telegram-visible behavior: update [`docs/SPEC.md`](./SPEC.md)
+- Change built-in plugin UX: update [`docs/SPEC_PLUGINS_BUILTIN.md`](./SPEC_PLUGINS_BUILTIN.md)
+- Change canonical emoji or shared labels: update [`docs/UI_EMOJI_SYSTEM.md`](./UI_EMOJI_SYSTEM.md)
+- Change runtime boundaries, extension patterns, or maintainer-level guidance: update [`docs/DEVELOPMENT.md`](./DEVELOPMENT.md)
 
 ## Runtime Map
 
@@ -188,11 +213,14 @@ What to test first:
 - Product positioning or quick-start messaging: [`README.md`](../README.md)
 - User setup or runtime operations: [`docs/SETUP.md`](./SETUP.md)
 - Stable Telegram-visible behavior: [`docs/SPEC.md`](./SPEC.md)
+- Built-in plugin UI/UX behavior: [`docs/SPEC_PLUGINS_BUILTIN.md`](./SPEC_PLUGINS_BUILTIN.md)
+- Canonical emoji and labels: [`docs/UI_EMOJI_SYSTEM.md`](./UI_EMOJI_SYSTEM.md)
 - Maintainer reference / architecture / plugin model: [`docs/DEVELOPMENT.md`](./DEVELOPMENT.md)
 - Always-loaded Claude Code instructions: [`CLAUDE.md`](../CLAUDE.md)
 
 ## Deliberate Non-Goals For Docs
 
 - Do not mirror code line-for-line in docs.
-- Do not keep giant UI transcripts when the code and tests already explain the flow.
+- Do not move detailed UI transcripts out of `SPEC` when they are serving as the intended UX contract.
+- Do keep giant UI transcripts out of `CLAUDE.md` and out of general maintainer guidance unless they are truly needed there.
 - Do not duplicate the same rule across README, SPEC, DEVELOPMENT, and CLAUDE unless it truly belongs in all of them.
