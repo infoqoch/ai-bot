@@ -11,7 +11,7 @@ from telegram.ext import ContextTypes
 from src.ai import get_provider_label
 from src.logging_config import logger, clear_context
 from src.plugins.loader import PLUGIN_SURFACE_CATALOG
-from src.ui_emoji import BUTTON_BACK, BUTTON_REFRESH, BUTTON_SESSION_LIST
+from src.ui_emoji import BUTTON_AI_WORK, BUTTON_BACK, BUTTON_REFRESH, BUTTON_SESSION_LIST
 from ..constants import MAX_LOCK_STATUS_PREVIEW
 from ..middleware import authorized_only, authenticated_only
 from .base import BaseHandler
@@ -408,7 +408,7 @@ class AdminHandlers(BaseHandler):
         text = "".join(lines) if lines else "No status info"
 
         keyboard = [
-            [InlineKeyboardButton("✨ AI와 작업하기", callback_data="aiwork:tasks")],
+            [InlineKeyboardButton(BUTTON_AI_WORK, callback_data="aiwork:tasks")],
             [
                 InlineKeyboardButton(BUTTON_REFRESH, callback_data="tasks:refresh"),
                 InlineKeyboardButton(BUTTON_SESSION_LIST, callback_data="sess:list"),

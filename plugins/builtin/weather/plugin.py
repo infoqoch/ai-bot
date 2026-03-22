@@ -20,12 +20,12 @@ from src.repository.adapters import RepositoryWeatherLocationStore
 
 
 def _load_cities_csv(csv_path: Path) -> tuple[dict[str, str], dict[str, list[str]]]:
-    """CSV 파일에서 도시 데이터를 로드.
+    """Load city data from CSV file.
 
     Returns:
         (korean_to_english, province_to_cities):
-            - korean_to_english: 한국어 도시명 → 영어명 매핑
-            - province_to_cities: 도/광역시 → [도시명 목록]
+            - korean_to_english: Korean city name -> English name mapping
+            - province_to_cities: province/metro -> [list of cities]
     """
     korean_to_english: dict[str, str] = {}
     province_to_cities: dict[str, list[str]] = OrderedDict()
@@ -48,7 +48,7 @@ def _load_cities_csv(csv_path: Path) -> tuple[dict[str, str], dict[str, list[str
     return korean_to_english, province_to_cities
 
 
-# 광역시/특별시: province와 city가 동일한 경우
+# Metro/special cities: province and city name are identical
 _METRO_CITIES = {"서울", "부산", "대구", "인천", "광주", "대전", "울산", "세종"}
 
 
@@ -65,11 +65,11 @@ class WeatherPlugin(Plugin):
         default_promoted=True,
     )
     usage = (
-        "🌤️ <b>날씨 플러그인</b>\n\n"
-        "<b>날씨 확인</b>\n"
-        "• <code>날씨</code> - 도시 선택 후 날씨 확인\n\n"
-        "<b>위치 설정</b>\n"
-        "• 날씨 화면의 버튼으로 도시를 선택하세요"
+        "🌤️ <b>Weather Plugin</b>\n\n"
+        "<b>Check Weather</b>\n"
+        "• <code>weather</code> - Select a city and check weather\n\n"
+        "<b>Location Settings</b>\n"
+        "• Use the buttons on the weather screen to select a city"
     )
 
     CALLBACK_PREFIX = "weather:"
@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS weather_locations (
     GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
     WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 
-    # CSV에서 로드 (클래스 로드 시점에 한 번)
+    # Load from CSV once at class load time
     _CITIES_CSV = Path(__file__).parent / "cities.csv"
     KOREAN_TO_ENGLISH, PROVINCE_TO_CITIES = _load_cities_csv(_CITIES_CSV)
 
@@ -169,7 +169,7 @@ CREATE TABLE IF NOT EXISTS weather_locations (
             return {"text": "❌ Unknown command.", "edit": True}
 
     def _handle_province_select(self) -> dict:
-        """1단계: 도/광역시 목록 표시."""
+        """Step 1: Show province/metro list."""
         buttons = []
         row = []
         for province in self.PROVINCE_TO_CITIES:
@@ -192,7 +192,7 @@ CREATE TABLE IF NOT EXISTS weather_locations (
         }
 
     def _handle_province_cities(self, province: str) -> dict:
-        """2단계: 선택한 도의 시/군 목록 표시."""
+        """Step 2: Show cities in the selected province."""
         cities = self.PROVINCE_TO_CITIES.get(province, [])
         if not cities:
             return {"text": f"❌ No cities registered for '{province}'.", "edit": True}
@@ -207,7 +207,6 @@ CREATE TABLE IF NOT EXISTS weather_locations (
         if row:
             buttons.append(row)
 
-        # 뒤로가기 버튼
         buttons.append([InlineKeyboardButton("◀️ Back", callback_data="weather:select")])
 
         return {
@@ -232,7 +231,7 @@ CREATE TABLE IF NOT EXISTS weather_locations (
                 InlineKeyboardButton("🔄 Refresh", callback_data=f"weather:city:{city}"),
                 InlineKeyboardButton("📍 Other city", callback_data="weather:select"),
             ],
-            [InlineKeyboardButton("✨ AI와 작업하기", callback_data="aiwork:weather")],
+            [InlineKeyboardButton("✨ Work with AI", callback_data="aiwork:weather")],
         ]
 
         return {
@@ -388,7 +387,7 @@ CREATE TABLE IF NOT EXISTS weather_locations (
         location = self._load_location(chat_id)
 
         if not location:
-            # 저장된 위치 없음 → 도/광역시 선택
+            # No saved location -> show province/metro select
             result = self._handle_province_select()
             return PluginResult(
                 handled=True,

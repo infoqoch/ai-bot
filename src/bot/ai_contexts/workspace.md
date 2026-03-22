@@ -1,42 +1,42 @@
-# 워크스페이스 - 로컬 프로젝트 디렉토리 관리
+# Workspace - Local Project Directory Management
 
-## 기능 개요
-로컬 개발 프로젝트 디렉토리를 봇에 등록하여, 해당 프로젝트의 컨텍스트(CLAUDE.md 등)를 AI 대화에 적용할 수 있는 기능입니다.
+## Feature Overview
+A feature for registering local development project directories with the bot, allowing the context of those projects (CLAUDE.md, etc.) to be applied to AI conversations.
 
-## DB 스키마 (workspaces 테이블)
-| 컬럼 | 설명 |
-|------|------|
-| id | 워크스페이스 고유 ID |
-| user_id | 사용자 ID |
-| path | 프로젝트 절대 경로 |
-| name | 워크스페이스 이름 (표시용) |
-| description | 프로젝트 설명 |
-| keywords | 키워드 목록 (JSON 배열) |
-| created_at | 등록 시각 |
-| last_used | 마지막 사용 시각 |
-| use_count | 사용 횟수 |
+## DB Schema (workspaces table)
+| Column | Description |
+|--------|-------------|
+| id | Workspace unique ID |
+| user_id | User ID |
+| path | Absolute project path |
+| name | Workspace name (display label) |
+| description | Project description |
+| keywords | Keyword list (JSON array) |
+| created_at | Registration time |
+| last_used | Last used time |
+| use_count | Usage count |
 
-## 사용자 조작
-- **추가**: 새 워크스페이스 등록 (경로, 이름, 설명 입력)
-- **삭제**: 워크스페이스 제거
-- **세션 생성**: 워크스페이스 기반 AI 세션 시작 (--cwd 옵션으로 프로젝트 디렉토리 지정)
-- **스케줄 등록**: 워크스페이스 기반 정기 작업 설정
-- **목록 보기**: 등록된 워크스페이스 확인
+## User Operations
+- **Add**: Register a new workspace (enter path, name, and description)
+- **Delete**: Remove a workspace
+- **Create session**: Start an AI session based on the workspace (specifies the project directory via the --cwd option)
+- **Register schedule**: Set up a recurring task based on the workspace
+- **View list**: See registered workspaces
 
-## 워크스페이스 세션 동작
-- 세션 생성 시 `--cwd`로 프로젝트 경로 지정
-- `--append-system-prompt`로 Telegram 포맷팅 규칙 주입
-- 프로젝트의 CLAUDE.md 규칙이 AI에 자동 적용
+## Workspace Session Behavior
+- The project path is specified via `--cwd` when creating a session
+- Telegram formatting rules are injected via `--append-system-prompt`
+- The project's CLAUDE.md rules are automatically applied to the AI
 
-## AI 도움 가능 영역
-- 프로젝트 상태 분석 및 요약
-- 워크스페이스 활용 제안 (자주 쓰는 작업 자동화)
-- 프로젝트별 맞춤 스케줄 추천
-- 워크스페이스 정리 및 구조화 조언
+## AI Assistance Areas
+- Analyze and summarize project status
+- Workspace usage suggestions (automate frequently used tasks)
+- Recommend custom schedules per project
+- Advice on workspace organization and structuring
 
-## MCP 도구
+## MCP Tools
 
-데이터 조회가 필요하면 `query_db` 도구를 사용하라. `{chat_id}` 플레이스홀더는 user_id로 자동 치환된다.
+Use the `query_db` tool when you need to query data. The `{chat_id}` placeholder is automatically substituted as user_id.
 
-- 전체 조회: `query_db("SELECT * FROM workspaces WHERE user_id = '{chat_id}'")`
-- 테이블 구조 확인: `db_schema("workspaces")`
+- List all: `query_db("SELECT * FROM workspaces WHERE user_id = '{chat_id}'")`
+- Inspect table structure: `db_schema("workspaces")`

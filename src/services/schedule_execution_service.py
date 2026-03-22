@@ -57,7 +57,7 @@ class ScheduleExecutionService:
                 logger.warning(
                     f"Schedule {schedule.id} ({schedule.name}) returned empty response, sending fallback"
                 )
-                response = "(응답 내용 없음)"
+                response = "(No response content)"
 
             if self._bot and schedule.chat_id and response:
                 log_id = None

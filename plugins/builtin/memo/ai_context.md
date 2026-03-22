@@ -1,43 +1,43 @@
-# 메모 관리 (Memo)
+# Memo Management
 
-간단한 텍스트 메모를 저장하고 관리하는 플러그인.
+Plugin for saving and managing simple text memos.
 
-## DB 스키마
+## DB Schema
 
 ```sql
 memos (
     id INTEGER PRIMARY KEY,
     chat_id INTEGER NOT NULL,
-    content TEXT NOT NULL,     -- 메모 내용
+    content TEXT NOT NULL,     -- Memo content
     created_at TEXT
 )
 ```
 
-## 기능
+## Features
 
-- 메모 추가
-- 메모 삭제 (개별/다중 선택)
-- 메모 목록 조회
-- 최대 30개 제한
+- Add memos
+- Delete memos (individually or via multi-select)
+- View memo list
+- Maximum of 30 memos
 
-## AI 활용
+## AI Assistance
 
-- 메모 내용 기반 카테고리 분류
-- 관련 메모 그룹화 및 요약
-- 주제별 메모 검색
-- 메모 정리 및 구조화 제안
+- Categorize memos by content
+- Group and summarize related memos
+- Search memos by topic
+- Suggest memo organization and structuring
 
-## MCP 도구
+## MCP Tools
 
-데이터 조회/수정이 필요하면 `query_db` 도구를 사용하라. `{chat_id}` 플레이스홀더가 자동 치환된다.
+Use the `query_db` tool when you need to query or modify data. The `{chat_id}` placeholder is substituted automatically.
 
-- 전체 조회: `query_db("SELECT * FROM memos WHERE chat_id = {chat_id}")`
-- 키워드 검색: `query_db("SELECT * FROM memos WHERE chat_id = {chat_id} AND content LIKE '%키워드%'")`
-- 삭제: `query_db("DELETE FROM memos WHERE id = 3 AND chat_id = {chat_id}")`
-- 테이블 구조 확인: `db_schema("memos")`
+- List all: `query_db("SELECT * FROM memos WHERE chat_id = {chat_id}")`
+- Keyword search: `query_db("SELECT * FROM memos WHERE chat_id = {chat_id} AND content LIKE '%keyword%'")`
+- Delete: `query_db("DELETE FROM memos WHERE id = 3 AND chat_id = {chat_id}")`
+- Inspect table structure: `db_schema("memos")`
 
-## 제약사항
+## Constraints
 
-- 사용자(chat_id)별 격리
-- 최대 30개 저장 제한
-- 날짜 구분 없이 전체 목록 관리
+- Isolated per user (chat_id)
+- Maximum of 30 memos stored
+- Managed as a single flat list with no date separation

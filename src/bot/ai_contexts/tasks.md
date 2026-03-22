@@ -1,59 +1,59 @@
-# 작업 현황 - AI 작업 처리 상태 모니터링
+# Task Status - AI Task Processing State Monitor
 
-## 기능 개요
-현재 진행 중인 AI 요청, 대기 중인 메시지, 세션 잠금 상태를 실시간으로 확인하는 읽기 전용 모니터링 기능입니다.
+## Feature Overview
+A read-only monitoring feature for checking the real-time status of in-progress AI requests, queued messages, and session locks.
 
-## 관련 DB 테이블
+## Related DB Tables
 
-### message_log (AI 요청 추적)
-| 컬럼 | 설명 |
-|------|------|
-| id | 요청 고유 ID |
-| chat_id | Telegram 채팅 ID |
-| session_id | 세션 ID |
-| model | 사용 모델 |
-| request | 요청 메시지 내용 |
-| request_at | 요청 시각 |
-| processed | 처리 상태 (0=대기, 1=처리중, 2=완료) |
-| processed_at | 처리 완료 시각 |
-| response | AI 응답 내용 |
-| error | 에러 메시지 |
-| delivery_status | 전달 상태 (not_ready / pending / delivered / failed) |
-| delivery_attempts | 전달 시도 횟수 |
+### message_log (AI request tracking)
+| Column | Description |
+|--------|-------------|
+| id | Request unique ID |
+| chat_id | Telegram chat ID |
+| session_id | Session ID |
+| model | Model used |
+| request | Request message content |
+| request_at | Request time |
+| processed | Processing state (0=pending, 1=processing, 2=complete) |
+| processed_at | Processing completion time |
+| response | AI response content |
+| error | Error message |
+| delivery_status | Delivery state (not_ready / pending / delivered / failed) |
+| delivery_attempts | Number of delivery attempts |
 
-### queued_messages (동시 요청 큐)
-| 컬럼 | 설명 |
-|------|------|
-| id | 큐 항목 ID |
-| session_id | 대상 세션 ID |
-| message | 대기 메시지 내용 |
-| model | 사용 모델 |
-| created_at | 큐 등록 시각 |
+### queued_messages (concurrent request queue)
+| Column | Description |
+|--------|-------------|
+| id | Queue item ID |
+| session_id | Target session ID |
+| message | Queued message content |
+| model | Model used |
+| created_at | Queue registration time |
 
-### session_locks (세션 잠금)
-| 컬럼 | 설명 |
-|------|------|
-| session_id | 잠금된 세션 ID |
-| job_id | 처리 중인 작업 ID |
-| worker_pid | 워커 프로세스 PID |
-| acquired_at | 잠금 획득 시각 |
+### session_locks (session locks)
+| Column | Description |
+|--------|-------------|
+| session_id | Locked session ID |
+| job_id | ID of the job being processed |
+| worker_pid | Worker process PID |
+| acquired_at | Lock acquisition time |
 
-## 사용자 조작
-- **상태 보기**: 현재 진행/대기 중인 작업 목록 확인
-- **새로고침**: 최신 상태로 갱신
-- 읽기 전용 기능으로, 작업 취소/수정은 불가
+## User Operations
+- **View status**: Check the list of currently in-progress and queued tasks
+- **Refresh**: Update to the latest state
+- Read-only feature — tasks cannot be cancelled or modified
 
-## AI 도움 가능 영역
-- 작업 상태 설명 및 해석
-- 멈춘 작업 진단 및 해결 방안 제시
-- 작업 처리 패턴 분석 (평균 소요 시간, 에러 빈도 등)
-- 시스템 최적화 제안
+## AI Assistance Areas
+- Explain and interpret task status
+- Diagnose stalled tasks and suggest solutions
+- Analyze task processing patterns (average duration, error frequency, etc.)
+- System optimization suggestions
 
-## MCP 도구
+## MCP Tools
 
-데이터 조회가 필요하면 `query_db` 도구를 사용하라. `{chat_id}` 플레이스홀더가 자동 치환된다.
+Use the `query_db` tool when you need to query data. The `{chat_id}` placeholder is substituted automatically.
 
-- 처리 중 작업: `query_db("SELECT * FROM message_log WHERE chat_id = {chat_id} AND processed = 1 ORDER BY request_at DESC LIMIT 10")`
-- 대기 중 메시지: `query_db("SELECT * FROM queued_messages WHERE chat_id = {chat_id}")`
-- 세션 잠금 상태: `query_db("SELECT * FROM session_locks")`
-- 테이블 구조 확인: `db_schema("message_log")`
+- In-progress tasks: `query_db("SELECT * FROM message_log WHERE chat_id = {chat_id} AND processed = 1 ORDER BY request_at DESC LIMIT 10")`
+- Queued messages: `query_db("SELECT * FROM queued_messages WHERE chat_id = {chat_id}")`
+- Session lock status: `query_db("SELECT * FROM session_locks")`
+- Inspect table structure: `db_schema("message_log")`

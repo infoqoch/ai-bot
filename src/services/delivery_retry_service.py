@@ -79,8 +79,8 @@ class DeliveryRetryService:
                         )
                         await bot.send_message(
                             chat_id=chat_id,
-                            text=f"⚠️ 메시지 전달에 실패했습니다 (시도 {attempts + 1}회).\n\n"
-                                 f"<i>미리보기:</i> {preview}",
+                            text=f"⚠️ Message delivery failed (attempt {attempts + 1}).\n\n"
+                                 f"<i>Preview:</i> {preview}",
                             parse_mode="HTML",
                         )
                     except Exception:

@@ -134,7 +134,7 @@ CREATE INDEX IF NOT EXISTS idx_memos_chat_id ON memos(chat_id);
                 InlineKeyboardButton("📄 List", callback_data="memo:list"),
                 InlineKeyboardButton("➕ Add", callback_data="memo:add"),
             ],
-            [InlineKeyboardButton("✨ AI와 작업하기", callback_data="aiwork:memo")],
+            [InlineKeyboardButton("✨ Work with AI", callback_data="aiwork:memo")],
         ]
 
         limit_text = f" (max {self.MAX_MEMOS})" if count >= self.MAX_MEMOS else ""

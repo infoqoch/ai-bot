@@ -19,18 +19,18 @@ from src.plugins.storage import DiaryStore
 from src.repository.adapters import RepositoryDiaryStore
 from src.time_utils import app_today
 
-WEEKDAY_NAMES = ["월", "화", "수", "목", "금", "토", "일"]
+WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
 def _format_date_display(date_str: str) -> str:
-    """Format date string to Korean display format: 2026년 3월 17일 (월)."""
+    """Format date string to display format: 2026/03/17 (Mon)."""
     d = _date.fromisoformat(date_str)
     weekday = WEEKDAY_NAMES[d.weekday()]
-    return f"{d.year}년 {d.month}월 {d.day}일 ({weekday})"
+    return f"{d.year}/{d.month:02d}/{d.day:02d} ({weekday})"
 
 
 def _format_date_short(date_str: str) -> str:
-    """Format date string to short display: 3/17 (월)."""
+    """Format date string to short display: 3/17 (Mon)."""
     d = _date.fromisoformat(date_str)
     weekday = WEEKDAY_NAMES[d.weekday()]
     return f"{d.month}/{d.day} ({weekday})"
@@ -139,7 +139,7 @@ END;
                 year = int(parts[2]) if len(parts) > 2 else None
                 month = int(parts[3]) if len(parts) > 3 else None
             except (ValueError, IndexError):
-                return {"text": "⚠️ 잘못된 요청입니다.", "edit": True}
+                return {"text": "⚠️ Invalid request.", "edit": True}
             return self._handle_list(chat_id, year=year, month=month)
         elif action == "view":
             diary_id = int(parts[2]) if len(parts) > 2 else 0
@@ -158,7 +158,7 @@ END;
 
     def get_scheduled_actions(self) -> list[ScheduledAction]:
         return [
-            ScheduledAction(name="daily_diary", description="📓 오늘의 일기 작성 알림"),
+            ScheduledAction(name="daily_diary", description="📓 Daily diary reminder"),
         ]
 
     async def execute_scheduled_action(self, action_name: str, chat_id: int) -> str | dict:
@@ -170,15 +170,15 @@ END;
             if existing:
                 buttons = [
                     [
-                        InlineKeyboardButton("✏️ 수정", callback_data=f"diary:edit:{existing.id}"),
-                        InlineKeyboardButton("👁 보기", callback_data=f"diary:view:{existing.id}"),
+                        InlineKeyboardButton("✏️ Edit", callback_data=f"diary:edit:{existing.id}"),
+                        InlineKeyboardButton("👁 View", callback_data=f"diary:view:{existing.id}"),
                     ],
-                    [InlineKeyboardButton("📄 목록", callback_data="diary:list")],
+                    [InlineKeyboardButton("📄 List", callback_data="diary:list")],
                 ]
                 return {
                     "text": (
-                        f"🔔 <i>오늘의 일기 작성 알림</i>\n\n"
-                        f"📓 오늘의 일기는 이미 작성되었습니다.\n\n"
+                        f"🔔 <i>Daily diary reminder</i>\n\n"
+                        f"📓 Today's diary has already been written.\n\n"
                         f"<b>{_format_date_display(date)}</b>\n"
                         f"{escape_html(existing.content[:100])}{'...' if len(existing.content) > 100 else ''}"
                     ),
@@ -187,17 +187,17 @@ END;
 
             buttons = [
                 [
-                    InlineKeyboardButton("📝 쓰기", callback_data="diary:write"),
-                    InlineKeyboardButton("⏪ 어제 쓰기", callback_data="diary:write_yesterday"),
+                    InlineKeyboardButton("📝 Write", callback_data="diary:write"),
+                    InlineKeyboardButton("⏪ Yesterday", callback_data="diary:write_yesterday"),
                 ],
-                [InlineKeyboardButton("📄 목록", callback_data="diary:list")],
+                [InlineKeyboardButton("📄 List", callback_data="diary:list")],
             ]
             return {
                 "text": (
-                    f"🔔 <i>오늘의 일기 작성 알림</i>\n\n"
-                    f"📓 <b>일기 쓰기</b>\n\n"
+                    f"🔔 <i>Daily diary reminder</i>\n\n"
+                    f"📓 <b>Write Diary</b>\n\n"
                     f"{_format_date_display(date)}\n\n"
-                    f"오늘 하루를 기록해보세요."
+                    f"Record today in your diary."
                 ),
                 "reply_markup": InlineKeyboardMarkup(buttons),
             }
@@ -214,9 +214,9 @@ END;
 
         if not content:
             return {
-                "text": "❌ 내용이 비어 있습니다.",
+                "text": "❌ Content cannot be empty.",
                 "reply_markup": InlineKeyboardMarkup([[
-                    InlineKeyboardButton("📓 메뉴", callback_data="diary:menu"),
+                    InlineKeyboardButton("📓 Menu", callback_data="diary:menu"),
                 ]]),
             }
 
@@ -237,27 +237,27 @@ END;
         today = app_today()
         date = target_date or today.isoformat()
         is_yesterday = target_date is not None and target_date == (today - timedelta(days=1)).isoformat()
-        label = "어제의 일기" if is_yesterday else "오늘의 일기"
-        placeholder = "어제 하루는 어땠나요?" if is_yesterday else "오늘 하루는 어땠나요?"
-        prompt = f"📓 {label}를 입력하세요:"
+        label = "Yesterday's diary" if is_yesterday else "Today's diary"
+        placeholder = "How was yesterday?" if is_yesterday else "How was today?"
+        prompt = f"📓 Enter your {label.lower()}:"
         existing = self.store.get_by_date(chat_id, date)
 
         if existing:
             buttons = [
                 [
-                    InlineKeyboardButton("✏️ 수정", callback_data=f"diary:edit:{existing.id}"),
-                    InlineKeyboardButton("👁 보기", callback_data=f"diary:view:{existing.id}"),
+                    InlineKeyboardButton("✏️ Edit", callback_data=f"diary:edit:{existing.id}"),
+                    InlineKeyboardButton("👁 View", callback_data=f"diary:view:{existing.id}"),
                 ],
-                [InlineKeyboardButton("◀️ 메뉴", callback_data="diary:menu")],
+                [InlineKeyboardButton("◀️ Menu", callback_data="diary:menu")],
             ]
             return {
-                "text": f"📓 {label}는 이미 작성되었습니다.\n\n<b>{_format_date_display(date)}</b>\n{escape_html(existing.content[:100])}{'...' if len(existing.content) > 100 else ''}",
+                "text": f"📓 {label} has already been written.\n\n<b>{_format_date_display(date)}</b>\n{escape_html(existing.content[:100])}{'...' if len(existing.content) > 100 else ''}",
                 "reply_markup": InlineKeyboardMarkup(buttons),
                 "edit": True,
             }
 
         return {
-            "text": f"📓 <b>일기 쓰기</b>\n\n{_format_date_display(date)}\n\n{'어제 하루를' if is_yesterday else '오늘 하루를'} 기록해보세요.",
+            "text": f"📓 <b>Write Diary</b>\n\n{_format_date_display(date)}\n\n{'Record yesterday' if is_yesterday else 'Record today'} in your diary.",
             "force_reply_prompt": prompt,
             "force_reply": ForceReply(
                 selective=True,
@@ -273,31 +273,31 @@ END;
         today = app_today()
         date = target_date or today.isoformat()
         is_yesterday = target_date is not None and target_date == (today - timedelta(days=1)).isoformat()
-        label = "어제의 일기" if is_yesterday else "오늘의 일기"
+        label = "Yesterday's diary" if is_yesterday else "Today's diary"
 
         # Race condition guard
         existing = self.store.get_by_date(chat_id, date)
         if existing:
             buttons = [
                 [
-                    InlineKeyboardButton("✏️ 수정", callback_data=f"diary:edit:{existing.id}"),
-                    InlineKeyboardButton("👁 보기", callback_data=f"diary:view:{existing.id}"),
+                    InlineKeyboardButton("✏️ Edit", callback_data=f"diary:edit:{existing.id}"),
+                    InlineKeyboardButton("👁 View", callback_data=f"diary:view:{existing.id}"),
                 ],
             ]
             return {
-                "text": f"📓 {label}는 이미 작성되었습니다.",
+                "text": f"📓 {label} has already been written.",
                 "reply_markup": InlineKeyboardMarkup(buttons),
             }
 
         diary = self.store.add(chat_id, date, content)
 
         buttons = [[
-            InlineKeyboardButton("👁 보기", callback_data=f"diary:view:{diary.id}"),
-            InlineKeyboardButton("📄 목록", callback_data="diary:list"),
+            InlineKeyboardButton("👁 View", callback_data=f"diary:view:{diary.id}"),
+            InlineKeyboardButton("📄 List", callback_data="diary:list"),
         ]]
 
         return {
-            "text": f"✅ 일기가 저장되었습니다!\n\n<b>{_format_date_display(date)}</b>",
+            "text": f"✅ Diary saved!\n\n<b>{_format_date_display(date)}</b>",
             "reply_markup": InlineKeyboardMarkup(buttons),
         }
 
@@ -307,17 +307,17 @@ END;
         """Send ForceReply for editing."""
         diary = self.store.get(diary_id)
         if not diary:
-            return {"text": "❌ 일기를 찾을 수 없습니다.", "edit": True}
+            return {"text": "❌ Diary entry not found.", "edit": True}
 
         if diary.chat_id != chat_id:
-            return {"text": "❌ 권한이 없습니다.", "edit": True}
+            return {"text": "❌ Permission denied.", "edit": True}
 
         return {
-            "text": f"✏️ <b>일기 수정</b>\n\n<b>{_format_date_display(diary.date)}</b>\n\n현재 내용:\n<code>{escape_html(diary.content)}</code>",
-            "force_reply_prompt": "✏️ 수정할 내용을 입력하세요:",
+            "text": f"✏️ <b>Edit Diary</b>\n\n<b>{_format_date_display(diary.date)}</b>\n\nCurrent content:\n<code>{escape_html(diary.content)}</code>",
+            "force_reply_prompt": "✏️ Enter new content:",
             "force_reply": ForceReply(
                 selective=True,
-                input_field_placeholder="수정할 내용을 입력하세요...",
+                input_field_placeholder="Enter new content...",
             ),
             "interaction_action": "edit",
             "interaction_state": {"diary_id": diary_id},
@@ -328,20 +328,20 @@ END;
         """Process diary edit from ForceReply."""
         diary = self.store.get(diary_id)
         if not diary:
-            return {"text": "❌ 일기를 찾을 수 없습니다."}
+            return {"text": "❌ Diary entry not found."}
 
         if diary.chat_id != chat_id:
-            return {"text": "❌ 권한이 없습니다."}
+            return {"text": "❌ Permission denied."}
 
         self.store.update(diary_id, content)
 
         buttons = [[
-            InlineKeyboardButton("👁 보기", callback_data=f"diary:view:{diary_id}"),
-            InlineKeyboardButton("📄 목록", callback_data="diary:list"),
+            InlineKeyboardButton("👁 View", callback_data=f"diary:view:{diary_id}"),
+            InlineKeyboardButton("📄 List", callback_data="diary:list"),
         ]]
 
         return {
-            "text": f"✅ 일기가 수정되었습니다!\n\n<b>{_format_date_display(diary.date)}</b>",
+            "text": f"✅ Diary updated!\n\n<b>{_format_date_display(diary.date)}</b>",
             "reply_markup": InlineKeyboardMarkup(buttons),
         }
 
@@ -356,22 +356,22 @@ END;
         entries = self.store.list_by_month(chat_id, year, month)
         total = self.store.count_by_chat(chat_id)
 
-        month_display = f"{year}년 {month}월"
+        month_display = f"{year}/{month:02d}"
 
         if not entries and total == 0:
             buttons = [
                 [
-                    InlineKeyboardButton("📝 쓰기", callback_data="diary:write"),
-                    InlineKeyboardButton("⏪ 어제 쓰기", callback_data="diary:write_yesterday"),
+                    InlineKeyboardButton("📝 Write", callback_data="diary:write"),
+                    InlineKeyboardButton("⏪ Yesterday", callback_data="diary:write_yesterday"),
                 ],
             ]
             return {
-                "text": "📭 작성된 일기가 없습니다.",
+                "text": "📭 No diary entries yet.",
                 "reply_markup": InlineKeyboardMarkup(buttons),
                 "edit": True,
             }
 
-        lines = [f"📓 <b>일기 목록</b> ({month_display})\n"]
+        lines = [f"📓 <b>Diary List</b> ({month_display})\n"]
 
         buttons = []
         for entry in entries:
@@ -387,7 +387,7 @@ END;
             ])
 
         if not entries:
-            lines.append("이 달에 작성된 일기가 없습니다.")
+            lines.append("No entries this month.")
 
         # Month navigation
         nav_buttons = []
@@ -396,12 +396,12 @@ END;
         if prev_month < 1:
             prev_month, prev_year = 12, year - 1
         nav_buttons.append(
-            InlineKeyboardButton(f"◀️ {prev_month}월", callback_data=f"diary:list:{prev_year}:{prev_month}")
+            InlineKeyboardButton(f"◀️ {prev_month}", callback_data=f"diary:list:{prev_year}:{prev_month}")
         )
 
         if year != today.year or month != today.month:
             nav_buttons.append(
-                InlineKeyboardButton("📅 이번달", callback_data="diary:list")
+                InlineKeyboardButton("📅 This month", callback_data="diary:list")
             )
 
         next_month = month + 1
@@ -410,17 +410,17 @@ END;
             next_month, next_year = 1, year + 1
         if _date(next_year, next_month, 1) <= today:
             nav_buttons.append(
-                InlineKeyboardButton(f"{next_month}월 ▶️", callback_data=f"diary:list:{next_year}:{next_month}")
+                InlineKeyboardButton(f"{next_month} ▶️", callback_data=f"diary:list:{next_year}:{next_month}")
             )
 
         buttons.append(nav_buttons)
 
-        lines.append(f"📊 이 달 {len(entries)}개 · 전체 {total}개")
+        lines.append(f"📊 This month: {len(entries)} · Total: {total}")
 
-        buttons.append([InlineKeyboardButton("✨ AI와 작업하기", callback_data="aiwork:diary")])
+        buttons.append([InlineKeyboardButton("✨ Work with AI", callback_data="aiwork:diary")])
         buttons.append([
-            InlineKeyboardButton("📝 쓰기", callback_data="diary:write"),
-            InlineKeyboardButton("⏪ 어제 쓰기", callback_data="diary:write_yesterday"),
+            InlineKeyboardButton("📝 Write", callback_data="diary:write"),
+            InlineKeyboardButton("⏪ Yesterday", callback_data="diary:write_yesterday"),
         ])
 
         return {
@@ -435,19 +435,19 @@ END;
         """View single diary entry."""
         diary = self.store.get(diary_id)
         if not diary:
-            return {"text": "❌ 일기를 찾을 수 없습니다.", "edit": True}
+            return {"text": "❌ Diary entry not found.", "edit": True}
 
         if diary.chat_id != chat_id:
-            return {"text": "❌ 권한이 없습니다.", "edit": True}
+            return {"text": "❌ Permission denied.", "edit": True}
 
         date_display = _format_date_display(diary.date)
 
         buttons = [
             [
-                InlineKeyboardButton("✏️ 수정", callback_data=f"diary:edit:{diary_id}"),
-                InlineKeyboardButton("🗑 삭제", callback_data=f"diary:del:{diary_id}"),
+                InlineKeyboardButton("✏️ Edit", callback_data=f"diary:edit:{diary_id}"),
+                InlineKeyboardButton("🗑 Delete", callback_data=f"diary:del:{diary_id}"),
             ],
-            [InlineKeyboardButton("◀️ 목록", callback_data="diary:list")],
+            [InlineKeyboardButton("◀️ List", callback_data="diary:list")],
         ]
 
         return {
@@ -462,23 +462,23 @@ END;
         """Show delete confirmation."""
         diary = self.store.get(diary_id)
         if not diary:
-            return {"text": "❌ 일기를 찾을 수 없습니다.", "edit": True}
+            return {"text": "❌ Diary entry not found.", "edit": True}
 
         if diary.chat_id != chat_id:
-            return {"text": "❌ 권한이 없습니다.", "edit": True}
+            return {"text": "❌ Permission denied.", "edit": True}
 
         date_display = _format_date_display(diary.date)
         preview = escape_html(diary.content[:50]) + ("..." if len(diary.content) > 50 else "")
 
         buttons = [
             [
-                InlineKeyboardButton("✅ 삭제", callback_data=f"diary:del_confirm:{diary_id}"),
-                InlineKeyboardButton("❌ 취소", callback_data=f"diary:view:{diary_id}"),
+                InlineKeyboardButton("✅ Delete", callback_data=f"diary:del_confirm:{diary_id}"),
+                InlineKeyboardButton("❌ Cancel", callback_data=f"diary:view:{diary_id}"),
             ]
         ]
 
         return {
-            "text": f"🗑 <b>정말 삭제하시겠습니까?</b>\n\n<b>{date_display}</b>\n{preview}",
+            "text": f"🗑 <b>Delete this entry?</b>\n\n<b>{date_display}</b>\n{preview}",
             "reply_markup": InlineKeyboardMarkup(buttons),
             "edit": True,
         }
@@ -487,14 +487,14 @@ END;
         """Execute diary deletion."""
         diary = self.store.get(diary_id)
         if not diary:
-            return {"text": "❌ 일기를 찾을 수 없습니다.", "edit": True}
+            return {"text": "❌ Diary entry not found.", "edit": True}
 
         if diary.chat_id != chat_id:
-            return {"text": "❌ 권한이 없습니다.", "edit": True}
+            return {"text": "❌ Permission denied.", "edit": True}
 
         date_display = _format_date_display(diary.date)
         self.store.delete(diary_id)
 
         result = self._handle_list(chat_id)
-        result["text"] = f"🗑 <b>{date_display}</b> 일기가 삭제되었습니다.\n\n" + result["text"]
+        result["text"] = f"🗑 <b>{date_display}</b> diary deleted.\n\n" + result["text"]
         return result

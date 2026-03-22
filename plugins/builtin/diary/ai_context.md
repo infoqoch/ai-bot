@@ -1,46 +1,46 @@
-# 일기 관리 (Diary)
+# Diary Management
 
-하루 하나의 일기를 작성하고 관리하는 플러그인.
+Plugin for writing and managing one diary entry per day.
 
-## DB 스키마
+## DB Schema
 
 ```sql
 diaries (
     id INTEGER PRIMARY KEY,
     chat_id INTEGER NOT NULL,
-    date TEXT NOT NULL,         -- YYYY-MM-DD (하루 1개, UNIQUE)
-    content TEXT NOT NULL,      -- 일기 내용
+    date TEXT NOT NULL,         -- YYYY-MM-DD (one per day, UNIQUE)
+    content TEXT NOT NULL,      -- Diary content
     created_at TEXT,
     updated_at TEXT
 )
 ```
 
-## 기능
+## Features
 
-- 오늘/어제 일기 작성
-- 일기 수정 및 삭제
-- 월별 목록 조회 (월 탐색)
-- 날짜별 개별 조회
-- 일기 작성 알림 스케줄
+- Write today's or yesterday's diary entry
+- Edit and delete diary entries
+- View monthly list (navigate between months)
+- View individual entry by date
+- Diary writing reminder schedule
 
-## AI 활용
+## AI Assistance
 
-- 일기 작성 도우미 (문체 다듬기, 내용 보강)
-- 감정/기분 분석
-- 월간 회고 및 요약 생성
-- 성찰 질문 제안
-- 반복 패턴이나 성장 포인트 발견
+- Writing assistant (refine prose, enrich content)
+- Emotion and mood analysis
+- Generate monthly retrospectives and summaries
+- Suggest reflective questions
+- Discover recurring patterns or growth points
 
-## MCP 도구
+## MCP Tools
 
-데이터 조회/수정이 필요하면 `query_db` 도구를 사용하라. `{chat_id}` 플레이스홀더가 자동 치환된다.
+Use the `query_db` tool when you need to query or modify data. The `{chat_id}` placeholder is substituted automatically.
 
-- 월별 조회: `query_db("SELECT * FROM diaries WHERE chat_id = {chat_id} AND date LIKE '2026-03%'")`
-- 특정 날짜: `query_db("SELECT * FROM diaries WHERE chat_id = {chat_id} AND date = '2026-03-22'")`
-- 테이블 구조 확인: `db_schema("diaries")`
+- Monthly query: `query_db("SELECT * FROM diaries WHERE chat_id = {chat_id} AND date LIKE '2026-03%'")`
+- Specific date: `query_db("SELECT * FROM diaries WHERE chat_id = {chat_id} AND date = '2026-03-22'")`
+- Inspect table structure: `db_schema("diaries")`
 
-## 제약사항
+## Constraints
 
-- 하루 1개 일기만 허용 (chat_id + date UNIQUE)
-- 사용자(chat_id)별 격리
-- 월 단위로 목록 관리
+- Only one diary entry per day (chat_id + date UNIQUE)
+- Isolated per user (chat_id)
+- List managed in monthly units

@@ -241,7 +241,7 @@ END;
             InlineKeyboardButton("📅 Week", callback_data=f"td:week:{today}"),
             InlineKeyboardButton("Next ▶️", callback_data=f"td:date:{tomorrow}"),
         ])
-        buttons.append([InlineKeyboardButton("✨ AI와 작업하기", callback_data="aiwork:todo")])
+        buttons.append([InlineKeyboardButton("✨ Work with AI", callback_data="aiwork:todo")])
         buttons.append([
             InlineKeyboardButton("➕ Add", callback_data="td:add"),
             InlineKeyboardButton("🔄 Refresh", callback_data="td:list"),

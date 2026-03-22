@@ -113,12 +113,12 @@ class CalendarPlugin(Plugin):
         return [
             ToolSpec(
                 name="calendar_list_events",
-                description="Google Calendar 일정 조회. 날짜 범위를 지정하여 일정 목록을 반환한다.",
+                description="Query Google Calendar events by date range.",
                 parameters={
                     "type": "object",
                     "properties": {
-                        "start_date": {"type": "string", "description": "시작일 (YYYY-MM-DD)"},
-                        "end_date": {"type": "string", "description": "종료일 (YYYY-MM-DD)"},
+                        "start_date": {"type": "string", "description": "Start date (YYYY-MM-DD)"},
+                        "end_date": {"type": "string", "description": "End date (YYYY-MM-DD)"},
                     },
                     "required": ["start_date", "end_date"],
                 },
@@ -126,13 +126,13 @@ class CalendarPlugin(Plugin):
             ),
             ToolSpec(
                 name="calendar_create_event",
-                description="새 Google Calendar 일정을 생성한다.",
+                description="Create a new Google Calendar event.",
                 parameters={
                     "type": "object",
                     "properties": {
-                        "summary": {"type": "string", "description": "일정 제목"},
-                        "start": {"type": "string", "description": "시작 시각 (YYYY-MM-DDTHH:MM)"},
-                        "all_day": {"type": "boolean", "description": "종일 일정 여부", "default": False},
+                        "summary": {"type": "string", "description": "Event title"},
+                        "start": {"type": "string", "description": "Start time (YYYY-MM-DDTHH:MM)"},
+                        "all_day": {"type": "boolean", "description": "All-day event", "default": False},
                     },
                     "required": ["summary", "start"],
                 },
@@ -148,12 +148,12 @@ class CalendarPlugin(Plugin):
         e = datetime.fromisoformat(end_date).replace(tzinfo=tz)
         events = self._gcal.list_events(s, e)
         if not events:
-            return "해당 기간에 일정이 없습니다."
+            return "No events in this period."
         lines = []
         for ev in events:
             summary = html_mod.escape(ev.summary)
             if ev.all_day:
-                lines.append(f"- {ev.start.strftime('%m/%d')} 종일: {summary}")
+                lines.append(f"- {ev.start.strftime('%m/%d')} All day: {summary}")
             else:
                 lines.append(f"- {ev.start.strftime('%m/%d %H:%M')}: {summary}")
         return "\n".join(lines)
@@ -163,8 +163,8 @@ class CalendarPlugin(Plugin):
         s = datetime.fromisoformat(start).replace(tzinfo=tz)
         event = self._gcal.create_event(summary=summary, start=s, all_day=all_day)
         if not event:
-            return f"일정 생성 실패: {self._gcal.last_error}"
-        return f"일정 생성됨: {event.summary} ({event.start.strftime('%m/%d %H:%M')})"
+            return f"Failed to create event: {self._gcal.last_error}"
+        return f"Event created: {event.summary} ({event.start.strftime('%m/%d %H:%M')})"
 
     async def handle(self, message: str, chat_id: int) -> PluginResult:
         if not self._gcal.available:

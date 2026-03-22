@@ -12,6 +12,7 @@ from src.constants import AVAILABLE_HOURS
 from src.schedule_utils import next_occurrence, normalize_trigger_type
 from src.ui_emoji import (
     BUTTON_ADD_NEW,
+    BUTTON_AI_WORK,
     BUTTON_BACK,
     BUTTON_CANCEL,
     BUTTON_DELETE,
@@ -71,7 +72,7 @@ class WorkspaceHandlers(BaseHandler):
                     InlineKeyboardButton(BUTTON_DELETE, callback_data=f"ws:delete:{ws.id}"),
                 ])
 
-        buttons.append([InlineKeyboardButton("✨ AI와 작업하기", callback_data="aiwork:workspace")])
+        buttons.append([InlineKeyboardButton(BUTTON_AI_WORK, callback_data="aiwork:workspace")])
         buttons.append([
             InlineKeyboardButton(BUTTON_ADD_NEW, callback_data="ws:add"),
             InlineKeyboardButton(BUTTON_REFRESH, callback_data="ws:refresh"),

@@ -1,93 +1,93 @@
-# Google 캘린더 (Calendar)
+# Google Calendar
 
-Google Calendar API를 연동하여 일정을 관리하는 플러그인.
+Plugin for managing calendar events via the Google Calendar API.
 
-## 외부 API
+## External API
 
-Google Calendar API (서비스 계정 인증). DB 테이블 없이 Google 서버에 직접 CRUD.
+Google Calendar API (service account authentication). CRUD operations are performed directly on Google servers — no DB tables.
 
-### CalendarEvent 구조
+### CalendarEvent Structure
 
-- `id`: Google 이벤트 ID
-- `summary`: 일정 제목
-- `start` / `end`: 시작/종료 시간 (datetime)
-- `location`: 장소 (선택)
-- `description`: 설명 (선택)
-- `all_day`: 종일 일정 여부
+- `id`: Google event ID
+- `summary`: Event title
+- `start` / `end`: Start/end time (datetime)
+- `location`: Location (optional)
+- `description`: Description (optional)
+- `all_day`: Whether it is an all-day event
 
-## 기능
+## Features
 
-- 오늘 일정 보기 (일별 허브 뷰)
-- 날짜 탐색 (이전/다음, 캘린더 그리드)
-- 일정 추가 (날짜 → 시간 → 제목 입력)
-- 종일 일정 추가
-- 일정 수정 (제목, 날짜/시간)
-- 일정 삭제
-- 아침 브리핑 스케줄
+- View today's events (daily hub view)
+- Date navigation (previous/next, calendar grid)
+- Add events (date → time → title input)
+- Add all-day events
+- Edit events (title, date/time)
+- Delete events
+- Morning briefing schedule
 
-## AI 활용
+## AI Assistance
 
-- 일정 충돌 감지 및 조정 제안
-- 하루/주간 일정 최적화
-- 일정 기반 시간 관리 조언
-- 반복 일정 패턴 분석
-- 여유 시간 파악 및 활용 제안
+- Detect event conflicts and suggest adjustments
+- Optimize daily/weekly schedule
+- Time management advice based on events
+- Analyze recurring event patterns
+- Identify free time and suggest how to use it
 
-## 응답 포맷 규칙
+## Response Format Rules
 
-### 금지 사항
+### Prohibited
 
-- `<pre>` 블록으로 달력 그리드(월간 달력 모양)를 그리지 마라. Telegram에서 고정폭 정렬이 깨진다.
-- `<table>`, `<div>`, `<span>` 등 Telegram 미지원 태그 사용 금지.
-- 마크다운 문법(`**bold**`, `*italic*`, `` `code` ``) 사용 금지. 반드시 HTML 태그를 사용하라.
-- 날짜에 `*`, `>`, `[ ]` 등 마커를 붙여 정렬을 깨뜨리지 마라.
+- Do not render a calendar grid (monthly calendar layout) in a `<pre>` block — fixed-width alignment breaks in Telegram.
+- Do not use tags unsupported by Telegram: `<table>`, `<div>`, `<span>`, etc.
+- Do not use Markdown syntax (`**bold**`, `*italic*`, `` `code` ``). Always use HTML tags.
+- Do not attach markers (`*`, `>`, `[ ]`, etc.) to dates that would break alignment.
 
-### 날짜/시간 포맷
+### Date/Time Format
 
-- 날짜: `M/D (요일)` — 예: `3/22 (토)`
-- 시간: `HH:MM` 24시간제 — 예: `09:00`, `14:30`
-- 기간: `HH:MM-HH:MM` — 예: `14:00-15:30`
-- 종일 일정: `종일` 표기
+- Date: `M/D (weekday)` — e.g., `3/22 (Sat)`
+- Time: `HH:MM` 24-hour — e.g., `09:00`, `14:30`
+- Duration: `HH:MM-HH:MM` — e.g., `14:00-15:30`
+- All-day events: display as `All day`
 
-### 일정 목록 포맷
+### Event List Format
 
-날짜별로 묶어 리스트 형식으로 표시한다:
+Group by date and display as a list:
 
 ```
-📅 3/22 (토)
-• 09:00 팀 미팅
-• 14:00-15:30 디자인 리뷰
-• 종일 — 공휴일
+📅 3/22 (Sat)
+• 09:00 Team meeting
+• 14:00-15:30 Design review
+• All day — Holiday
 
-📅 3/23 (일)
-• 일정 없음
+📅 3/23 (Sun)
+• No events
 ```
 
-### 질문 유형별 응답 구조
+### Response Structure by Question Type
 
-| 질문 | 응답 구조 |
-|------|----------|
-| "오늘/내일 일정" | 시간순 정렬, 충돌 있으면 명시 |
-| "이번 주 일정" | 날짜별 그룹, 일정 없는 날 생략 가능, 최대 7일 |
-| "이번 달 일정" | 날짜별 그룹, 일정 있는 날만 표시 |
-| "일정 분석/조언" | 먼저 관련 일정 요약 → 분석/조언 |
+| Question | Response Structure |
+|----------|--------------------|
+| "Today's/tomorrow's events" | Sorted by time; note conflicts explicitly |
+| "This week's events" | Grouped by date; days with no events may be omitted; max 7 days |
+| "This month's events" | Grouped by date; show only days with events |
+| "Schedule analysis/advice" | Summarize relevant events first, then provide analysis/advice |
 
-### 허용 HTML 태그
+### Allowed HTML Tags
 
-- `<b>` 제목, 날짜 강조
-- `<i>` 부가 정보
-- `<code>` 시간, ID 등 고정폭 텍스트
+- `<b>` for titles and date emphasis
+- `<i>` for supplementary information
+- `<code>` for fixed-width text such as times and IDs
 
-## MCP 도구 (사용 가능 시)
+## MCP Tools (when available)
 
-MCP 도구가 활성화된 경우, 아래 도구로 캘린더 데이터를 직접 조회/생성할 수 있다.
-특정 기간의 일정이 필요하면 컨텍스트 데이터 대신 도구를 사용하라.
+When MCP tools are active, you can query or create calendar data directly using the tools below.
+Use the tools instead of context data when you need events for a specific period.
 
-- `calendar_list_events(start_date, end_date)`: 기간별 일정 조회 (YYYY-MM-DD 형식)
-- `calendar_create_event(summary, start, all_day)`: 새 일정 생성 (start는 YYYY-MM-DDTHH:MM 형식)
+- `calendar_list_events(start_date, end_date)`: List events for a date range (YYYY-MM-DD format)
+- `calendar_create_event(summary, start, all_day)`: Create a new event (start in YYYY-MM-DDTHH:MM format)
 
-## 제약사항
+## Constraints
 
-- Google 서비스 계정 설정 필요 (GOOGLE_SERVICE_ACCOUNT_FILE, GOOGLE_CALENDAR_ID)
-- 설정 안 된 경우 사용 불가
-- 실시간 API 호출
+- Requires Google service account configuration (GOOGLE_SERVICE_ACCOUNT_FILE, GOOGLE_CALENDAR_ID)
+- Unavailable if not configured
+- Real-time API calls

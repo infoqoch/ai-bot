@@ -231,8 +231,8 @@ class TestDiaryPlugin:
         result = plugin.handle_callback("diary:write", 1)
 
         text = result["text"]
-        assert "이미 작성" in text
-        # 수정 버튼이 callback_data에 diary:edit:42 포함
+        assert "already been written" in text
+        # Edit button should have diary:edit:42 in callback_data
         markup = result["reply_markup"]
         buttons_flat = [btn for row in markup.inline_keyboard for btn in row]
         cb_datas = [b.callback_data for b in buttons_flat]
@@ -248,7 +248,7 @@ class TestDiaryPlugin:
 
         result = plugin.handle_callback("diary:list", 1)
 
-        assert "없습니다" in result["text"]
+        assert "No diary entries yet" in result["text"]
 
     def test_callback_list_with_entries(self):
         """diary:list - 일기 있음 → 월별 목록 표시."""
@@ -264,7 +264,7 @@ class TestDiaryPlugin:
 
         result = plugin.handle_callback("diary:list", 1)
 
-        assert "일기 목록" in result["text"]
+        assert "Diary List" in result["text"]
         markup = result["reply_markup"]
         buttons_flat = [btn for row in markup.inline_keyboard for btn in row]
         cb_datas = [b.callback_data for b in buttons_flat]
@@ -324,7 +324,7 @@ class TestDiaryPlugin:
         result = plugin.handle_callback("diary:del_confirm:1", 1)
 
         mock_store.delete.assert_called_once_with(1)
-        assert "삭제되었습니다" in result["text"]
+        assert "deleted" in result["text"]
 
     # ---- handle_interaction: write -----------------------------------------
 
@@ -345,7 +345,7 @@ class TestDiaryPlugin:
         result = plugin.handle_interaction("새로 쓴 일기", 1, interaction)
 
         mock_store.add.assert_called_once()
-        assert "저장되었습니다" in result["text"]
+        assert "Diary saved" in result["text"]
 
     # ---- handle_interaction: edit ------------------------------------------
 
@@ -367,7 +367,7 @@ class TestDiaryPlugin:
         result = plugin.handle_interaction("수정된 내용", 1, interaction)
 
         mock_store.update.assert_called_once_with(5, "수정된 내용")
-        assert "수정되었습니다" in result["text"]
+        assert "Diary updated" in result["text"]
 
     # ---- ownership check ---------------------------------------------------
 
@@ -382,7 +382,7 @@ class TestDiaryPlugin:
 
         result = plugin.handle_callback("diary:del:1", chat_id=1)
 
-        assert "권한이 없습니다" in result["text"]
+        assert "Permission denied" in result["text"]
         mock_store.delete.assert_not_called()
 
     def test_ownership_check_on_view(self):
@@ -396,7 +396,7 @@ class TestDiaryPlugin:
 
         result = plugin.handle_callback("diary:view:2", chat_id=1)
 
-        assert "권한이 없습니다" in result["text"]
+        assert "Permission denied" in result["text"]
 
     # ---- scheduled action --------------------------------------------------
 
@@ -409,12 +409,12 @@ class TestDiaryPlugin:
         result = await plugin.execute_scheduled_action("daily_diary", 1)
 
         assert isinstance(result, dict)
-        assert "일기" in result["text"]
+        assert "Diary" in result["text"]
         assert result["reply_markup"] is not None
 
     @pytest.mark.asyncio
     async def test_scheduled_action_already_written(self):
-        """daily_diary 스케줄 - 오늘 일기 이미 있음 → 수정/보기 버튼 포함 dict 반환."""
+        """daily_diary schedule - today's diary already written -> dict with edit/view buttons."""
         plugin, mock_store = _make_plugin()
         today = date.today().isoformat()
         existing = Diary(
@@ -426,7 +426,7 @@ class TestDiaryPlugin:
         result = await plugin.execute_scheduled_action("daily_diary", 1)
 
         assert isinstance(result, dict)
-        assert "이미 작성" in result["text"]
+        assert "already been written" in result["text"]
         assert result["reply_markup"] is not None
 
     # ---- handle_callback: write_yesterday ------------------------------------
@@ -447,7 +447,7 @@ class TestDiaryPlugin:
 
         # Check placeholder and prompt contain yesterday labels
         force_reply = result["force_reply"]
-        assert "어제" in force_reply.input_field_placeholder or "어제" in result.get("force_reply_prompt", "")
+        assert "Yesterday" in force_reply.input_field_placeholder or "yesterday" in result.get("force_reply_prompt", "")
 
     def test_callback_write_yesterday_existing(self):
         """diary:write_yesterday - 어제 일기 이미 있음 → 기존 내용 + 수정/보기 버튼."""
@@ -462,8 +462,8 @@ class TestDiaryPlugin:
         result = plugin.handle_callback("diary:write_yesterday", 1)
 
         text = result["text"]
-        assert "이미 작성" in text
-        assert "어제의 일기" in text
+        assert "already been written" in text
+        assert "Yesterday's diary" in text
 
         # Check for edit/view buttons
         markup = result["reply_markup"]
@@ -493,4 +493,4 @@ class TestDiaryPlugin:
 
         # Verify add was called with yesterday's date
         mock_store.add.assert_called_once_with(1, yesterday, "어제의 추억")
-        assert "저장되었습니다" in result["text"]
+        assert "Diary saved" in result["text"]

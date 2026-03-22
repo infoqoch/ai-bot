@@ -10,10 +10,10 @@ from src.repository import Repository
 from src.ui_emoji import ENTITY_AI, ENTITY_SESSION_CURRENT, ENTITY_WORKSPACE, ENTITY_WORKSPACE_INACTIVE
 
 _RANDOM_NAMES = [
-    "돌돌이", "덜덜이", "돌쇠", "뭉치", "뽀삐", "콩이", "몽실이", "두부", "꼬미", "보리",
-    "초코", "모찌", "호떡", "구름이", "별이", "달이", "해피", "럭키", "토리", "나비",
-    "도토리", "밤톨이", "솜이", "풍이", "도담이", "하늘이", "바람이", "새별이", "온이", "한이",
-    "누리", "다솜이", "아름이", "미르", "가온이", "라온이", "이슬이", "나래", "다온이", "하루",
+    "Buddy", "Sparky", "Cloud", "Pebble", "Breezy", "Maple", "Pixel", "Orbit", "Coral", "Drift",
+    "Echo", "Flint", "Glow", "Haze", "Ivy", "Jazz", "Kite", "Luna", "Moss", "Nova",
+    "Opal", "Pine", "Quill", "Reed", "Sage", "Twig", "Vibe", "Wren", "Zest", "Bloom",
+    "Chip", "Dawn", "Fern", "Gem", "Halo", "Iris", "Jade", "Lark", "Mint", "Nook",
 ]
 
 
@@ -45,7 +45,7 @@ class SessionService:
             return False
 
     def _generate_session_name(self, user_id: str, ai_provider: str) -> str:
-        """Generate a unique random Korean nickname for a session."""
+        """Generate a unique random nickname for a session."""
         import random
         from src.ui_emoji import PROVIDER_ICON_CLAUDE, PROVIDER_ICON_CODEX
 
@@ -312,7 +312,7 @@ class SessionService:
     def get_session_info(self, session_id: str) -> str:
         """Get formatted session info."""
         if not session_id:
-            return "없음"
+            return "None"
 
         session = self._repo.get_session(session_id)
         if not session:
@@ -384,7 +384,7 @@ class SessionService:
         current_id = self._repo.get_current_session_id(user_id, provider)
 
         if not rows:
-            return "세션이 없습니다."
+            return "No sessions."
 
         lines = []
         for s, msg_count in rows:
@@ -395,7 +395,7 @@ class SessionService:
             display_name = s.name or s.id[:8]
             model_badge = get_profile_badge(s.ai_provider, s.model)
 
-            lines.append(f"{emoji} {model_badge} <b>{display_name}</b> ({msg_count}개)")
+            lines.append(f"{emoji} {model_badge} <b>{display_name}</b> ({msg_count})")
 
         return "\n".join(lines)
 

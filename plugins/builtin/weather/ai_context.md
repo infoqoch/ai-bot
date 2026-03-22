@@ -1,42 +1,42 @@
-# 날씨 조회 (Weather)
+# Weather
 
-Open-Meteo API를 이용한 날씨 정보 조회 플러그인.
+Plugin for querying weather information using the Open-Meteo API.
 
-## DB 스키마
+## DB Schema
 
 ```sql
 weather_locations (
     chat_id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,        -- 지역명
-    country TEXT,              -- 국가
-    lat REAL NOT NULL,         -- 위도
-    lon REAL NOT NULL,         -- 경도
+    name TEXT NOT NULL,        -- Location name
+    country TEXT,              -- Country
+    lat REAL NOT NULL,         -- Latitude
+    lon REAL NOT NULL,         -- Longitude
     updated_at TEXT
 )
 ```
 
-## 기능
+## Features
 
-- 도/광역시 → 시/군 2단계 지역 선택
-- 현재 날씨 조회 (기온, 습도, 풍속, 날씨 상태)
-- 3일간 예보 (최저/최고 기온)
-- 위치 저장 (마지막 조회 지역 기억)
+- Two-level location selection (province/metro → city/county)
+- Current weather (temperature, humidity, wind speed, conditions)
+- 3-day forecast (low/high temperatures)
+- Save location (remembers last queried location)
 
-## AI 활용
+## AI Assistance
 
-- 날씨 기반 옷차림/활동 추천
-- 여행 계획 시 날씨 참고
-- 주간 날씨 트렌드 분석
-- 기상 상황에 따른 일정 조정 제안
+- Clothing and activity recommendations based on weather
+- Weather reference when planning trips
+- Weekly weather trend analysis
+- Schedule adjustment suggestions based on weather conditions
 
-## MCP 도구
+## MCP Tools
 
-저장된 위치 조회: `query_db("SELECT * FROM weather_locations WHERE chat_id = {chat_id}")`
+Query saved location: `query_db("SELECT * FROM weather_locations WHERE chat_id = {chat_id}")`
 
-날씨 데이터는 실시간 API에서 제공되므로 DB 조회로는 현재 날씨를 알 수 없다. 위치 정보만 조회 가능.
+Weather data is provided by a real-time API, so current conditions cannot be obtained via DB query. Only location information can be queried.
 
-## 제약사항
+## Constraints
 
-- 사용자당 1개 위치만 저장
-- Open-Meteo API 기반 (한국 도시 CSV 매핑)
-- 실시간 API 호출 (캐시 없음)
+- Only one saved location per user
+- Based on the Open-Meteo API (Korean city CSV mapping)
+- Real-time API calls (no cache)

@@ -1,8 +1,8 @@
-# 할일 관리 (Todo)
+# Todo Management
 
-할일(투두) 목록을 날짜별로 관리하는 플러그인.
+Plugin for managing todo lists organized by date.
 
-## DB 스키마
+## DB Schema
 
 ```sql
 todos (
@@ -10,42 +10,42 @@ todos (
     chat_id INTEGER NOT NULL,
     date TEXT NOT NULL,        -- YYYY-MM-DD
     slot TEXT DEFAULT 'default',
-    text TEXT NOT NULL,        -- 할일 내용
-    done INTEGER DEFAULT 0,   -- 0=미완료, 1=완료
+    text TEXT NOT NULL,        -- Todo content
+    done INTEGER DEFAULT 0,   -- 0=incomplete, 1=complete
     created_at TEXT,
     updated_at TEXT
 )
 ```
 
-## 기능
+## Features
 
-- 할일 추가 (여러 줄 입력으로 일괄 추가)
-- 완료 처리 / 삭제
-- 내일로 이동 (미완료 항목)
-- 다중 선택 후 일괄 완료/삭제/이동
-- 날짜별 조회 (이전/다음 날 탐색)
-- 주간 뷰 (7일간 진행률 요약)
-- 어제 미완료 항목 이월
+- Add todos (bulk add via multi-line input)
+- Mark as complete / delete
+- Move to tomorrow (incomplete items)
+- Bulk complete/delete/move after multi-select
+- View by date (navigate to previous/next day)
+- Weekly view (7-day progress summary)
+- Carry over yesterday's incomplete items
 
-## AI 활용
+## AI Assistance
 
-- 할일 우선순위 제안
-- 카테고리 분류 및 그룹화
-- 완료 패턴 분석
-- 일일/주간 계획 수립 도우미
-- 반복 할일 패턴 파악
+- Suggest todo priorities
+- Categorize and group todos
+- Analyze completion patterns
+- Daily/weekly planning assistant
+- Identify recurring todo patterns
 
-## MCP 도구
+## MCP Tools
 
-데이터 조회/수정이 필요하면 `query_db` 도구를 사용하라. `{chat_id}` 플레이스홀더가 자동 치환된다.
+Use the `query_db` tool when you need to query or modify data. The `{chat_id}` placeholder is substituted automatically.
 
-- 조회: `query_db("SELECT * FROM todos WHERE chat_id = {chat_id} AND date = '2026-03-22'")`
-- 완료 처리: `query_db("UPDATE todos SET done = 1 WHERE id = 5 AND chat_id = {chat_id}")`
-- 삭제: `query_db("DELETE FROM todos WHERE id = 5 AND chat_id = {chat_id}")`
-- 테이블 구조 확인: `db_schema("todos")`
+- Query: `query_db("SELECT * FROM todos WHERE chat_id = {chat_id} AND date = '2026-03-22'")`
+- Mark complete: `query_db("UPDATE todos SET done = 1 WHERE id = 5 AND chat_id = {chat_id}")`
+- Delete: `query_db("DELETE FROM todos WHERE id = 5 AND chat_id = {chat_id}")`
+- Inspect table structure: `db_schema("todos")`
 
-## 제약사항
+## Constraints
 
-- 날짜 기반 관리 (date 컬럼)
-- 사용자(chat_id)별 격리
-- 하루 단위로 할일 목록 구성
+- Date-based management (date column)
+- Isolated per user (chat_id)
+- Todo list is organized in daily units
