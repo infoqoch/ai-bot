@@ -1,310 +1,430 @@
-# 빌트인 플러그인 기획서
+# Built-in Plugin Specifications
 
-> 빌트인 플러그인(Todo, Memo, Weather)의 UI/UX 기획
-> 봇 코어 기획은 [SPEC.md](SPEC.md) 참조
+> UI/UX specifications for built-in plugins: Todo, Calendar, Weather, Diary, Memo
+> For bot core specifications, see [SPEC.md](SPEC.md)
 
 ---
 
-## 투두 플러그인
+## Todo Plugin
 
-### 개념
+### Concept
 
-일별 할일 관리. 오늘의 할일을 기준으로, 완료/삭제/내일로 이동 가능. 주간 뷰와 어제 미완료 이월 기능 제공.
+Daily task management. Centered on today's todos: mark complete, delete, or move to tomorrow. Provides a weekly view and carry-over of yesterday's incomplete items.
 
-### 트리거
+### Triggers
 
-- 자연어: `todo`, `할일`, `투두` (메시지 시작)
-- 제외: 질문 패턴 ("투두란 뭐야", "어떻게", "왜" 등) → AI에게 넘김
+- Natural language: `todo`, `할일`, `투두` (exact match)
+- Excluded: question patterns ("what is todo", "how", "why", etc.) → passed to AI
 
-### 하루 플로우
-
-```
-09:00  [자동] Yesterday Report
-       → 어제 미완료 항목 표시 + 이월 버튼
-
-낮     [수동] 할일 추가/완료/삭제
-       → "할일" 입력 → 오늘 리스트 + 액션 버튼
-
-21:00  [자동] Daily Wrap-up
-       → 오늘 진행률 + 미완료 항목 → 내일로 이동 유도
-```
-
-### 오늘 리스트 화면
+### Daily Flow
 
 ```
-Todos for 2026-03-07
+09:00  [Automatic] Yesterday Report
+       → Display yesterday's incomplete items + carry-over button
+
+Daytime [Manual] Add / complete / delete todos
+       → Type "todo" → today's list + action buttons
+
+21:00  [Automatic] Daily Wrap-up
+       → Today's progress + incomplete items → prompt to move to tomorrow
+```
+
+### Today's List Screen
+
+```
+📋 Todos for 2026-03-07
 
 ⬜ 1. Buy groceries
 ✅ 2. Read chapter 5
 ⬜ 3. Call dentist
 
-1/3 completed
+📊 1/3 completed
 
-[1. Buy groceries]  [3. Call dentist]  ← 미완료 항목만 버튼 (20자 truncate)
-[Multi-select]
-[Prev] [Week] [Next]
-[Add] [Refresh]
+[1. Buy groceries]  [3. Call dentist]  ← Incomplete items only (20-char truncate)
+[📋 Multi-select]
+[◀️ Prev] [📅 Week] [Next ▶️]
+[✨ Work with AI]
+[➕ Add] [🔄 Refresh]
 ```
 
-- 빈 리스트: `No todos yet.` + `[Add]` 버튼
+- Empty list: `No todos yet.` + `[➕ Add]` button
 
-### 항목 상세 → 액션
+### Item Detail → Actions
 
-항목 클릭 시:
+Tap an item button:
 ```
-Todo
+📌 Todo
 
 Buy groceries
 
-[Done] [Delete]
-[Tomorrow]
-[Back]
+[✅ Done] [🗑️ Delete]
+[📅 Tomorrow]
+[⬅️ Back]
 ```
 
-각 액션 후 피드백 메시지 + 리스트 갱신:
-- Done: `Marked as done!`
-- Delete: `Deleted!`
-- Tomorrow: `Moved to tomorrow!`
+Feedback after each action + list refresh:
+- Done: `✅ Marked as done!`
+- Delete: `🗑️ Deleted!`
+- Tomorrow: `📅 Moved to tomorrow!`
 
-### 추가 (ForceReply)
+### Add (ForceReply)
 
-`[Add]` → ForceReply 프롬프트 → 사용자 입력 (줄바꿈으로 복수 항목 가능) → 결과:
+`[➕ Add]` → ForceReply prompt → user input (multiple items separated by line breaks) → result:
 ```
-3 added!
+✅ 3 added!
 
-- Buy milk
-- Clean house
-- Fix bug
+• Buy milk
+• Clean house
+• Fix bug
 
-[View list] [Add more]
+[📄 View list] [➕ Add more]
 ```
 
-### 멀티 선택 모드
+### Multi-select Mode
 
 ```
-Multi-select
+📋 Multi-select
 
 Tap items to select/deselect.
 
 ⬜ Buy groceries
 ☑️ Call dentist
 
-1 selected
+📌 1 selected
 
-[⬜ Buy groceries]  [☑️ Call dentist]    ← 18자 truncate
-[Done(1)] [Delete(1)] [Tomorrow(1)]   ← 선택 시에만 표시
-[Deselect all] [Back]
+[⬜ Buy groceries]  [☑️ Call dentist]    ← 18-char truncate
+[✅ Done(1)] [🗑️ Delete(1)] [📅 Tomorrow(1)]   ← Shown only when items selected
+[🔄 Deselect all] [⬅️ Back]
 ```
 
-### 날짜 네비게이션
+### Date Navigation
 
-- `[Prev]`/`[Next]`: 하루씩 이동, 해당 날짜의 할일 표시
-- 오늘이 아닌 날짜: 헤더에 `MM/DD` 표시
-- `[Today]` 버튼으로 오늘로 복귀
+- `[◀️ Prev]` / `[Next ▶️]`: Move one day, show that date's todos
+- Non-today dates: header shows `MM/DD (Label)`
+- `[📅 Today]` button to return to today
 
-### 주간 뷰
+### Weekly View
 
-기준일을 중심으로 전후 3일 (총 7일) 표시. 월~일 고정이 아닌 중심일 기반.
+Shows 3 days before and after the center date (7 days total). Center-date based, not fixed Mon–Sun.
 
 ```
-Weekly Todos (03/04 ~ 03/10)
+📅 Weekly Todos (03/04 ~ 03/10)
 
-03/04(Mon): ✅ 3/3        ← 전체 완료
-03/05(Tue): ⬜ 1/4        ← 미완료 있음
-03/06(Wed): —             ← 할일 없음
-👉 03/07(Thu): ⬜ 2/5      ← 오늘 표시
+👉 03/04(Mon): ✅ 3/3        ← All complete
+03/05(Tue): ⬜ 1/4           ← Has incomplete
+03/06(Wed): —                ← No todos
+📍03/07(Thu): ⬜ 2/5         ← Today indicator
 
-[4(Mon)] [5(Tue)] [6(Wed)] [📍7(Thu)]  ← 날짜 클릭 → 해당일 리스트
+[4(Mon)] [5(Tue)] [6(Wed)] [📍7(Thu)]  ← Tap date → that day's list
 [8(Fri)] [9(Sat)] [10(Sun)]
-[Prev week] [Today] [Next week]
+[◀️ Prev week] [📅 Today] [Next week ▶️]
 ```
 
-### 어제 미완료 이월
+### Yesterday's Incomplete Carry-over
 
-Yesterday Report 또는 `[Carry over]` 버튼으로 진입:
+Via Yesterday Report or `[📅 Carry selected]` button:
 
 ```
-Incomplete from 2026-03-06
+📋 Incomplete from 2026-03-06
 
 Select items to carry over to today.
 
 ⬜ Unfinished task A
 ☑️ Unfinished task B
 
-1 selected
+📌 1 selected
 
-[⬜ task A] [☑️ task B]          ← 18자 truncate
-[Carry selected(1)] [Carry all(2)]
-[Today]
+[⬜ task A] [☑️ task B]             ← 18-char truncate
+[📅 Carry selected(1)] [📅 Carry all(2)]
+[📄 Today]
 ```
 
-- 선택 이월 / 전체 이월 가능
-- 빈 상태: `No incomplete items from yesterday!`
+- Carry selected or carry all
+- Empty state: `✅ No incomplete items from yesterday!`
 
-### 스케줄 액션
+### Schedule Actions
 
-| 액션 | 시간 | 동작 |
-|------|------|------|
-| `yesterday_report` | 09:00 | 어제 미완료 표시 + 이월 버튼. 어제 할일 없으면 스킵 |
-| `daily_wrap` | 21:00 | 오늘 진행률 + 미완료 목록. 전체 완료면 축하 메시지. 할일 없으면 스킵 |
+| Action | Recommended Time | Behavior |
+|--------|-----------------|----------|
+| `yesterday_report` | 09:00 | Show yesterday's incomplete items + carry-over button. Skipped if no todos yesterday |
+| `daily_wrap` | 21:00 | Today's progress + incomplete list. Celebration message if all complete. Skipped if no todos |
 
 ---
 
-## 메모 플러그인
+## Calendar Plugin
 
-### 개념
+### Concept
 
-짧은 텍스트 메모 저장. 최대 30개 (모바일에서 스크롤 없이 관리 가능한 적정 개수). CRUD + 멀티 삭제.
+Google Calendar integration. View events by day, navigate dates, add/edit/delete events through a step-by-step UI. Supports scheduled briefings and reminders. Requires `GOOGLE_SERVICE_ACCOUNT_FILE` and `GOOGLE_CALENDAR_ID` environment variables.
 
-### 트리거
+### Triggers
 
-- 자연어: `메모`, `memo` (정확 일치)
-- 제외: 질문 패턴 → AI에게 넘김
+- Natural language: `calendar`, `cal`, `캘린더`, `일정`, `달력` (exact match, or keyword followed by a subcommand word)
+- Excluded: question patterns ("what is calendar", etc.) → passed to AI
 
-### 메인 화면
+### Hub Screen (Day View)
 
-```
-Memo
-
-Saved: 5
-(최대: Saved: 30 (max 30))
-
-[List] [Add]
-```
-
-### 리스트 화면
+The main screen showing a single day's events. Opens on today by default.
 
 ```
-Memo List
+📅 Today — Mon, Mar 7
 
-#1 Meeting notes for project review...
-2026-03-05
+────────────────────
+🌅 All day  Team holiday
+⏰ 09:00  Weekly standup
+⏰ 14:00  Dentist
 
-#2 Shopping list
-2026-03-06
-
-[🗑️ #1 Meeting notes] [🗑️ #2 Shopping li...]  ← 15자 truncate
-[Multi-delete]                                   ← 2개 이상일 때만
-[Add] [Refresh]
-[Back]
+[🌅 All day · Team holiday]
+[09:00 · Weekly standup]
+[14:00 · Dentist]
+[◀️ Mar 6] [Today] [Mar 8 ▶️]
+[📅 Calendar grid]
+[➕ Add event]
+[✨ Work with AI]
 ```
 
-- 빈 상태: `No saved memos.` + `[Add]` + `[Back]`
+- No events: `No events ☀️`
+- Tapping an event button → event detail screen
 
-### 추가 (ForceReply)
+### Date Navigation
 
-`[Add]` → ForceReply → 입력 → 저장:
+- `[◀️]` / `[▶️]` buttons: navigate one day at a time
+- `[📅 Calendar grid]`: opens a month-grid for direct date picking
+- `[Today]`: returns to today's hub
+
+### Calendar Grid (Date Picker)
+
 ```
-Memo saved!
+📅 2026/03
 
-#3 This is my new memo content
+[Mon] [Tue] [Wed] [Thu] [Fri] [Sat] [Sun]
+[ 2 ] [ 3 ] [ 4 ] [ 5 ] [ 6 ] [ 7 ] [ 8 ]
+[ 9 ] [10 ] [11 ] [12 ] [13 ] [14 ] [15 ]
+...
+[•22•]  ← Today marker
 
-[List] [Add]
-```
-
-- 빈 입력: `Memo content is empty.`
-- 30개 초과: `Maximum 30 memos reached. Delete some before adding new ones.`
-
-### 단일 삭제 (2단계 확인)
-
-`[🗑️ #N]` → 확인 화면:
-```
-Delete?
-
-#5 This is the memo content...
-
-[Delete] [Cancel]
+[◀️ Feb] [Apr ▶️]
 ```
 
-삭제 완료: `Deleted: ~~content~~` (취소선, 20자 truncate) + 리스트 갱신.
+Tapping a day → hub for that date.
 
-### 멀티 삭제
+### Event Detail Screen
 
-`[Multi-delete]` → 선택 모드:
 ```
-Select Memos to Delete
+📌 Weekly standup
 
-Tap to select.
+⏰ 09:00 - 09:30
+📅 Monday, March 7, 2026
+📍 Conference room B
+📝 Bring Q1 report
 
-[⬜ #1 Short preview...] [✅ #2 Selected memo]  ← 20자 truncate
-[Delete 1]               ← 선택 시에만
-[Cancel]
+[✏️ Edit] [🗑 Delete]
+[◀ Back]
 ```
 
-확인 화면:
-```
-Delete 2 Memos?
+### Add Event Flow
 
-- #1 Meeting notes for project re...    ← 30자 truncate
-- #2 Shopping list
+Step-by-step date/time picker → ForceReply for title.
 
-Are you sure?
-[Delete] [Cancel]
+**Step 1 — Date select:**
 ```
+📅 Select date
+
+[Today Mar 7] [Tomorrow Mar 8] [Day after Mar 9]
+[📅 More dates...]
+```
+
+**Step 2 — Hour select:**
+```
+⏰ Select start hour
+
+📅 Monday, March 7, 2026
+
+[00h] [01h] [02h] [03h]
+[04h] [05h] [06h] [07h]
+...
+[🌅 All day]
+[❌ Cancel]
+```
+
+**Step 3 — Minute select:**
+```
+⏰ 09h — select minute
+
+📅 Monday, March 7, 2026
+
+[:00] [:05] [:10] [:15]
+[:20] [:25] [:30] [:35]
+...
+[❌ Cancel]
+```
+
+**Step 4 — Title (ForceReply):**
+```
+📝 Add Event
+
+📅 Monday, March 7, 2026
+⏰ 09:00
+
+Enter the title.
+```
+ForceReply placeholder: `e.g., Team meeting, Dentist...`
+
+**Result:**
+```
+✅ Event created!
+
+📅 Monday, March 7, 2026
+⏰ 09:00
+📌 Weekly standup
+
+[📅 Calendar]
+```
+
+### All-day Events
+
+In Step 2 (hour select), tap `[🌅 All day]` → skip minute step → ForceReply for title directly.
+
+Result shows `🌅 All day` instead of a time.
+
+### Edit Event
+
+Tap `[✏️ Edit]` from event detail → edit submenu:
+
+```
+✏️ What to edit?
+
+📌 Weekly standup
+
+[📅 Date/Time] [📌 Title]
+[◀ Back]
+```
+
+- **Edit Title**: ForceReply for new title → `✅ Title updated!`
+- **Edit Date/Time**: Same date → hour → minute picker flow as Add, then applies the new time
+
+### Delete Event (with Confirmation)
+
+Tap `[🗑 Delete]` from event detail → confirmation screen:
+
+```
+⚠️ Delete this event?
+
+📌 Weekly standup
+📅 Mar 7
+⏰ 09:00 - 09:30
+
+[✅ Delete] [❌ Cancel]
+```
+
+After deletion: `🗑 Event deleted.` + `[📅 Calendar]` button.
+
+### Schedule Actions
+
+| Action | Recommended Time | Behavior |
+|--------|-----------------|----------|
+| `morning_briefing` | ⭐ 08:00 daily | Today's events list. If no events: "No events ☀️" |
+| `evening_summary` | ⭐ 22:00 daily | Tomorrow's events list (for next-day planning) |
+| `reminder_10m` | Interval (every 5 min) | Alerts for events starting within 10 minutes. Silent if none |
+| `reminder_1h` | Interval (every 5 min) | Alerts for events starting within 1 hour. Silent if none |
+
+Reminder actions are **interval-based** (run every N minutes). Each event is reminded only once per trigger type (dedup via in-memory set). Returns `None` when there is nothing to report (intentional silence — no message sent).
+
+Morning and evening briefings show an `[📅 Open Calendar]` button for quick access.
+
+### MCP Tools
+
+When configured, the Calendar plugin exposes two MCP tools that Claude can call during AI conversations:
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `calendar_list_events` | Query events by date range | `start_date` (YYYY-MM-DD), `end_date` (YYYY-MM-DD) |
+| `calendar_create_event` | Create a new event | `summary` (title), `start` (YYYY-MM-DDTHH:MM), `all_day` (bool, optional) |
+
+Tools are only registered when the Google Calendar client is available (credentials configured). Claude can invoke these tools to read or write calendar data within an AI conversation.
+
+### Configuration
+
+| Env Variable | Description |
+|--------------|-------------|
+| `GOOGLE_SERVICE_ACCOUNT_FILE` | Path to Google service account JSON file |
+| `GOOGLE_CALENDAR_ID` | Calendar ID (e.g., `user@gmail.com` or `primary`) |
+
+If not configured, the plugin responds with a setup instruction instead of showing the calendar.
 
 ---
 
-## 날씨 플러그인
+## Weather Plugin
 
-### 개념
+### Concept
 
-도시별 현재 날씨 + 3일 예보. 기본 위치 저장 가능. Open-Meteo API (무료, 키 불필요).
+Current weather + 3-day forecast by city. Saved location for quick access. Uses the Open-Meteo API (free, no API key required). City data loaded from a bundled CSV file.
 
-### 트리거
+### Triggers
 
-- 자연어: `날씨`, `기온`, `weather`
-- 도시 지정: `서울 날씨` (한국어 도시명 + 날씨)
-- 위치 설정: `위치 설정: 서울`, `날씨 위치: 서울`, `서울 날씨 설정`
+- Natural language: `weather`, `날씨`, `기온` (exact match)
+- Excluded: question patterns → passed to AI
 
-### 날씨 조회 시나리오
+### Weather Query Scenarios
 
-**저장된 위치 있음:** `날씨` → 저장 위치의 날씨 즉시 표시.
+**Saved location exists:** `weather` → show weather for saved location immediately.
 
-**저장된 위치 없음:** `날씨` → 도시 선택 화면 (퀵 시티 7개, 2열 그리드).
+**No saved location:** `weather` → region/province select screen.
 
-**도시 지정:** `서울 날씨` → 해당 도시 날씨 즉시 표시.
+**City from select:** Tap a city button → show that city's weather.
 
-### 날씨 표시 화면
+### Region Select Screen (No Saved Location)
+
+```
+🌤️ Select Region
+
+Choose a region to check weather:
+
+[서울] [부산] [대구]
+[경기] [인천] [강원]
+[충북] [충남] [대전]
+...
+```
+
+Metro/special cities (서울, 부산, 대구, 인천, 광주, 대전, 울산, 세종) go directly to weather. Other regions show a city list.
+
+### Province → City List Screen
+
+```
+🌤️ 경기 - Select City
+
+Choose a city:
+
+[수원] [성남] [의정부]
+[안양] [부천] [광명]
+...
+[◀️ Back]
+```
+
+### Weather Display Screen
 
 ```
 ☀️ 서울 Weather
 
 Current
-- Weather: Clear
-- Temp: 15.2°C
-- Humidity: 45%
-- Wind: 8.3 km/h
+• Weather: Clear
+• Temp: 15.2°C
+• Humidity: 45%
+• Wind: 8.3 km/h
 
 3-Day Forecast
 03/07 ☀️ 5° / 16°
 03/08 ⛅ 7° / 14°
 03/09 🌧️ 3° / 10°
 
-[서울] [부산] [대구] [인천]    ← 퀵 시티 (4+3 그리드)
-[광주] [대전] [제주]
-[Refresh] [Other city]
+[🔄 Refresh] [📍 Other city]
+[✨ Work with AI]
 ```
 
-- 도시 선택 화면(저장 위치 없음)에서는 2열 그리드, 날씨 결과 화면에서는 4+3 그리드
+### Weather Icon Mapping
 
-### 위치 설정
-
-`위치 설정: 서울` →
-```
-Location set!
-
-서울 (South Korea)
-Lat: 37.5665, Lon: 126.9780
-
-[Check weather]
-```
-
-- 도시 못 찾음: `'{name}' not found. Try a different location.`
-
-### 날씨 아이콘 매핑
-
-| 코드 | 아이콘 | 설명 |
-|------|--------|------|
+| Code | Icon | Description |
+|------|------|-------------|
 | 0 | ☀️ | Clear |
 | 1 | 🌤️ | Mostly clear |
 | 2 | ⛅ | Partly cloudy |
@@ -318,3 +438,223 @@ Lat: 37.5665, Lon: 126.9780
 | 80, 81 | 🌦️ | Showers |
 | 82 | ⛈️ | Heavy showers |
 | 95, 96, 99 | ⛈️ | Thunderstorm |
+
+---
+
+## Diary Plugin
+
+### Concept
+
+One diary entry per day. Browse past entries by month. Write, edit, or delete entries through a button-driven UI. Supports a daily reminder schedule action.
+
+### Triggers
+
+- Natural language: `diary`, `일기` (exact match, or keyword followed by a subcommand word)
+- Excluded: question patterns ("what is a diary", etc.) → passed to AI
+
+### Main Screen (Monthly List)
+
+```
+📓 Diary List (2026/03)
+
+[3/1 (Mon) Had a great morning walk...]
+[3/5 (Fri) Finished the project report...]
+[3/7 (Sun) Relaxed at home and read...]
+
+[◀️ 2] [3 ▶️]
+📊 This month: 3 · Total: 12
+[✨ Work with AI]
+[📝 Write] [⏪ Yesterday]
+```
+
+- No entries at all: `📭 No diary entries yet.` + `[📝 Write]` + `[⏪ Yesterday]`
+- Month navigation: `[◀️ prev]` / `[next ▶️]` (future months not shown)
+- `[📅 This month]` button appears when viewing a past month
+
+### Write Flow (ForceReply)
+
+**`[📝 Write]` (today's entry):**
+
+1. If today's entry already exists → show existing entry preview with `[✏️ Edit]` / `[👁 View]` / `[◀️ Menu]`
+2. If no entry → ForceReply prompt:
+   ```
+   📓 Write Diary
+
+   2026/03/07 (Mon)
+
+   Record today in your diary.
+   ```
+   Placeholder: `How was today?`
+
+3. After submission:
+   ```
+   ✅ Diary saved!
+
+   2026/03/07 (Mon)
+
+   [👁 View] [📄 List]
+   ```
+
+**`[⏪ Yesterday]` (yesterday's entry):**
+
+Same flow but with `"Record yesterday in your diary."` prompt and `"How was yesterday?"` placeholder.
+
+### View Entry Screen
+
+```
+📓 2026/03/07 (Mon)
+
+Today was productive. Finished the feature and wrote tests.
+The deploy went smoothly too.
+
+[✏️ Edit] [🗑 Delete]
+[◀️ List]
+```
+
+Content is shown in a code block (monospace).
+
+### Edit Flow
+
+Tap `[✏️ Edit]` from view screen:
+
+```
+✏️ Edit Diary
+
+2026/03/07 (Mon)
+
+Current content:
+today was productive...
+
+```
+ForceReply prompt: `✏️ Enter new content:`
+Placeholder: `Enter new content...`
+
+After submission:
+```
+✅ Diary updated!
+
+2026/03/07 (Mon)
+
+[👁 View] [📄 List]
+```
+
+### Delete (with Confirmation)
+
+Tap `[🗑 Delete]` from view screen:
+
+```
+🗑 Delete this entry?
+
+2026/03/07 (Mon)
+Today was productive. Finished the fea...
+
+[✅ Delete] [❌ Cancel]
+```
+
+After deletion: returns to monthly list with `🗑 [date] diary deleted.` prepended.
+
+### Schedule Action
+
+| Action | Recommended Time | Behavior |
+|--------|-----------------|----------|
+| `daily_diary` | (user sets) | If today's entry already written: shows preview with Edit/View buttons. If not written: prompts to write with Write/Yesterday/List buttons |
+
+The reminder message is prefixed with `🔔 Daily diary reminder`.
+
+---
+
+## Memo Plugin
+
+### Concept
+
+Short text memo storage. Maximum 30 memos (manageable on mobile without excessive scrolling). CRUD + multi-delete.
+
+### Triggers
+
+- Natural language: `메모`, `memo` (exact match)
+- Excluded: question patterns → passed to AI
+
+### Main Screen
+
+```
+📝 Memo
+
+Saved: 5
+
+[📄 List] [➕ Add]
+[✨ Work with AI]
+```
+
+When at max capacity: `Saved: 30 (max 30)`
+
+### List Screen
+
+```
+📝 Memo List
+
+#1 Meeting notes for project review...
+2026-03-05
+
+#2 Shopping list
+2026-03-06
+
+[🗑️ #1 Meeting notes] [🗑️ #2 Shopping li...]  ← 15-char truncate
+[☑️ Multi-delete]                                ← Only shown when 2+ memos exist
+[➕ Add] [🔄 Refresh]
+[⬅️ Back]
+```
+
+- Empty state: `📭 No saved memos.` + `[➕ Add]` + `[⬅️ Back]`
+
+### Add (ForceReply)
+
+`[➕ Add]` → ForceReply → input → saved:
+```
+✅ Memo saved!
+
+#3 This is my new memo content
+
+[📄 List] [➕ Add]
+```
+
+- Empty input: `❌ Memo content is empty.` + `[📝 Try again]`
+- Over 30 memos: `❌ Maximum 30 memos reached. Delete some before adding new ones.`
+
+### Single Delete (2-step Confirmation)
+
+Tap `[🗑️ #N ...]` → confirmation screen:
+```
+🗑️ Delete?
+
+#5 This is the memo content
+
+[✅ Delete] [❌ Cancel]
+```
+
+After deletion: `🗑️ Deleted: ~~content~~` (strikethrough, 20-char truncate) + list refreshed.
+
+### Multi-delete
+
+`[☑️ Multi-delete]` → selection mode:
+```
+☑️ Select Memos to Delete
+
+Tap to select.
+
+[⬜ #1 Short preview...] [✅ #2 Selected memo]  ← 20-char truncate
+[🗑️ Delete 1]            ← Shown only when selected
+[❌ Cancel]
+```
+
+Confirmation screen:
+```
+🗑️ Delete 2 Memos?
+
+• #1 Meeting notes for project re...    ← 30-char truncate
+• #2 Shopping list
+
+Are you sure?
+[✅ Delete] [❌ Cancel]
+```
+
+After deletion: `🗑️ N memos deleted` + list refreshed.

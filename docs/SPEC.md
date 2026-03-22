@@ -1,142 +1,142 @@
-# AI Bot - UI/UX 기획서
+# AI Bot - UI/UX Specification
 
-> Layer 3: 사용자 경험 의도, 시나리오, UX 원칙
-> 코드에 존재하지 않는 기획 정보를 기술한다.
+> Layer 3: User experience intent, scenarios, and UX principles
+> Documents planning information that does not exist in code.
 
 ---
 
-## 전체 UX 원칙
+## Overall UX Principles
 
-| 원칙 | 설명 |
-|------|------|
-| **즉시 피드백** | 플러그인/명령어는 AI 호출 없이 즉시 응답. AI 호출 시에도 "처리 중" 상태를 사용자가 인지 |
-| **한 탭 완료** | 가능한 한 인라인 버튼 한 번으로 작업 완료. 멀티스텝은 최소화 |
-| **현재 상태 표시** | 모든 화면에서 현재 세션, 모델, 개수 등 컨텍스트를 표시 |
-| **안전한 삭제** | 삭제 작업은 2단계 확인 (확인 버튼 → 실행). 예외: 워크스페이스 삭제 (단일 탭, 재등록이 용이하므로) |
-| **빈 상태 유도** | 데이터가 없을 때 "추가" 행동을 유도하는 버튼 표시 |
-| **비파괴적 에러** | 에러 발생 시 사용자 데이터 손실 없이 재시도 안내 |
-| **영어 UI** | 모든 사용자 대면 텍스트는 영어. 시스템 프롬프트에 의해 Claude 응답만 한국어 |
-| **플러그인 탈출구** | 플러그인이 자연어를 가로챌 수 있으므로, `/ai` 명령어로 항상 현재 AI에 직접 질문 가능 |
+| Principle | Description |
+|-----------|-------------|
+| **Immediate feedback** | Plugins/commands respond instantly without AI calls. Even when an AI call is made, the user is aware of a "processing" state |
+| **One-tap completion** | Complete actions with a single inline button tap whenever possible. Multi-step flows are minimized |
+| **Current state display** | All screens show contextual info such as current session, model, and counts |
+| **Safe deletion** | Delete operations require 2-step confirmation (confirm button → execute). Exception: workspace deletion (single tap, since re-adding is easy) |
+| **Empty state guidance** | When there is no data, show a button prompting the "add" action |
+| **Non-destructive errors** | On error, guide the user to retry without any data loss |
+| **English UI** | All user-facing text is in English. Only Claude responses are in Korean, as specified by the system prompt |
+| **Plugin escape hatch** | Since plugins can intercept natural language, `/ai` always allows the user to query the current AI directly |
 
-## 응답 포맷 규칙
+## Response Format Rules
 
-- 모든 응답은 **Telegram HTML** (`<b>`, `<i>`, `<code>`, `<pre>`)
-- 마크다운 문법 금지 (`**`, `*`, `#`, `` ` ``, `>`)
-- AI 응답에 마크다운이 포함될 경우 `markdown_to_telegram_html()` 변환기가 자동으로 HTML로 변환
-- 테이블 미지원 → 불릿/번호 리스트 사용
-- 모바일 최적화: 간결한 텍스트, 4096자 제한 (안전 마진 4000자)
-- 4000자 초과 시 줄바꿈 기준으로 자동 분할 전송 (줄바꿈이 없으면 4000자 단위로 분할)
+- All responses use **Telegram HTML** (`<b>`, `<i>`, `<code>`, `<pre>`)
+- Markdown syntax is forbidden (`**`, `*`, `#`, `` ` ``, `>`)
+- If AI responses contain markdown, the `markdown_to_telegram_html()` converter automatically converts them to HTML
+- Tables are not supported → use bulleted/numbered lists
+- Mobile-optimized: concise text, 4096-character limit (safe margin: 4000 characters)
+- Messages exceeding 4000 characters are automatically split at newline boundaries (or at 4000-character intervals if no newline exists)
 
-## 모델 표현 체계
+## Model Representation
 
-| 모델 | 이모지 | 리스트 약자 |
-|------|--------|------------|
+| Model | Emoji | List badge |
+|-------|-------|------------|
 | opus | 🧠 | `[O]` |
 | sonnet | ⚡ | `[S]` |
 | haiku | 🚀 | `[H]` |
 
 ---
 
-## 전체 명령어 목록
+## Full Command List
 
-Telegram slash command picker는 시작 시 API로 자동 동기화되며, 아래 5개만 노출한다.
+The Telegram slash command picker is automatically synced via API at startup, exposing only the following 5 commands.
 
-| 공개 picker 명령 | 설명 |
-|------------------|------|
-| `/menu` | 메인 서비스 런처 |
-| `/session` | 현재 세션 정보 |
-| `/new` | 새 세션 생성 |
-| `/sl` | 세션 목록 |
-| `/tasks` | 활성 태스크/큐 현황 |
+| Public picker command | Description |
+|-----------------------|-------------|
+| `/menu` | Main service launcher |
+| `/session` | Current session info |
+| `/new` | Create a new session |
+| `/sl` | Session list |
+| `/tasks` | Active task/queue status |
 
-나머지 명령은 버튼 허브 또는 직접 입력으로 접근한다.
+All other commands are accessed via button hubs or direct input.
 
-| 직접 입력/버튼 명령 | 설명 |
-|---------------------|------|
-| `/start` | 시작 화면 (`/menu` / `/help` 진입) |
-| `/help` | 간단 도움말 + Back to Menu |
-| `/help_extend` | 확장 도움말 인덱스 |
-| `/help_{plugin}` | 개별 플러그인 상세 도움말 |
-| `/auth <key>` | 인증 (REQUIRE_AUTH=true 시) |
-| `/status` | 인증 상태 확인 |
-| `/select_ai` | 현재 AI 제공자 선택 (`Claude` / `Codex`) |
-| `/model [model]` | 현재 세션 모델 변경/확인 |
-| `/model_opus`, `/model_sonnet`, `/model_haiku` | 모델 변경 단축 |
-| `/new_opus`, `/new_sonnet`, `/new_haiku` | 모델별 세션 단축 생성 |
-| `/new_workspace path [model] [name]` | 워크스페이스 세션 생성 |
-| `/workspace` | 워크스페이스 관리 |
-| `/scheduler` | 스케줄 관리 |
-| `/plugins` | 플러그인 버튼 허브 |
-| `/ai <question>` | 플러그인 우회, 현재 AI에 직접 질문 |
-| `/chatid` | 내 Chat ID 확인 |
-| `/s_{id}` | 세션 전환 |
-| `/h_{id}` | 세션 히스토리 (`/history_{id}` 별칭 지원) |
-| `/d_{id}` | 세션 삭제 (`/delete_{id}` 별칭 지원) |
-| `/rename_name` | 현재 세션 이름 변경 |
-| `/r_{id}_name` | 특정 세션 이름 변경 |
-| `/back` | 이전 세션으로 복귀 |
-| `/{plugin}` | 사용법 본문 대신 `/help_{plugin}` 경로로 안내 |
-| `/reload [name]` | 플러그인 리로드 (admin only) |
+| Direct input / button command | Description |
+|-------------------------------|-------------|
+| `/start` | Start screen (entry to `/menu` / `/help`) |
+| `/help` | Brief help + Back to Menu |
+| `/help_extend` | Extended help index |
+| `/help_{plugin}` | Detailed help for individual plugins |
+| `/auth <key>` | Authentication (when `REQUIRE_AUTH=true`) |
+| `/status` | Check authentication status |
+| `/select_ai` | Select current AI provider (`Claude` / `Codex`) |
+| `/model [model]` | Change or view the current session model |
+| `/model_opus`, `/model_sonnet`, `/model_haiku` | Model change shortcuts |
+| `/new_opus`, `/new_sonnet`, `/new_haiku` | Quick session creation by model |
+| `/new_workspace path [model] [name]` | Create a workspace session |
+| `/workspace` | Workspace management |
+| `/scheduler` | Schedule management |
+| `/plugins` | Plugin button hub |
+| `/ai <question>` | Bypass plugins, query the current AI directly |
+| `/chatid` | View my Chat ID |
+| `/s_{id}` | Switch session |
+| `/h_{id}` | Session history (alias `/history_{id}` supported) |
+| `/d_{id}` | Delete session (alias `/delete_{id}` supported) |
+| `/rename_name` | Rename the current session |
+| `/r_{id}_name` | Rename a specific session |
+| `/back` | Return to the previous session |
+| `/{plugin}` | Redirects to `/help_{plugin}` instead of showing usage inline |
+| `/reload [name]` | Reload plugin (admin only) |
 
 ---
 
-## 접근 제어
+## Access Control
 
-### 인증 플로우
+### Authentication Flow
 
 ```
-사용자 메시지 도착
+User message arrives
     │
-    ├─ ALLOWED_CHAT_IDS 미포함 → "Access denied." (종료)
+    ├─ Not in ALLOWED_CHAT_IDS → "Access denied." (stop)
     │
-    ├─ REQUIRE_AUTH=false → 통과
+    ├─ REQUIRE_AUTH=false → pass
     │
     └─ REQUIRE_AUTH=true
-         ├─ 인증 세션 유효 → 통과
-         └─ 미인증/만료 → "Authentication required." + /auth 안내 (종료)
+         ├─ Auth session valid → pass
+         └─ Not authenticated / expired → "Authentication required." + /auth guidance (stop)
 ```
 
-### `/auth` 명령어
+### `/auth` Command
 
-- 인자 없음: `Usage: /auth <secret_key>`
-- 성공: `Authenticated! Valid for {N} minutes.`
-- 실패: `Authentication failed. Wrong key.`
+- No argument: `Usage: /auth <secret_key>`
+- Success: `Authenticated! Valid for {N} minutes.`
+- Failure: `Authentication failed. Wrong key.`
 
-### 인증 상태 표시
+### Authentication Status Display
 
-| 위치 | 인증됨 | 미인증 | 인증 불필요 |
-|------|--------|--------|------------|
+| Location | Authenticated | Not authenticated | Auth not required |
+|----------|---------------|-------------------|-------------------|
 | `/start` | `Auth: Authenticated (Xm remaining)` | `Auth: Authentication required` | `No authentication required` |
-| `/help` | `/auth`, `/status` 섹션 표시 | 동일 | 섹션 숨김 |
+| `/help` | Shows `/auth`, `/status` section | Same | Section hidden |
 | `/status` | `Authenticated (Xm remaining)` | `Authentication required.` | - |
 
 ---
 
-## 기본 화면
+## Base Screens
 
 ### `/start`
 
 ```
 CLI AI Bot
 
-{인증 상태}
+{auth status}
 Current AI: {provider}
-Session: [{세션정보}] ({N} messages)
+Session: [{session info}] ({N} messages)
 
 /menu or /help
 ```
 
-- 하단에 `Menu`, `Help` 버튼 2개를 함께 표시한다.
+- Displays 2 buttons at the bottom: `Menu`, `Help`.
 
 ### `/help`
 
-간단 도움말만 보여준다. 상세 문서는 `/help_extend` 아래로 분리한다.
+Shows brief help only. Detailed docs are separated under `/help_extend`.
 
-- 하단에 `Back to Menu` 버튼 표시
+- Displays a `Back to Menu` button at the bottom.
 
-### 알 수 없는 명령어
+### Unknown Command
 
-등록되지 않은 `/xxx` 입력 시: `Unknown command: {command}` + `/menu or /help`
+When an unregistered `/xxx` is entered: `Unknown command: {command}` + `/menu or /help`
 
 ### `/chatid`
 
@@ -162,23 +162,24 @@ Tap a plugin button below.
 Docs: /help_extend
 ```
 
-- 플러그인 본문은 `Builtin` / `Custom` 한 줄 요약만 표시한다.
-- 실제 사용은 동적 버튼으로 연다. 플러그인 수가 늘어나면 버튼도 자동으로 늘어난다.
-- `/{plugin}` 직접 입력은 실행 설명 대신 `/help_{plugin}` 문서 경로로 안내한다.
-플러그인 없음: `No plugins loaded.`
+- The plugin body shows only a one-line `Builtin` / `Custom` summary.
+- Actual usage is opened via dynamic buttons. As more plugins are added, buttons are automatically added.
+- Entering `/{plugin}` directly redirects to `/help_{plugin}` docs instead of showing usage inline.
+
+No plugins loaded: `No plugins loaded.`
 
 ---
 
-## 세션 관리
+## Session Management
 
-### AI 제공자 선택
+### AI Provider Selection
 
-사용자는 한 시점에 하나의 AI 제공자를 활성화한다.
+The user activates one AI provider at a time.
 
-| 제공자 | 성격 | 세션/모델 예시 |
-|------|------|---------------|
-| `Claude` | 기존 대화형 코딩 보조 | `opus`, `sonnet`, `haiku` |
-| `Codex` | ChatGPT 로그인 기반 CLI 코딩 에이전트 | `GPT-5.4 High`, `GPT-5.4 XHigh`, `GPT-5.3 Codex Medium` |
+| Provider | Character | Session/model examples |
+|----------|-----------|------------------------|
+| `Claude` | Conversational coding assistant | `opus`, `sonnet`, `haiku` |
+| `Codex` | ChatGPT login-based CLI coding agent | `GPT-5.4 High`, `GPT-5.4 XHigh`, `GPT-5.3 Codex Medium` |
 
 ### `/select_ai`
 
@@ -189,49 +190,49 @@ Current AI: Claude
 [Cancel]
 ```
 
-- 선택 즉시 현재 AI가 바뀐다.
-- 세션 목록(`/sl`), 현재 세션(`/session`), 새 세션(`/new`), 모델 변경(`/model`)은 모두 현재 선택된 AI 기준으로 동작한다.
-- AI를 바꿔도 다른 AI의 세션은 삭제되지 않는다.
-- 현재 세션은 AI 제공자와 무관하게 **전체에서 1개만** 유지한다. 세션 전환 시 다른 제공자의 current session은 자동 해제된다.
-- 시작 화면, 도움말, 세션 화면에는 항상 `Current AI: {provider}`를 표시한다.
+- The current AI changes immediately upon selection.
+- Session list (`/sl`), current session (`/session`), new session (`/new`), and model change (`/model`) all operate based on the currently selected AI.
+- Switching AI does not delete the other AI's sessions.
+- Only **1 current session** is maintained across the entire system, regardless of AI provider. When switching sessions, the other provider's current session is automatically deselected.
+- `Current AI: {provider}` is always shown on the start screen, help, and session screens.
 
-### 사용자 시나리오
+### User Scenarios
 
-**신규 사용자 첫 메시지:** 세션이 없으면 현재 AI의 기본 프로필로 자동 생성 → detached worker가 provider CLI를 호출. 사용자가 세션을 의식하지 않아도 바로 대화 가능.
+**First message from a new user:** If no session exists, one is automatically created with the current AI's default profile → the detached worker calls the provider CLI. The user can start chatting without being aware of sessions.
 
-**모델 선택 세션 생성:** `/new` → 모델 버튼 선택 → 이름 입력(ForceReply) → 생성 완료. 단축 명령어 `/new_opus` 등으로 한 단계 스킵 가능.
+**Model-selected session creation:** `/new` → select model button → enter name (ForceReply) → creation complete. The shortcut command `/new_opus` etc. lets you skip one step.
 
-**프리셋 세션:** `/new_haiku_speedy` (빠른 응답용), `/new_opus_smarty` (고품질 분석용). 자주 쓰는 조합을 한 번에.
+**Preset sessions:** `/new_haiku_speedy` (for fast responses), `/new_opus_smarty` (for high-quality analysis). Common combinations in one step.
 
-**세션 전환:** `/sl`로 목록 → 세션 이름 버튼 클릭 → `/session` 전체 정보 표시 (모델/히스토리/버튼 포함). `/s_{id}` 직접 입력 시에는 간단한 전환 메시지만 표시.
+**Session switching:** `/sl` to list → click session name button → `/session` full info is displayed (model/history/buttons included). When using `/s_{id}` directly, only a brief switch message is shown.
 
-**세션 삭제:** 목록에서 `Del` 버튼 → 확인 화면 → `Delete` 버튼. 현재 세션은 삭제 불가 (다른 세션으로 전환 먼저 필요).
+**Session deletion:** `Del` button from the list → confirmation screen → `Delete` button. The current session cannot be deleted (switch to another session first).
 
-**이전 세션 복귀:** `/back` → 직전에 사용하던 세션으로 즉시 전환.
+**Return to previous session:** `/back` → instantly switches to the previously used session.
 
-**로컬 세션 가져오기 (Import Local Session):** 세션 목록 → `Import Local` → 로컬 CLI에서 직접 만든 세션 목록 표시 → 선택 → 봇 세션으로 등록.
+**Import Local Session:** Session list → `Import Local` → shows list of sessions created directly in the local CLI → select → register as a bot session.
 
 ### Import Local Session
 
-#### 개념
+#### Concept
 
-터미널에서 `claude` 또는 `codex` CLI를 직접 실행하면, 해당 세션은 봇이 모른다. Import Local은 이렇게 로컬에만 존재하는 세션을 봇으로 가져와서 텔레그램에서 이어서 대화할 수 있게 한다.
+When the user runs the `claude` or `codex` CLI directly in a terminal, those sessions are unknown to the bot. Import Local allows these locally-only sessions to be brought into the bot so conversations can continue from Telegram.
 
-#### 데이터 소스
+#### Data Sources
 
-로컬 머신의 provider CLI 저장소를 직접 스캔한다:
+Directly scans the provider CLI storage on the local machine:
 
-| Provider | 스캔 경로 |
-|----------|----------|
+| Provider | Scan path |
+|----------|-----------|
 | Claude | `~/.claude/projects/*/sessions-index.json` + raw `*.jsonl` |
 | Codex | `~/.codex/session_index.jsonl` + `~/.codex/sessions/YYYY/MM/DD/*.jsonl` |
 
-위 경로에 파일이 없는 세션은 발견되지 않는다 (다른 머신에서 만든 세션, 삭제된 세션 등).
+Sessions not found in the above paths cannot be discovered (sessions from other machines, deleted sessions, etc.).
 
-#### UI 플로우
+#### UI Flow
 
 ```
-세션 목록 → [Import Local]
+Session list → [Import Local]
     │
     ▼
 Import Local Session
@@ -248,73 +249,73 @@ Showing 1-10 recent sessions.
 
 [📚 a1b2c3d4 Fix authenticat...]
 [🤖 e5f6g7h8 Refactor databa...]
-[← Newer] [Older →]                ← 페이지네이션
+[← Newer] [Older →]                ← pagination
 [Back]
 ```
 
-#### 선택 후 동작
+#### Behavior After Selection
 
-| 상황 | 결과 |
-|------|------|
-| 최초 import | 봇 DB에 새 세션 생성 + 세션 상세 화면 표시 |
-| 이미 import됨 | 기존 봇 세션으로 전환 + "already attached" 안내 |
-| 워크스페이스 경로 존재 | 워크스페이스 세션으로 등록 (cwd 연결) |
-| 워크스페이스 경로 없음/삭제됨 | 일반 세션으로 등록 |
+| Situation | Result |
+|-----------|--------|
+| First import | New session created in bot DB + session detail screen displayed |
+| Already imported | Switch to existing bot session + "already attached" notice |
+| Workspace path exists | Registered as a workspace session (cwd linked) |
+| Workspace path missing/deleted | Registered as a regular session |
 
-#### 주의사항
+#### Notes
 
-- Import 후 봇 히스토리는 import 시점부터 시작된다 (provider 측 기존 대화는 유지되지만 봇 UI에는 표시되지 않음)
-- 정렬은 `updated_at` 내림차순 (최신 사용 순)
-- 페이지당 10개, Claude/Codex 세션이 혼합 표시됨
-- 봇 DB와 무관하게 로컬 파일만 스캔하므로, 봇에서 삭제한 세션이 다시 보일 수 있음
+- After import, the bot history starts from the point of import (prior provider-side conversations are preserved but not shown in the bot UI)
+- Sorted by `updated_at` descending (most recently used first)
+- 10 sessions per page; Claude/Codex sessions are shown mixed together
+- Since only local files are scanned (independent of the bot DB), sessions deleted from the bot may reappear
 
-### 세션 목록 화면
+### Session List Screen
 
 ```
-Session List (HH:MM:SS)                 ← 타임스탬프는 콜백 갱신 시에만 표시
+Session List (HH:MM:SS)                 ← timestamp shown only on callback refresh
 Current AI: Claude
 
 🧠 Project Alpha ●
 🤖 ⚡ Research Bot 🔒
 
-[SessionName] [History] [Del]       ← 각 세션별 액션 버튼
+[SessionName] [History] [Del]       ← action buttons per session
 [OtherSess..] [History] [Del]
 
 [New Session] [Refresh] [Tasks]
 [Switch AI]
-[Back]                              ← `/menu -> Sessions`로 진입한 경우만
+[Back]                              ← only shown when entered from `/menu -> Sessions`
 ```
 
-- 최대 10개 표시
-- 세션 이름은 버튼에서 10자 truncate
-- Claude/Codex 세션을 한 화면에 함께 표시한다
-- 현재 선택된 AI의 current session 하나만 `●`로 강조한다
-- 각 행에는 provider icon과 model badge를 함께 표시한다
+- Maximum 10 sessions shown
+- Session names truncated to 10 characters on buttons
+- Claude and Codex sessions are shown together on one screen
+- Only the current session of the currently selected AI is highlighted with `●`
+- Each row shows both the provider icon and model badge
 
-### 세션 정보 화면 (`/session`)
+### Session Info Screen (`/session`)
 
-현재 세션의 상세 정보 + 최근 히스토리 10건 + 모델 변경/리네임/히스토리/삭제/Session List 버튼.
-히스토리 항목에 처리자 표시: `[cmd]` (명령어), `[plugin]` (플러그인), `[x]` (거절), 없음 (AI).
+Current session details + last 10 history entries + buttons for model change / rename / history / delete / Session List.
+History items show the handler: `[cmd]` (command), `[plugin]` (plugin), `[x]` (rejected), none (AI).
 
-- 상단에 현재 AI를 표시: `Current AI: Claude`
-- 모델 버튼은 현재 세션의 AI가 제공하는 모델/프로필만 표시
-- Claude와 Codex 세션은 서로 다른 모델 버튼 집합을 가진다
+- Current AI is shown at the top: `Current AI: Claude`
+- Model buttons show only the models/profiles available for the current session's AI
+- Claude and Codex sessions have different sets of model buttons
 
-### 모델 변경 (`/model`)
+### Model Change (`/model`)
 
-- `/model` (인자 없음): `/session`으로 리다이렉트 (세션 정보 + 모델 변경 버튼 표시)
-- `/model {profile}`: 현재 AI의 모델/프로필로 변경
-- 동일 모델: `Already using {model}.`
-- 세션 없음: 세션 생성 안내
-- 지원되지 않는 모델: 현재 AI 기준 지원 목록을 표시
-- 인라인 버튼으로도 변경 가능 (`/session` 화면, 세션 전환 후 화면)
+- `/model` (no argument): redirects to `/session` (shows session info + model change buttons)
+- `/model {profile}`: changes the current AI's model/profile
+- Same model: `Already using {model}.`
+- No session: guidance to create a session
+- Unsupported model: shows the supported list for the current AI
+- Can also be changed via inline buttons (on `/session` screen, after session switch)
 
-### 모델/프로필 UX
+### Model/Profile UX
 
-사용자는 내부 CLI 플래그를 직접 알 필요가 없다. UI는 사람이 읽는 이름만 보여준다.
+Users do not need to know the underlying CLI flags. The UI only shows human-readable names.
 
-| AI | UI 라벨 | 내부 의미 |
-|----|--------|----------|
+| AI | UI label | Internal meaning |
+|----|----------|------------------|
 | Claude | `Opus` | `opus` |
 | Claude | `Sonnet` | `sonnet` |
 | Claude | `Haiku` | `haiku` |
@@ -322,387 +323,386 @@ Current AI: Claude
 | Codex | `GPT-5.4 XHigh` | `model=gpt-5.4`, `reasoning=xhigh` |
 | Codex | `GPT-5.3 Codex Medium` | `model=gpt-5.3-codex`, `reasoning=medium` |
 
-- DB에는 profile key를 저장하고, 실제 provider별 CLI 플래그는 내부에서 해석한다.
-- 버튼, 세션 목록, `/session`, `/tasks`에는 UI 라벨만 보여준다.
-- Codex profile은 reasoning depth를 포함한 "모델 프로필" 개념으로 다룬다.
+- The profile key is stored in the DB; the actual per-provider CLI flags are interpreted internally.
+- Only UI labels are shown in buttons, session list, `/session`, and `/tasks`.
+- Codex profiles are treated as "model profile" concepts that include reasoning depth.
 
-### 세션 이름 변경 (`/rename`)
+### Session Rename (`/rename`)
 
-- `/rename` (인자 없음): 현재 이름 표시 + 사용법 안내
-- `/rename_newname`: 현재 세션 이름 변경
-- `/r_{id}_newname`: 특정 세션 ID의 이름 변경
-- `/session` 화면에서도 리네임 버튼으로 변경 가능 (ForceReply 방식)
-- 이름 최대 50자 제한
+- `/rename` (no argument): shows current name + usage guidance
+- `/rename_newname`: renames the current session
+- `/r_{id}_newname`: renames a specific session by ID
+- Rename is also available via the rename button on the `/session` screen (ForceReply method)
+- Maximum 50-character name limit
 
-### 세션 히스토리 (`/h_{id}`)
+### Session History (`/h_{id}`)
 
 ```
 Session History
 - ID: {id}
 - Messages: {count}
 
-1. {message_preview}    ← 60자 truncate
+1. {message_preview}    ← truncated to 60 characters
 2. {message_preview}
 ...
 
 /s_{id} Switch to this session
 ```
 
-빈 히스토리: `No history.`
+Empty history: `No history.`
 
-### 세션 충돌 처리 (Session Queue)
+### Session Conflict Handling (Session Queue)
 
-현재 세션에 detached worker가 실행 중일 때 새 메시지가 오면:
+When a new message arrives while a detached worker is running for the current session:
 
 ```
 Current session is processing
-(메시지 미리보기)
+(message preview)
 
-선택지:
-1. [Wait in this session (recommended)] → 큐에 추가, 완료 후 자동 처리
-2. [다른 세션 버튼]                      → 해당 세션으로 전환 + 즉시 처리
-3. [+Opus/Sonnet/Haiku]                 → 새 세션 생성 + 즉시 처리
-4. [Cancel]                             → 요청 취소
+Options:
+1. [Wait in this session (recommended)] → queued, auto-processed after completion
+2. [other session button]               → switch to that session + process immediately
+3. [+Opus/Sonnet/Haiku]                 → create new session + process immediately
+4. [Cancel]                             → cancel the request
 ```
 
-- 대기열 위치 표시: `Position: #N`
-- 요청 임시 저장 만료: 5분
-- 만료 시: `Request expired. Please resend the message.`
-- `Wait in this session` 선택 후 저장되는 persistent queue는 자동 만료되지 않음
-- 세션 사용 여부는 봇 메모리가 아니라 persistent lock 기준으로 판단
-- 따라서 봇이 재시작돼도 같은 세션은 계속 busy로 보이며 중복 실행되지 않음
+- Queue position shown: `Position: #N`
+- Request temporary storage expiry: 5 minutes
+- On expiry: `Request expired. Please resend the message.`
+- The persistent queue saved after selecting `Wait in this session` does not auto-expire
+- Session busy state is determined by the persistent lock, not bot memory
+- Therefore, even after a bot restart, the same session remains busy and duplicate execution does not occur
 
-### 봇 재시작 중 응답 보존
+### Response Preservation During Bot Restart
 
-자가 개발 중 AI agent가 `./run.sh restart-soft`를 실행할 수 있다. 이때 UX 목표는 "응답 유실 없이 계속 진행되는 것"이다.
+An AI agent during self-development may execute `./run.sh restart-soft`. The UX goal is "continued progress without any response loss."
 
-| 상황 | 사용자 경험 |
-|------|-------------|
-| 요청 접수 직후 | 핸들러는 즉시 반환. 사용자는 봇이 멈춘 것처럼 느끼지 않음 |
-| 처리 중 soft 재시작 | 별도 복구 질문 없이 기존 작업이 계속 진행되고, 완료 응답이 그대로 도착 |
-| 재시작 중 같은 세션에 새 메시지 | 세션은 여전히 busy로 보이며 Session Queue UI가 그대로 동작 |
-| `Wait in this session` 선택 | 요청은 영속 대기열에 저장되고 현재 작업 완료 뒤 자동 실행 |
-| worker 자체 비정상 종료 | 유실 알림 후 재전송을 유도 |
+| Situation | User experience |
+|-----------|----------------|
+| Immediately after request is received | Handler returns immediately. User does not feel the bot has stopped |
+| Soft restart while processing | Existing work continues without any recovery prompt; the completed response arrives normally |
+| New message to the same session during restart | Session still appears busy; Session Queue UI works as normal |
+| `Wait in this session` selected | Request saved to persistent queue; auto-executed after current work completes |
+| Worker itself crashes abnormally | Loss notification prompts user to resend |
 
 ---
 
-## 워크스페이스
+## Workspace
 
-### 개념
+### Concept
 
-로컬 디렉토리에 바인딩된 세션. 해당 디렉토리의 CLAUDE.md 규칙을 따르면서 텔레그램 포맷으로 응답. 개발 프로젝트별 AI 어시스턴트를 텔레그램에서 사용하는 것이 목적.
+A session bound to a local directory. Responds in Telegram format while following the CLAUDE.md rules of that directory. The purpose is to use a per-project AI assistant in Telegram.
 
-### 사용자 시나리오
+### User Scenarios
 
-**빠른 워크스페이스 세션:** `/nw ~/AiSandbox/my-app opus` → 즉시 생성. 경로/모델/이름을 한 줄로.
+**Quick workspace session:** `/new_workspace ~/AiSandbox/my-app opus` → created immediately. Path/model/name in one line.
 
-**워크스페이스 등록 + 관리:** `/workspace` (= `/ws`) → 목록 화면 → `+ Add New` → AI 추천 또는 수동 입력.
+**Workspace registration + management:** `/workspace` (= `/ws`) → list screen → `+ Add New` → AI recommendation or manual input.
 
-**AI 추천 등록 플로우:**
-1. 목적 입력 (ForceReply): "투자 분석 프로젝트"
-2. AI가 ALLOWED_PROJECT_PATHS 내에서 적합한 디렉토리 추천
-3. 추천 목록에서 선택 → 이름 입력 → 등록 완료
-4. 추천 실패 시 수동 입력으로 전환
+**AI-recommended registration flow:**
+1. Enter purpose (ForceReply): "Investment analysis project" ("투자 분석 프로젝트")
+2. AI recommends a suitable directory within `ALLOWED_PROJECT_PATHS`
+3. Select from recommended list → enter name → registration complete
+4. Falls back to manual input if recommendation fails
 
-**수동 등록 플로우:**
-1. 경로 입력 (ForceReply) → 존재 여부 검증
-2. 이름 입력 (ForceReply)
-3. 설명 입력 (ForceReply)
-4. 등록 완료
+**Manual registration flow:**
+1. Enter path (ForceReply) → validate that path exists
+2. Enter name (ForceReply)
+3. Enter description (ForceReply)
+4. Registration complete
 
-### 워크스페이스 목록 화면
+### Workspace List Screen
 
 ```
-{활성도 이모지} WorkspaceName
+{activity emoji} WorkspaceName
    ~/short/path
 
-[WorkspaceName] [Del]        ← 각 워크스페이스별 (삭제는 확인 없이 즉시)
-[+ Add New] [Refresh]        ← 하단 고정
+[WorkspaceName] [Del]        ← per workspace (deletion is immediate, no confirmation)
+[+ Add New] [Refresh]        ← fixed at bottom
 ```
 
-- 활성도: 사용 5회 초과 `🔥`, 이하 `📂`
+- Activity: `🔥` if used more than 5 times, `📂` otherwise
 
-### 워크스페이스 상세 → 액션 선택
+### Workspace Detail → Action Selection
 
-워크스페이스 선택 시: `[Session]` (세션 시작) / `[Schedule]` (스케줄 등록) 선택.
+When a workspace is selected: choose `[Session]` (start session) / `[Schedule]` (register schedule).
 
-- 세션 시작: 모델 선택 → 생성. 동일 워크스페이스 세션이 이미 있으면 자동 전환 (중복 생성 방지).
-- 현재 AI 기준 모델 선택 버튼을 사용한다. 같은 워크스페이스라도 Claude/Codex 세션은 각각 따로 가질 수 있다.
-- 스케줄 등록: 시간 → 분 → `Daily` 또는 `One-time` → 모델 → 메시지 입력 → 등록 완료.
+- Start session: select model → create. If a session for the same workspace already exists, auto-switches to it (prevents duplicate creation).
+- Uses model selection buttons based on the current AI. Even for the same workspace, Claude/Codex sessions can each exist separately.
+- Register schedule: time → minute → `Daily` or `One-time` → model → enter message → registration complete.
 
 ---
 
-## 스케줄러
+## Scheduler
 
-### 개념
+### Concept
 
-지정 시간에 자동 실행되는 작업. 3가지 타입: Chat (일반 대화), Workspace (프로젝트 컨텍스트), Plugin (플러그인 액션). 앱 전체는 단일 로컬 시간대(`APP_TIMEZONE`, 기본 `Asia/Seoul`)를 사용한다.
+Tasks that run automatically at a specified time. Three types: Chat (general conversation), Workspace (project context), Plugin (plugin action). The entire app uses a single local timezone (`APP_TIMEZONE`, default `Asia/Seoul`).
 
-### 사용자 시나리오
+### User Scenarios
 
-**스케줄 확인:** `/scheduler` → 등록된 스케줄 목록 (다음 실행 시각순 정렬, 활성/비활성 표시).
+**View schedules:** `/scheduler` → list of registered schedules (sorted by next run time, showing active/inactive status).
 
-**Chat 스케줄 추가:** `+ Chat` → 시간(00~23h) → 분(5분 간격) → `Daily` 또는 `One-time` → 모델 → 메시지 입력 → 등록.
+**Add a Chat schedule:** `+ Chat` → hour (00~23h) → minute (5-minute intervals) → `Daily` or `One-time` → model → enter message → register.
 
-- 일반/워크스페이스 스케줄은 생성 시점의 현재 AI 제공자를 따른다.
-- Plugin 스케줄은 AI 제공자와 무관하다.
-- 복잡한 반복식은 기본 UI에서 직접 만들지 않고, 이후 AI/admin 경로로 `cron` 값을 업데이트하는 방식으로 처리한다.
+- Regular/workspace schedules follow the current AI provider at the time of creation.
+- Plugin schedules are independent of the AI provider.
+- Complex recurrence patterns are not created directly in the basic UI; instead, the `cron` value is updated later via AI/admin routes.
 
-**Workspace 스케줄 추가:** `+ Workspace` → 워크스페이스 선택 → 시간 → 분 → `Daily` 또는 `One-time` → 모델 → 메시지 → 등록.
+**Add a Workspace schedule:** `+ Workspace` → select workspace → hour → minute → `Daily` or `One-time` → model → message → register.
 
-**Plugin 스케줄 추가:** `+ Plugin` → 플러그인 선택 → 액션 선택 → 시간 → 분 → `Daily` 또는 `One-time` → 등록. (모델/메시지 불필요)
+**Add a Plugin schedule:** `+ Plugin` → select plugin → select action → hour → minute → `Daily` or `One-time` → register. (No model/message required)
 
-**스케줄 관리:** 목록에서 스케줄 클릭 → 상세 화면 → ON/OFF 토글, 시간 변경, 삭제.
+**Manage schedules:** Click a schedule from the list → detail screen → ON/OFF toggle, change time, delete.
 
-### 스케줄 목록 화면
+### Schedule List Screen
 
 ```
-{ON/OFF} {타입} ScheduleName - Next run
+{ON/OFF} {type} ScheduleName - Next run
 
-[{ON/OFF} MM-DD HH:MM {타입이모지} name]    ← 각 스케줄 버튼
-[+ Chat] [+ Workspace] [+ Plugin]  ← 추가 버튼
+[{ON/OFF} MM-DD HH:MM {type emoji} name]    ← button per schedule
+[+ Chat] [+ Workspace] [+ Plugin]            ← add buttons
 [Refresh]
 
-System Jobs                            ← 시스템 잡 (hourly_ping 등)
+System Jobs                                  ← system jobs (hourly_ping, etc.)
   {schedule_info} - {job_name}
 ```
 
-- 타입 이모지: `💬` Chat, `📂` Workspace, `🔌` Plugin
-- 상태: `✅` 활성, `⏸` 비활성
+- Type emoji: `💬` Chat, `📂` Workspace, `🔌` Plugin
+- Status: `✅` active, `⏸` inactive
 
-### 스케줄 상세 화면
+### Schedule Detail Screen
 
 ```
-{타입이모지} ScheduleName
+{type emoji} ScheduleName
 
 Status: ON/OFF
-Time: HH:MM 또는 YYYY-MM-DD HH:MM
+Time: HH:MM or YYYY-MM-DD HH:MM
 Schedule: Daily at HH:MM / Once at YYYY-MM-DD HH:MM
 Next run: YYYY-MM-DD HH:MM
-Model: model          ← Claude/Workspace만
-Path: /path           ← Workspace만
-Message: message...   ← Claude/Workspace만 (80자 truncate)
-Plugin: name          ← Plugin만
-Action: action        ← Plugin만
+Model: model          ← Chat/Workspace only
+Path: /path           ← Workspace only
+Message: message...   ← Chat/Workspace only (truncated to 80 characters)
+Plugin: name          ← Plugin only
+Action: action        ← Plugin only
 Runs: N
 
-[ON/OFF 토글]
+[ON/OFF toggle]
 [Change Time (HH:MM)]
 [Delete]
 [Back]
 ```
 
-### 시간 변경 플로우
+### Change Time Flow
 
-`Change Time` → 시간 선택(00h~23h) → 분 선택(00~55, 5분 간격) → 반복 유형 선택(`Daily` / `One-time`) → 변경 완료.
+`Change Time` → select hour (00h~23h) → select minute (00~55, 5-minute intervals) → select recurrence (`Daily` / `One-time`) → change complete.
 
-- 시간: 앱 로컬 시간대 기준, 4열 그리드 (24개 버튼)
-- 분: 5분 간격, 4열 그리드 (12개 버튼)
-- 반복 유형: 현재 설정된 유형이 기본 선택됨. 변경하면 `cron_expr` / `run_at_local`이 자동 재계산됨.
+- Hours: based on app local timezone, 4-column grid (24 buttons)
+- Minutes: 5-minute intervals, 4-column grid (12 buttons)
+- Recurrence: currently configured type is pre-selected. Changing it automatically recalculates `cron_expr` / `run_at_local`.
 
-### ON/OFF 토글 동작
+### ON/OFF Toggle Behavior
 
-- **OFF → ON**: `once` 스케줄의 경우 `run_at_local`을 현재 시각 기준 **가장 가까운 미래 시각**으로 재설정한다. 오늘 해당 시각이 아직 지나지 않았으면 오늘, 이미 지났으면 내일로 설정.
-- **ON → OFF**: 런타임 스케줄러에서 해제만 하고 설정은 유지.
+- **OFF → ON**: For `once` schedules, resets `run_at_local` to the **nearest future time** relative to now. If today's time has not yet passed, set to today; if it has already passed, set to tomorrow.
+- **ON → OFF**: Only removes from the runtime scheduler; configuration is preserved.
 
-### 스케줄 실행 결과
+### Schedule Execution Result
 
-실행 완료 시 사용자에게 전송 (4000자 초과 시 분할 전송):
+Sent to the user upon completion (split if over 4000 characters):
+
 ```
 📅 ScheduleName
 
-{실행 결과 텍스트}
+{execution result text}
 
-[💬 Session]        ← Chat/Workspace 스케줄만 표시
+[💬 Session]        ← shown only for Chat/Workspace schedules
 ```
 
-- `💬 Session` 버튼: 실행 결과와 연결된 세션으로 전환. 세션이 아직 없으면 해당 실행의 provider session을 봇 세션으로 등록하고 전환한다.
-- Plugin 스케줄은 AI 세션이 없으므로 버튼 미표시.
+- `💬 Session` button: switches to the session linked to the execution result. If no session exists yet, registers the provider session from that run as a bot session and switches to it.
+- Plugin schedules have no AI session, so no button is shown.
 
 ---
 
-## `/ai` - 현재 AI 직접 질문
+## `/ai` - Direct Query to Current AI
 
-코드 구조와 런타임 책임 분리는 [ARCHITECTURE.md](./ARCHITECTURE.md) 참조.
+### Concept
 
-### 개념
+Since plugins can intercept natural language patterns (e.g., typing "메모" is handled by the memo plugin), this command is an escape hatch for when the user intentionally wants to ask the current AI a question.
 
-플러그인이 자연어 패턴을 가로챌 수 있으므로 (예: "메모"라고 입력하면 메모 플러그인이 처리), 사용자가 의도적으로 현재 AI에게 질문하고 싶을 때 사용하는 탈출구.
+### Scenarios
 
-### 시나리오
-
-- `/ai 메모란 뭐야` → 메모 플러그인 우회, 현재 AI가 "메모"에 대해 답변
-- `/ai` (인자 없음) → 사용법 안내
+- `/ai 메모란 뭐야` (What is memo?) → bypasses the memo plugin; the current AI answers about "memo"
+- `/ai` (no argument) → shows usage guidance
 
 ---
 
-## 빌트인 플러그인
+## Built-in Plugins
 
-빌트인 플러그인(Todo, Memo, Weather) 기획은 [SPEC_PLUGINS_BUILTIN.md](SPEC_PLUGINS_BUILTIN.md) 참조.
+For built-in plugin (Todo, Memo, Weather) specifications, see [SPEC_PLUGINS_BUILTIN.md](SPEC_PLUGINS_BUILTIN.md).
 
 ---
 
-## Claude 대화
+## Claude Conversation
 
-### 응답 포맷
+### Response Format
 
 ```
 [SessionInfo|#HistoryCount]
 question_preview
 
-{Claude 응답 본문}
+{Claude response body}
 
 [Session]
 ```
 
-- 세션 정보와 히스토리 번호를 헤더에 표시 → 어느 세션에서의 응답인지 식별
-- 하단 shortcut은 `Session` 하나만 둔다
-- 이 shortcut 버튼은 원본 AI 응답을 수정하지 않는다. 클릭 결과는 새 메시지(follow-up)로 열려야 한다.
-- AI 응답용 shortcut callback과 화면 내비게이션 callback은 분리한다. 전자는 non-destructive follow-up, 후자는 동일 메시지 edit 기반을 사용한다.
+- Session info and history number are shown in the header → identifies which session the response belongs to
+- Only one shortcut at the bottom: `Session`
+- This shortcut button does not modify the original AI response. The click result must open as a new message (follow-up).
+- AI response shortcut callbacks and screen navigation callbacks are separate. The former uses non-destructive follow-up; the latter uses same-message edit.
 
-### 에러 응답
+### Error Responses
 
-| 상황 | 메시지 |
-|------|--------|
-| detached watchdog 타임아웃 (30분) | `Task exceeded 30 minutes and was stopped. Please try again.` |
-| provider 내부 타임아웃 | `Response timed out. Please try again.` |
-| 빈 응답 | `{question_preview} Response is empty. Please try again.` |
-| CLI 에러 | `Error: {error_detail}` |
-| 처리 중 예외 | `An error occurred. Please try again later.` |
-| 세션 초기화 중 | `Session initializing... Please try again shortly!` |
-| 세션 생성 실패 | `Failed to create Claude session. Please try again.` |
+| Situation | Message |
+|-----------|---------|
+| Detached watchdog timeout (30 min) | `Task exceeded 30 minutes and was stopped. Please try again.` |
+| Provider internal timeout | `Response timed out. Please try again.` |
+| Empty response | `{question_preview} Response is empty. Please try again.` |
+| CLI error | `Error: {error_detail}` |
+| Exception during processing | `An error occurred. Please try again later.` |
+| Session initializing | `Session initializing... Please try again shortly!` |
+| Session creation failed | `Failed to create Claude session. Please try again.` |
 
-### 장시간 작업 정책
+### Long-Running Task Policy
 
-| 경과 시간 | 동작 |
-|----------|------|
-| 0~5분 | 처리 중 (별도 표시 없음) |
-| 5분 | 알림: `Task taking N+ minutes. Still running. I will notify you when it finishes.` |
-| 5~30분 | detached worker는 계속 실행. provider client에는 별도 5분 hard timeout 없음 |
-| 30분 | detached watchdog이 작업 중단, DB에는 `watchdog_timeout` 저장, 사용자에게 timeout 메시지 전송 |
-| 완료 (5분 이상 걸린 경우) | 성공인 경우에만 알림: `Task complete! (Mm Ss)` |
-| 봇 soft 재시작 | detached worker가 계속 실행되고 완료 후 결과를 전송 |
+| Elapsed time | Behavior |
+|--------------|----------|
+| 0–5 minutes | Processing (no additional notification) |
+| 5 minutes | Notification: `Task taking N+ minutes. Still running. I will notify you when it finishes.` |
+| 5–30 minutes | Detached worker continues running. No separate 5-minute hard timeout on the provider client |
+| 30 minutes | Detached watchdog stops the task, stores `watchdog_timeout` in DB, sends timeout message to user |
+| Complete (took 5+ minutes) | Notification sent only on success: `Task complete! (Mm Ss)` |
+| Bot soft restart | Detached worker keeps running and sends the result after completion |
 
-### 동시 요청 정책
+### Concurrent Request Policy
 
-세션 단위 직렬화를 우선한다. 같은 세션에는 동시에 하나의 detached worker만 붙는다.
+Session-level serialization is the priority. Only one detached worker is attached to a given session at a time.
 
-| 세션 상태 | 동작 |
-|----------|------|
-| 세션 idle | detached worker 즉시 시작 |
-| 같은 세션 busy | Session Queue UI 표시 |
-| `Wait` 선택 | persistent queue에 저장 후 현재 작업 완료 뒤 자동 처리 |
-| 다른 세션 선택 | 세션 전환 후 즉시 처리 |
-| 새 세션 선택 | 새 세션 생성 후 즉시 처리 |
+| Session state | Behavior |
+|---------------|----------|
+| Session idle | Detached worker starts immediately |
+| Same session busy | Session Queue UI is shown |
+| `Wait` selected | Saved to persistent queue; auto-processed after current work completes |
+| Different session selected | Switch session + process immediately |
+| New session selected | Create new session + process immediately |
 
-### SQLite WAL 메모
+### SQLite WAL Notes
 
-- WAL이어도 reader 여러 개 + writer 한 개 모델이다.
-- 즉 서로 다른 세션/row를 만지는 write라도 동시에 commit 단계로 들어가면 직렬화된다.
-- 이 프로젝트는 그래서 DB row lock에 기대기보다, 앱 레벨 `session_locks`로 같은 세션의 worker를 직렬화하고, 각 write는 autocommit으로 짧게 끝내는 방식을 기본 원칙으로 둔다.
+- Even with WAL, the model is multiple readers + one writer.
+- This means even writes touching different sessions/rows are serialized when they reach the commit phase simultaneously.
+- For this reason, the project relies on app-level `session_locks` to serialize workers on the same session rather than on DB row locks. Each write is kept short using autocommit as the baseline principle.
 
-### AI 대화 실행 시나리오
+### AI Conversation Execution Scenario
 
-1. 사용자가 메시지를 보냄
-2. 세션이 idle이면 `message_log` row 생성 + `session_locks` 예약 + detached worker spawn
-3. worker가 provider CLI를 호출하고, 5분이 지나면 "still running" 알림만 전송
-4. 같은 세션에 새 메시지가 오면 Session Queue UI 표시
-5. 사용자가 `Wait in this session`을 누르면 요청이 persistent queue에 저장됨
-6. 현재 worker가 성공/실패/timeout으로 종료되면 lock을 유지한 채 다음 queued message를 이어 처리
-7. 마지막 queued message까지 끝나면 lock 해제
-8. worker가 보내는 최종 AI 응답 하단 shortcut은 `non-destructive follow-up` 규칙을 따른다. 현재는 `Session` 버튼 하나만 제공하고 원본 응답을 덮어쓰지 않는다.
+1. User sends a message
+2. If the session is idle: create a `message_log` row + reserve `session_locks` + spawn a detached worker
+3. Worker calls the provider CLI; after 5 minutes, sends only a "still running" notification
+4. If a new message arrives for the same session: show Session Queue UI
+5. If user presses `Wait in this session`: request is saved to persistent queue
+6. When the current worker finishes (success/failure/timeout): continue processing the next queued message while holding the lock
+7. After the last queued message is processed: release the lock
+8. The final AI response's bottom shortcut follows the `non-destructive follow-up` rule. Currently only one `Session` button is provided and the original response is not overwritten.
 
-### 시스템 프롬프트
+### System Prompt
 
-Claude CLI에 전달되는 전역 프롬프트:
-- Telegram HTML 포맷 사용 (마크다운 금지)
-- 간결한 응답 (모바일 최적화)
-- 한국어 응답 (별도 요청 없는 한)
+Global prompt passed to Claude CLI:
+- Use Telegram HTML format (no markdown)
+- Concise responses (mobile-optimized)
+- Respond in Korean (unless otherwise requested)
 
-워크스페이스 세션: 워크스페이스 CLAUDE.md 규칙 + 텔레그램 포맷 규칙이 동시 적용.
+Workspace sessions: Workspace CLAUDE.md rules + Telegram format rules apply simultaneously.
 
 ---
 
-## 태스크 현황 (`/tasks`)
+## Task Status (`/tasks`)
 
-처리 중인 메시지와 대기열의 실시간 현황 대시보드.
+Real-time dashboard of messages being processed and in the queue.
 
 ```
 Processing (2)
 
 1. session-name
    3m 45s elapsed
-   Can you summarize the...       ← 40자 truncate (표시 시)
+   Can you summarize the...       ← truncated to 40 characters (when displayed)
 
 2. research
    1m 12s elapsed
    Write a function...
 
 Queue (1)
-- session-name: Waiting message pre...  ← 30자 truncate
+- session-name: Waiting message pre...  ← truncated to 30 characters
 
 [Refresh] [Session List]
 ```
 
-- 태스크 없음: `No active tasks`
-- 멀티라인 메시지는 한 줄 미리보기로 정규화해서 표시
-- 처리 중/대기열 상태는 DB 기준으로 계산되므로, 봇 재시작 직후에도 끊기지 않음
+- No tasks: `No active tasks`
+- Multi-line messages are normalized to a one-line preview for display
+- Processing/queue status is calculated from the DB, so it is uninterrupted even immediately after a bot restart
 
 ---
 
-## 에러/엣지 케이스 정책
+## Error / Edge Case Policy
 
-### 에러 메시지 톤
+### Error Message Tone
 
-| 유형 | 톤 | 예시 |
-|------|------|------|
-| 권한 거부 | 간결, 단호 | `Access denied.` |
-| 인증 필요 | 안내 포함 | `Authentication required. /auth <key>` |
-| 입력 오류 | 구체적 안내 | `Unsupported model: xxx. Available: opus, sonnet, haiku` |
-| 찾을 수 없음 | 사실 전달 | `Session 'xxx' not found.` |
-| 시스템 에러 | 재시도 안내 | `An error occurred. Please try again later.` |
-| 버튼 만료 | 재시도 안내 | `Button expired. Please try again.` |
+| Type | Tone | Example |
+|------|------|---------|
+| Access denied | Concise, firm | `Access denied.` |
+| Authentication required | Includes guidance | `Authentication required. /auth <key>` |
+| Input error | Specific guidance | `Unsupported model: xxx. Available: opus, sonnet, haiku` |
+| Not found | States the fact | `Session 'xxx' not found.` |
+| System error | Retry guidance | `An error occurred. Please try again later.` |
+| Button expired | Retry guidance | `Button expired. Please try again.` |
 
-### 콜백 에러 처리
+### Callback Error Handling
 
-| 에러 유형 | 처리 |
-|----------|------|
-| `Message is not modified` | 무시 (같은 버튼 중복 클릭) |
-| `Query is too old` | 만료 안내 메시지 |
-| `message to edit not found` | 메시지 삭제됨 안내 |
-| 플러그인 미발견 | `{Plugin} plugin not found.` |
-| 기타 예외 | `Error occurred.` + 에러 코드 표시 |
+| Error type | Handling |
+|------------|----------|
+| `Message is not modified` | Ignored (duplicate click of same button) |
+| `Query is too old` | Expiry notification message |
+| `message to edit not found` | Notify that message was deleted |
+| Plugin not found | `{Plugin} plugin not found.` |
+| Other exceptions | `Error occurred.` + error code displayed |
 
-### 엣지 케이스
+### Edge Cases
 
-| 상황 | 처리 |
-|------|------|
-| 현재 세션 삭제 시도 | 거부 + "다른 세션으로 전환 먼저" 안내 |
-| 세션 없이 메시지 전송 | 기본 모델(sonnet)로 자동 생성 |
-| 세션 없이 /model | 세션 생성 안내 |
-| 세션 이름 50자 초과 | 거부 메시지 |
-| 메모 30개 초과 | 추가 거부 + 삭제 안내 |
-| 투두 빈 입력 | 거부 메시지 |
-| 도시 못 찾음 (날씨) | 재입력 안내 |
-| 스케줄 워크스페이스 없음 | `/workspace`에서 등록 안내 |
-| 스케줄 가능 플러그인 없음 | `get_scheduled_actions()` 구현 안내 |
-| ForceReply 입력 만료 | `Input expired. Please try again.` |
-| 세션 충돌 UI 선택 만료 (5분) | `Request expired. Please resend the message.` |
-| 동일 워크스페이스 세션 존재 | 기존 세션으로 자동 전환 (중복 생성 방지) |
-
----
-
-## 언어 정책
-
-| 영역 | 언어 | 비고 |
-|------|------|------|
-| 봇 UI (명령어 응답, 버튼, 에러) | 영어 | 통일 완료 |
-| Claude 응답 | 한국어 | 시스템 프롬프트로 지정 |
-| 플러그인 트리거 | 한국어 | `할일`, `메모`, `날씨` 등 자연어 |
-| 내부 에러/디버그 로그 | 영어 | 전체 전환 완료 |
+| Situation | Handling |
+|-----------|----------|
+| Attempt to delete current session | Rejected + "switch to another session first" guidance |
+| Message sent without a session | Auto-create with default model (sonnet) |
+| `/model` without a session | Guidance to create a session |
+| Session name exceeds 50 characters | Rejection message |
+| More than 30 memos | Addition rejected + guidance to delete |
+| Empty todo input | Rejection message |
+| City not found (weather) | Prompt to re-enter |
+| No workspace for schedule | Guidance to register via `/workspace` |
+| No schedulable plugins | Guidance to implement `get_scheduled_actions()` |
+| ForceReply input expired | `Input expired. Please try again.` |
+| Session conflict UI selection expired (5 min) | `Request expired. Please resend the message.` |
+| Same workspace session already exists | Auto-switch to existing session (prevents duplicate creation) |
 
 ---
 
-## 향후 계획
+## Language Policy
 
-- `/model` 명령어 제거 검토 (`/session` 통합으로 중복)
+| Area | Language | Notes |
+|------|----------|-------|
+| Bot UI (command responses, buttons, errors) | English | Fully standardized |
+| Claude responses | Korean | Specified via system prompt |
+| Plugin triggers | Korean | Natural language like `할일` (todo), `메모` (memo), `날씨` (weather) |
+| Internal error/debug logs | English | Fully converted |
+
+---
+
+## Future Plans
+
+- Consider removing the `/model` command (redundant with `/session` integration)
