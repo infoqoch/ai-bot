@@ -402,8 +402,10 @@ class BaseHandler:
         add_row("workspace", "scheduler")
         buttons.extend(self._build_featured_plugin_rows())
         add_row("plugins", "tasks")
-        add_row("select_ai")
-        buttons.append([InlineKeyboardButton("❓ Help", callback_data="menu:help")])
+        buttons.append([
+            InlineKeyboardButton("🔀 Switch AI", callback_data="menu:ai"),
+            InlineKeyboardButton("❓ Help", callback_data="menu:help"),
+        ])
 
         return InlineKeyboardMarkup(buttons)
 

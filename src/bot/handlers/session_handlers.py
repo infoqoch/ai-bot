@@ -52,7 +52,7 @@ class SessionHandlers(BaseHandler):
             "Current session: none"
         )
         return (
-            f"<b>Select AI</b>\n\n"
+            f"<b>Switch AI</b>\n\n"
             f"Current AI: <b>{self._format_provider_display(provider)}</b>\n"
             f"{current_line}\n\n"
             f"Choose which provider `/new`, `/sl`, `/session`, `/model`, `/ai`, and normal chat should use."
