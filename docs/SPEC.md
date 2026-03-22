@@ -56,6 +56,10 @@ All other commands are accessed via button hubs or direct input.
 | `/start` | Start screen (entry to `/menu` / `/help`) |
 | `/help` | Brief help + Back to Menu |
 | `/help_extend` | Extended help index |
+| `/help_session` | Session workflow guide |
+| `/help_workspace` | Workspace workflow guide |
+| `/help_scheduler` | Scheduler workflow guide |
+| `/help_plugins` | Plugin usage guide |
 | `/help_{plugin}` | Detailed help for individual plugins |
 | `/auth <key>` | Authentication (when `REQUIRE_AUTH=true`) |
 | `/status` | Check authentication status |
@@ -133,6 +137,7 @@ Session: [{session info}] ({N} messages)
 Shows brief help only. Detailed docs are separated under `/help_extend`.
 
 - Displays a `Back to Menu` button at the bottom.
+- Topic guides are available under `/help_session`, `/help_workspace`, `/help_scheduler`, and `/help_plugins`.
 
 ### Unknown Command
 
@@ -155,14 +160,15 @@ Add this ID to ALLOWED_CHAT_IDS.
 ```
 Plugins
 
-Builtin: /memo /todo /weather
-Custom: /hourly_ping
+Builtin: {loaded builtin plugin commands or -}
+Custom: {loaded custom plugin commands or -}
 
 Tap a plugin button below.
 Docs: /help_extend
 ```
 
 - The plugin body shows only a one-line `Builtin` / `Custom` summary.
+- Plugin command lists are generated from the currently loaded plugins, not hardcoded examples.
 - Actual usage is opened via dynamic buttons. As more plugins are added, buttons are automatically added.
 - Entering `/{plugin}` directly redirects to `/help_{plugin}` docs instead of showing usage inline.
 

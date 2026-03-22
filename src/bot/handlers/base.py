@@ -732,6 +732,7 @@ class BaseHandler:
             "Guides",
             "/help_session - Session workflow",
             "/help_workspace - Workspace workflow",
+            "/help_scheduler - Scheduler workflow",
             "/help_plugins - Plugin usage",
         ]
 

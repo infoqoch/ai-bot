@@ -55,6 +55,7 @@ class TestHelpCommand:
 
         reply = await get_reply_text(update)
         assert "/help_workspace" in reply
+        assert "/help_scheduler" in reply
         assert "/help_plugins" in reply
         assert "/help_admin" not in reply
 
