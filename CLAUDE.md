@@ -765,6 +765,16 @@ User message arrives
 | `/help_{name}` | Shows plugin usage/help text |
 | Keyword + content | Auto-routed to AI Conversation with plugin context prepended. AI uses MCP Data Bridge for actual data access. |
 
+**Plugin Launcher Registry:**
+
+| Plugin | `/command` | Korean Keywords | English Keywords |
+|--------|-----------|-----------------|------------------|
+| Todo | `/todo` | `할일`, `투두` | `todo` |
+| Memo | `/memo` | `메모` | `memo` |
+| Diary | `/diary` | `일기` | `diary` |
+| Calendar | `/calendar` | `캘린더`, `일정`, `달력` | `calendar`, `cal` |
+| Weather | `/weather` | `날씨`, `기온` | `weather` |
+
 ## Telegram Command Rules
 
 ### Non-ASCII Command Limitation
