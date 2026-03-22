@@ -127,6 +127,8 @@ class CalendarPlugin(Plugin):
         ]
 
     def _tool_list_events(self, start_date: str, end_date: str) -> str:
+        import html as html_mod
+
         tz = get_app_timezone()
         s = datetime.fromisoformat(start_date).replace(tzinfo=tz)
         e = datetime.fromisoformat(end_date).replace(tzinfo=tz)
@@ -135,10 +137,11 @@ class CalendarPlugin(Plugin):
             return "해당 기간에 일정이 없습니다."
         lines = []
         for ev in events:
+            summary = html_mod.escape(ev.summary)
             if ev.all_day:
-                lines.append(f"- {ev.start.strftime('%m/%d')} 종일: {ev.summary}")
+                lines.append(f"- {ev.start.strftime('%m/%d')} 종일: {summary}")
             else:
-                lines.append(f"- {ev.start.strftime('%m/%d %H:%M')}: {ev.summary}")
+                lines.append(f"- {ev.start.strftime('%m/%d %H:%M')}: {summary}")
         return "\n".join(lines)
 
     def _tool_create_event(self, summary: str, start: str, all_day: bool = False) -> str:
