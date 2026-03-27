@@ -135,8 +135,16 @@ class DetachedJobManager:
         stderr_path = log_dir / f"worker-{job_id}.err"
         stderr_file = open(stderr_path, "w")
 
+        # Wrap with caffeinate -i to prevent idle sleep while AI work runs.
+        # macOS suspends subprocesses during system sleep, causing multi-hour
+        # wall-clock times for requests that take minutes of actual CPU time.
+        cmd = [self._python_executable, "-u", "-m", "src.worker_job", "--job-id", str(job_id)]
+        caffeinate = "/usr/bin/caffeinate"
+        if os.path.isfile(caffeinate):
+            cmd = [caffeinate, "-i", "--"] + cmd
+
         process = subprocess.Popen(
-            [self._python_executable, "-u", "-m", "src.worker_job", "--job-id", str(job_id)],
+            cmd,
             cwd=str(self._base_dir),
             env=env,
             stdout=subprocess.DEVNULL,
