@@ -94,6 +94,22 @@ Rule: one service should own one runtime story.
 - Workspace calls set `cwd=<workspace>` and append the Telegram prompt, allowing the workspace's own `CLAUDE.md` to shape coding behavior while the bot keeps Telegram formatting constraints.
 - Root [`CLAUDE.md`](../CLAUDE.md) therefore matters most when Claude Code is run from the repository root or for non-workspace Claude sessions.
 
+### Per-Provider Integration Notes
+
+Each provider CLI has a different mechanism for system prompts, MCP, and session management. Reference when adding a new provider:
+
+| Concern | Claude | Codex | Gemini |
+|---------|--------|-------|--------|
+| System prompt | `--system-prompt` flag | `--instructions` flag | `GEMINI.md` file in cwd |
+| MCP config | `--mcp-config` flag | `--mcp-config` flag | `.gemini/settings.json` in cwd |
+| Session resume | `--resume <uuid>` | `--session <id>` | `--resume <uuid>` |
+| Model selection | `--model <name>` | `--model <name>` | `-m <name>` |
+| Auto-approve | `--dangerously-skip-permissions` | `--full-auto` | `--approval-mode yolo` |
+| Output format | `--output-format json` (`result` field) | `--output-format json` | `--output-format json` (`response` field) |
+| Session storage | `~/.claude/projects/` | `~/.codex/` | `~/.gemini/tmp/<project_hash>/chats/` |
+
+**Adding a new provider:** create `src/<provider>/client.py` subclassing `BaseCLIClient`, register in `src/ai/registry.py` `build_default_registry`, add profiles to `src/ai/catalog.py`, and add the provider icon to `src/ui_emoji.py`.
+
 ## Core Runtime Flows
 
 ### Message To AI

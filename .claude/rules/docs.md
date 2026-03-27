@@ -8,7 +8,7 @@ paths:
 
 # Documentation Rules
 
-- `README.md` is for product value, workflow, and quick start. Keep it short and practical.
+- `README.md` is for product value, workflow, and quick start. Keep it short and practical. Update it when the supported provider list changes or the core product description shifts.
 - `docs/SETUP.md` owns installation, runtime commands, security controls, and environment variables.
 - `docs/SPEC.md` owns stable user-visible Telegram behavior and may stay detailed when screen-level UX matters.
 - `docs/SPEC_PLUGINS_BUILTIN.md` owns built-in plugin UI/UX details and screen transcripts.
