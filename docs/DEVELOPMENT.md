@@ -83,7 +83,7 @@ Rule: one service should own one runtime story.
 
 - [`src/repository/`](../src/repository): SQLite persistence and adapters.
 - [`src/ai/`](../src/ai): provider registry and shared CLI client base.
-- [`src/claude/`](../src/claude) and [`src/codex/`](../src/codex): provider-specific CLI wrappers.
+- [`src/claude/`](../src/claude), [`src/codex/`](../src/codex), and [`src/gemini/`](../src/gemini): provider-specific CLI wrappers.
 - [`src/plugins/`](../src/plugins): plugin runtime and loader.
 - [`prompts/telegram.md`](../prompts/telegram.md): Telegram formatting and response-shaping prompt.
 
@@ -119,7 +119,7 @@ Rule: one service should own one runtime story.
 ### Local Session Discovery And Adoption
 
 - The bot keeps its own session DB.
-- Users may also create sessions directly in the `claude` or `codex` CLI.
+- Users may also create sessions directly in the `claude`, `codex`, or `gemini` CLI.
 - [`LocalSessionDiscoveryService`](../src/services/local_session_discovery.py) scans provider-local session storage and exposes those sessions for import into the bot.
 - Imported local sessions may carry over provider, title, and workspace path so Telegram can continue an existing local workflow instead of forcing a restart.
 

@@ -281,10 +281,10 @@ class BaseHandler:
         return "\n".join(lines), buttons
 
     def _build_new_session_picker_keyboard(self) -> list[list[InlineKeyboardButton]]:
-        """Build the unified 3x2 provider/model picker used by `/new`."""
+        """Build the unified provider/model picker used by `/new`."""
         return [
-            self._build_model_buttons("claude", "sess:new:", include_provider_icon=True),
-            self._build_model_buttons("codex", "sess:new:", include_provider_icon=True),
+            self._build_model_buttons(p, "sess:new:", include_provider_icon=True)
+            for p in self.ai.supported_providers()
         ]
 
     def _build_new_session_picker_text(self, user_id: str) -> str:
@@ -428,7 +428,7 @@ class BaseHandler:
         """Build provider switch buttons."""
         buttons = []
         row = []
-        for provider in ("claude", "codex"):
+        for provider in self.ai.supported_providers():
             label = get_provider_button(provider)
             if provider == current_provider:
                 label = f"• {label}"
@@ -452,7 +452,7 @@ class BaseHandler:
     ) -> list[list[InlineKeyboardButton]]:
         """Build provider chooser buttons for multi-step flows."""
         row: list[InlineKeyboardButton] = []
-        for provider in ("claude", "codex"):
+        for provider in self.ai.supported_providers():
             label = get_provider_button(provider)
             if provider == current_provider:
                 label = f"• {label}"
@@ -686,7 +686,7 @@ class BaseHandler:
             self._build_help_auth_section().rstrip(),
             "Core",
             "/menu - Main service launcher",
-            "/select_ai - Choose Claude or Codex",
+            "/select_ai - Choose AI provider (Claude / Codex / Gemini)",
             "/new [model] [name] - New session",
             "/session - Current session info",
             "/sl - Session list",

@@ -123,6 +123,6 @@ def resolve_schedule_type(schedule, *, fallback: str = "chat") -> str:
 
 def resolve_provider(schedule, *, fallback: str = "claude") -> str:
     provider = getattr(schedule, "ai_provider", None)
-    if not isinstance(provider, str) or provider not in {"claude", "codex"}:
+    if not isinstance(provider, str) or provider not in {"claude", "codex", "gemini"}:
         return fallback
     return provider

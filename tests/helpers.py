@@ -50,12 +50,20 @@ def get_callback_data(query):
 def make_handlers(**overrides):
     """BotHandlers mock 생성."""
     from src.bot.handlers import BotHandlers
+    from src.ai.registry import AIRegistry
+
+    claude_client = overrides.get("claude_client", MagicMock())
+    ai_registry = overrides.get(
+        "ai_registry",
+        AIRegistry({"claude": claude_client, "codex": MagicMock()}),
+    )
 
     h = BotHandlers(
         session_service=overrides.get("session_service", MagicMock()),
-        claude_client=overrides.get("claude_client", MagicMock()),
+        claude_client=claude_client,
         auth_manager=overrides.get("auth_manager", MagicMock()),
         require_auth=False,
         allowed_chat_ids=[],
+        ai_registry=ai_registry,
     )
     return h

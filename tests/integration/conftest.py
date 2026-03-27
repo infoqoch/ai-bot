@@ -256,6 +256,10 @@ async def handlers(
     plugin_loader,
 ) -> BotHandlers:
     """BotHandlers 인스턴스."""
+    from src.ai.registry import AIRegistry
+
+    ai_registry = AIRegistry({"claude": mock_claude, "codex": MagicMock()})
+
     handler = BotHandlers(
         session_service=session_store,
         claude_client=mock_claude,
@@ -263,6 +267,7 @@ async def handlers(
         require_auth=False,  # 테스트에서는 인증 비활성화
         allowed_chat_ids=[],  # 빈 리스트 = 모두 허용
         plugin_loader=plugin_loader,
+        ai_registry=ai_registry,
     )
     handler._spawn_detached_worker = MagicMock(return_value=os.getpid())
     return handler

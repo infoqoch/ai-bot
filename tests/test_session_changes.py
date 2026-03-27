@@ -511,13 +511,18 @@ class TestSchedulerInteractionFlow:
     def handlers(self):
         """핸들러 + mock schedule_manager."""
         from src.bot.handlers import BotHandlers
+        from src.ai.registry import AIRegistry
+
+        claude_client = MagicMock()
+        ai_registry = AIRegistry({"claude": claude_client, "codex": MagicMock()})
 
         h = BotHandlers(
             session_service=MagicMock(),
-            claude_client=MagicMock(),
+            claude_client=claude_client,
             auth_manager=MagicMock(),
             require_auth=False,
             allowed_chat_ids=[],
+            ai_registry=ai_registry,
         )
 
         mock_schedule = MagicMock()
