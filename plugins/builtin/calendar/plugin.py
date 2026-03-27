@@ -142,10 +142,14 @@ class CalendarPlugin(Plugin):
 
     def _tool_list_events(self, start_date: str, end_date: str) -> str:
         import html as html_mod
+        from datetime import timedelta
 
         tz = get_app_timezone()
         s = datetime.fromisoformat(start_date).replace(tzinfo=tz)
         e = datetime.fromisoformat(end_date).replace(tzinfo=tz)
+        # Date-only end (no time) means include the full day — extend by 1 day
+        if "T" not in end_date:
+            e = e + timedelta(days=1)
         events = self._gcal.list_events(s, e)
         if not events:
             return "No events in this period."
